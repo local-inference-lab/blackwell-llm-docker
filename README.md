@@ -9,6 +9,7 @@ Docker images for LLM inference on NVIDIA Blackwell GPUs (SM120).
 | `voipmonitor/sglang:cu130` | `Dockerfile.sglang-cu130` | CUDA 13.0, torch 2.11 stable cu130, FlashInfer source (PR #2913), SGLang + b12x + PCIe allreduce |
 | `voipmonitor/sglang:cu132` | `Dockerfile.sglang-cu132` | CUDA 13.2, torch 2.12 from source, FlashInfer source (PR #2913), SGLang + b12x |
 | `voipmonitor/vllm:cu130` | `Dockerfile.vllm-cu130` | CUDA 13.0, torch 2.11 stable cu130, FlashInfer source (PR #2913), vLLM + cherry-picks |
+| `voipmonitor/vllm:glm-kimi-cu132` | `Dockerfile.glm-kimi-cu132` | Clean CUDA 13.2.1, PyTorch 2.12 cu132 wheels, patched NCCL 2.30.4, FlashInfer, B12X, canonical GLM/Kimi vLLM |
 
 Base image for cu132 (torch + FlashInfer compiled from source):
 
@@ -74,6 +75,9 @@ docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.sglang-cu132 -t voi
 
 # vLLM cu130
 docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.vllm-cu130 -t voipmonitor/vllm:cu130 .
+
+# Clean GLM/Kimi vLLM cu132
+IMAGE=voipmonitor/vllm:glm-kimi-cu132-20260518 ./build-glm-kimi-cu132.sh
 ```
 
 ## Hardware
@@ -91,3 +95,15 @@ docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.vllm-cu130 -t voipm
 - **Model profiles** — preconfigured launch configs via `MODEL_PROFILE` env var
 - **Adaptive speculative decoding** (PR #21599) — dynamically adjusts num_steps
 - Pre-tuned Triton MoE configs for RTX PRO 6000 Blackwell
+
+## GLM/Kimi CUDA 13.2 Image
+
+`Dockerfile.glm-kimi-cu132` is intentionally self-contained: it starts from
+`nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04` and does not inherit from any
+previous `voipmonitor/vllm` image. It installs PyTorch `2.12.0+cu132` from the
+official PyTorch wheel index, builds patched NCCL `2.30.4` from
+`local-inference-lab/nccl-canonical`, then builds FlashInfer, B12X and the
+canonical GLM/Kimi vLLM branch.
+
+The final image defaults to `/usr/local/bin/run-kimi26-vllm`; GLM is available
+through `/usr/local/bin/run-glm51-vllm`.

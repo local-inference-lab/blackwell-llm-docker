@@ -1,0 +1,445 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# Clean GLM/Kimi vLLM image for Blackwell on CUDA 13.2.
+#
+# Source stack:
+#   NVIDIA CUDA 13.2.1 cuDNN devel base
+#   PyTorch 2.12.0+cu132 from the official PyTorch wheel index
+#   Patched NCCL 2.30.4 from local-inference-lab/nccl-canonical
+#   FlashInfer from pinned upstream git
+#   B12X from pinned local-inference-lab git
+#   vLLM from pinned voipmonitor canonical GLM/Kimi branch
+#
+# Build:
+#   DOCKER_BUILDKIT=1 docker build \
+#     -f Dockerfile.glm-kimi-cu132 \
+#     -t voipmonitor/vllm:glm-kimi-cu132-20260518 .
+# =============================================================================
+
+ARG CUDA_VERSION=13.2.1
+ARG UBUNTU_VERSION=24.04
+ARG PYTHON_VERSION=3.12
+
+ARG NCCL_REPO=https://github.com/local-inference-lab/nccl-canonical.git
+ARG NCCL_REF=canonical/cu132-nccl2304-amd-noxml
+ARG NCCL_SONAME=libnccl.so.2.30.4
+
+ARG FLASHINFER_REPO=https://github.com/flashinfer-ai/flashinfer.git
+ARG FLASHINFER_COMMIT=6885e76a5e12a59220b9dc199d86a64fbe5f6d78
+
+ARG B12X_REPO=https://github.com/local-inference-lab/b12x.git
+ARG B12X_COMMIT=c929144c7689668b07ca65af10ceadf1c745165d
+
+ARG VLLM_REPO=https://github.com/voipmonitor/vllm.git
+ARG VLLM_REF=codex/glm51-kimi-canonical-rebase-test-20260514
+ARG VLLM_COMMIT=5de88dbd6ca3486bd1dbe247fc08f96cdc7b2d2c
+ARG VLLM_BUILD_VERSION=0.20.2+glm51kimi.cu132.20260518
+
+ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
+ARG CUTLASS_REF=main
+
+ARG MAX_JOBS=128
+ARG NVCC_THREADS=1
+ARG VLLM_MAX_JOBS=128
+ARG VLLM_NVCC_THREADS=1
+
+# =============================================================================
+# Stage 0: patched NCCL
+# =============================================================================
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS nccl-build
+
+ARG NCCL_REPO
+ARG NCCL_REF
+ARG DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    python3 \
+    build-essential \
+    make \
+    g++ \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone "${NCCL_REPO}" nccl \
+ && cd nccl \
+ && git checkout "${NCCL_REF}" \
+ && make -j"$(nproc)" src.build CUDA_HOME=/usr/local/cuda \
+ && strings "build/lib/libnccl.so.2.30.4" | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2"
+
+# =============================================================================
+# Stage 1: CUDA/PyTorch runtime + build base
+# =============================================================================
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS base
+
+ARG PYTHON_VERSION
+ARG NCCL_SONAME
+ARG MAX_JOBS
+ARG NVCC_THREADS
+ARG DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+    python3-pip \
+    git \
+    git-lfs \
+    wget \
+    curl \
+    ca-certificates \
+    build-essential \
+    cmake \
+    ninja-build \
+    ccache \
+    pkg-config \
+    patchelf \
+    libssl-dev \
+    libffi-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libgomp1 \
+    numactl \
+    libnuma-dev \
+    libibverbs-dev \
+    pciutils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+ && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 \
+ && python -m venv /opt/venv
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}"
+
+COPY --from=nccl-build /build/nccl/build/lib/${NCCL_SONAME} /opt/libnccl-local-inference.so.2.30.4
+
+ENV NCCL_LOCAL_INFERENCE_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    NCCL_PR2127_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    NCCL_GRAPH_FILE=""
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade "pip<26" setuptools wheel \
+ && python -m pip install \
+      --index-url https://download.pytorch.org/whl/cu132 \
+      --extra-index-url https://pypi.org/simple \
+      "torch==2.12.0+cu132" \
+      "torchvision==0.27.0+cu132" \
+ && python -m pip install \
+      cuda-tile==1.3.0 \
+      "nvidia-cutlass-dsl[cu13]==4.5.1" \
+ && python -m pip install --force-reinstall --no-deps \
+      nvidia-cutlass-dsl-libs-cu13==4.5.1 \
+ && python -m pip check \
+ && python - <<'PY'
+import torch
+print("torch", torch.__version__)
+print("torch cuda", torch.version.cuda)
+print("torch nccl", torch.cuda.nccl.version())
+assert torch.__version__.startswith("2.12.0+cu132")
+assert torch.version.cuda == "13.2"
+PY
+
+ENV CCACHE_DIR=/root/.ccache \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+    TORCH_CUDA_ARCH_LIST=12.0a \
+    CMAKE_CUDA_ARCHITECTURES=120a \
+    FLASHINFER_CUDA_ARCH_LIST=12.0f \
+    FLASHINFER_LOCAL_VERSION=cu132 \
+    FLASHINFER_NVCC_THREADS=1 \
+    FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    AOT_MAX_JOBS_CAP=8 \
+    MAX_JOBS=${MAX_JOBS} \
+    NVCC_THREADS=${NVCC_THREADS}
+
+# CUDA 13.x headers can be laid out under cccl/. Keep both old and new include
+# paths usable for third-party build scripts.
+RUN if [[ -d /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda && ! -e /usr/local/cuda/include/cuda ]]; then \
+      ln -sf /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda /usr/local/cuda/include/cuda; \
+    fi
+
+# =============================================================================
+# Stage 2: build FlashInfer, B12X and vLLM
+# =============================================================================
+FROM base AS vllm-build
+
+ARG FLASHINFER_REPO
+ARG FLASHINFER_COMMIT
+ARG B12X_REPO
+ARG B12X_COMMIT
+ARG VLLM_REPO
+ARG VLLM_REF
+ARG VLLM_COMMIT
+ARG VLLM_BUILD_VERSION
+ARG CUTLASS_REPO
+ARG CUTLASS_REF
+ARG VLLM_MAX_JOBS
+ARG VLLM_NVCC_THREADS
+
+WORKDIR /build
+
+RUN git clone --filter=blob:none "${CUTLASS_REPO}" /build/cutlass \
+ && cd /build/cutlass \
+ && git checkout "${CUTLASS_REF}" \
+ && grep "CUTLASS_MAJOR\\|CUTLASS_MINOR\\|CUTLASS_PATCH" include/cutlass/version.h | head -3
+
+RUN CUTLASS_DSL="$(python -c 'import cutlass.utils.blockscaled_layout as m; print(m.__file__)')" \
+ && cp /build/cutlass/python/CuTeDSL/cutlass/utils/blockscaled_layout.py "${CUTLASS_DSL}" \
+ && python -c 'from cutlass.utils.blockscaled_layout import sm120_make_smem_layout_sfa; print("OK: sm120_make_smem_layout_sfa available")'
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install \
+      "apache-tvm-ffi>=0.1.6" \
+      "nvidia-cudnn-frontend>=1.13.0" \
+      packaging \
+      pynvml \
+      nvidia-ml-py \
+      requests \
+      numpy \
+      einops \
+      click \
+      tabulate \
+      tqdm
+
+RUN git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src \
+ && cd /tmp/flashinfer-src \
+ && git checkout "${FLASHINFER_COMMIT}" \
+ && git submodule update --init --recursive \
+ && python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true \
+ && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+    FLASHINFER_ENABLE_SM90=0 \
+    MAX_JOBS="${MAX_JOBS}" \
+    python -m pip install --no-build-isolation --no-deps -v . \
+ && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+    MAX_JOBS="${MAX_JOBS}" \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-cubin \
+ && python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_cubin-*.whl \
+ && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+    MAX_JOBS="${MAX_JOBS}" \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-jit-cache \
+ && python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_jit_cache-*.whl \
+ && python - <<'PY'
+import flashinfer
+print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+PY
+
+RUN git clone --filter=blob:none "${B12X_REPO}" /tmp/b12x-src \
+ && cd /tmp/b12x-src \
+ && git checkout "${B12X_COMMIT}" \
+ && python -m pip install --no-deps --force-reinstall . \
+ && rm -rf /tmp/b12x-src
+
+RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
+ && cd /opt/vllm \
+ && git checkout "${VLLM_REF}" \
+ && test "$(git rev-parse HEAD)" = "${VLLM_COMMIT}" \
+ && grep -v '^torch==' requirements/build/cuda.txt > /tmp/vllm-build-notorch.txt \
+ && python -m pip install -r /tmp/vllm-build-notorch.txt \
+ && python -m pip install -r requirements/common.txt \
+ && python -m pip install setuptools_scm \
+ && python -m pip check || true
+
+WORKDIR /opt/vllm
+
+RUN --mount=type=cache,target=/root/.ccache \
+    VLLM_VERSION_OVERRIDE="${VLLM_BUILD_VERSION}" \
+    VLLM_TARGET_DEVICE=cuda \
+    VLLM_USE_PRECOMPILED=0 \
+    VLLM_CUTLASS_SRC_DIR=/build/cutlass \
+    MAX_JOBS="${VLLM_MAX_JOBS}" \
+    CMAKE_BUILD_PARALLEL_LEVEL="${VLLM_MAX_JOBS}" \
+    NVCC_THREADS="${VLLM_NVCC_THREADS}" \
+    python -m pip install --no-build-isolation --no-deps --force-reinstall . \
+ && install -m 0755 scripts/run-glm51-vllm /usr/local/bin/run-glm51-vllm \
+ && install -m 0755 scripts/run-kimi26-vllm /usr/local/bin/run-kimi26-vllm \
+ && bash -n /usr/local/bin/run-glm51-vllm \
+ && bash -n /usr/local/bin/run-kimi26-vllm \
+ && for so in \
+      /opt/venv/lib/python3.12/site-packages/vllm/_C.abi3.so \
+      /opt/venv/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so \
+      /opt/venv/lib/python3.12/site-packages/vllm/cumem_allocator.abi3.so; do \
+      if [[ -f "${so}" ]] && ! readelf -d "${so}" | grep -Fq 'libcuda.so.1'; then \
+        patchelf --add-needed libcuda.so.1 "${so}"; \
+      fi; \
+    done \
+ && python - <<'PY'
+import torch, flashinfer, vllm
+print("torch", torch.__version__, torch.version.cuda)
+print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+print("vllm", getattr(vllm, "__version__", "unknown"))
+PY
+
+RUN <<'SH' bash -eux
+cat > /usr/local/bin/verify-glm-kimi-cu132 <<'VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+root="${1:-/opt/vllm}"
+test -d "${root}/vllm"
+test -x /usr/local/bin/run-glm51-vllm
+test -x /usr/local/bin/run-kimi26-vllm
+bash -n /usr/local/bin/run-glm51-vllm
+bash -n /usr/local/bin/run-kimi26-vllm
+python - <<'PY'
+import importlib.metadata as md
+import torch
+import flashinfer
+import vllm
+
+assert torch.__version__.startswith("2.12.0+cu132"), torch.__version__
+assert torch.version.cuda == "13.2", torch.version.cuda
+print("torch", torch.__version__, torch.version.cuda)
+print("torch nccl", torch.cuda.nccl.version())
+print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+print("vllm", getattr(vllm, "__version__", "unknown"))
+print("b12x", md.version("b12x"))
+PY
+VERIFY
+chmod 0755 /usr/local/bin/verify-glm-kimi-cu132
+/usr/local/bin/verify-glm-kimi-cu132 /opt/vllm
+SH
+
+RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu13==4.5.1 \
+ && python -m pip cache purge || true \
+ && rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheels /root/.cache/pip /tmp/pip-* \
+ && rm -rf \
+      /opt/vllm/.deps \
+      /opt/vllm/.git \
+      /opt/vllm/.github \
+      /opt/vllm/.buildkite \
+      /opt/vllm/build \
+      /opt/vllm/docs \
+      /opt/vllm/examples \
+      /opt/vllm/tests \
+ && find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -name "*.pyc" -delete 2>/dev/null || true \
+ && find /opt/venv -name "*.a" -delete 2>/dev/null || true
+
+# =============================================================================
+# Stage 3: clean final runtime
+# =============================================================================
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS final
+
+ARG PYTHON_VERSION
+ARG NCCL_SONAME
+ARG VLLM_COMMIT
+ARG B12X_COMMIT
+ARG FLASHINFER_COMMIT
+ARG DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+    python3-pip \
+    git \
+    git-lfs \
+    curl \
+    ca-certificates \
+    gcc \
+    g++ \
+    libc6-dev \
+    libgomp1 \
+    numactl \
+    libnuma1 \
+    libibverbs1 \
+    libjpeg8 \
+    libpng16-16t64 \
+    ninja-build \
+    ccache \
+    cmake \
+    patchelf \
+    pciutils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+ && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1
+
+COPY --from=vllm-build /opt/venv /opt/venv
+COPY --from=vllm-build /opt/vllm /opt/vllm
+COPY --from=vllm-build /usr/local/bin/run-glm51-vllm /usr/local/bin/run-glm51-vllm
+COPY --from=vllm-build /usr/local/bin/run-kimi26-vllm /usr/local/bin/run-kimi26-vllm
+COPY --from=vllm-build /usr/local/bin/verify-glm-kimi-cu132 /usr/local/bin/verify-glm-kimi-cu132
+COPY --from=nccl-build /build/nccl/build/lib/${NCCL_SONAME} /opt/libnccl-local-inference.so.2.30.4
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}" \
+    CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    TORCH_CUDA_ARCH_LIST=12.0a \
+    FLASHINFER_CUDA_ARCH_LIST=12.0f \
+    FLASHINFER_LOCAL_VERSION=cu132 \
+    FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    HF_HOME=/root/.cache/huggingface \
+    TRITON_CACHE_DIR=/cache/jit/triton \
+    TORCH_EXTENSIONS_DIR=/cache/jit/torch_extensions \
+    VLLM_CACHE_DIR=/cache/jit/vllm \
+    FLASHINFER_WORKSPACE_BASE=/cache/jit/flashinfer \
+    TVM_FFI_CACHE_DIR=/cache/jit/tvm-ffi \
+    XDG_CACHE_HOME=/cache/jit \
+    NCCL_LOCAL_INFERENCE_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    NCCL_PR2127_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4 \
+    LD_PRELOAD=/opt/libnccl-local-inference.so.2.30.4 \
+    NCCL_GRAPH_FILE="" \
+    NCCL_IB_DISABLE=1 \
+    NCCL_P2P_LEVEL=SYS \
+    NCCL_PROTO=LL,LL128,Simple \
+    VLLM_ENABLE_PCIE_ALLREDUCE=1 \
+    VLLM_PCIE_ALLREDUCE_BACKEND=cpp \
+    VLLM_CPP_AR_1STAGE_NCCL_CUTOFF=56KB \
+    VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS=0 \
+    VLLM_RTX6K_FUSED_ALLREDUCE_ADD=0 \
+    VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER=0 \
+    VLLM_DISABLE_SHARED_EXPERTS_STREAM=0 \
+    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+    VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
+
+RUN mkdir -p /cache/jit/triton /cache/jit/torch_extensions /cache/jit/vllm /cache/jit/flashinfer \
+ && strings /opt/libnccl-local-inference.so.2.30.4 | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2" \
+ && /usr/local/bin/verify-glm-kimi-cu132 /opt/vllm \
+ && python - <<'PY'
+import torch, flashinfer, vllm
+print("torch", torch.__version__, torch.version.cuda)
+print("torch nccl", torch.cuda.nccl.version())
+print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+print("vllm", getattr(vllm, "__version__", "unknown"))
+assert torch.__version__.startswith("2.12.0+cu132")
+assert torch.version.cuda == "13.2"
+PY
+
+WORKDIR /
+
+CMD ["/usr/local/bin/run-kimi26-vllm"]
+
+LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, B12X and canonical vLLM" \
+      local-inference.cuda.version="13.2.1" \
+      local-inference.torch.version="2.12.0+cu132" \
+      local-inference.nccl.repo="local-inference-lab/nccl-canonical" \
+      local-inference.nccl.branch="canonical/cu132-nccl2304-amd-noxml" \
+      local-inference.nccl.version="2.30.4" \
+      local-inference.vllm.repo="voipmonitor/vllm" \
+      local-inference.vllm.branch="codex/glm51-kimi-canonical-rebase-test-20260514" \
+      local-inference.vllm.commit="${VLLM_COMMIT}" \
+      local-inference.b12x.commit="${B12X_COMMIT}" \
+      local-inference.flashinfer.commit="${FLASHINFER_COMMIT}"
