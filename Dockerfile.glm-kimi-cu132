@@ -401,6 +401,17 @@ COPY --from=vllm-build /usr/local/bin/run-kimi26-vllm /usr/local/bin/run-kimi26-
 COPY --from=vllm-build /usr/local/bin/verify-glm-kimi-cu132 /usr/local/bin/verify-glm-kimi-cu132
 COPY --from=nccl-build /build/nccl/build/lib/${NCCL_SONAME} /opt/libnccl-local-inference.so.2.30.4
 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    printf 'torch==2.12.0+cu132\ntorchvision==0.27.0+cu132\n' > /tmp/torch-cu132-constraints.txt \
+ && /opt/venv/bin/python -m pip install --upgrade \
+      --index-url https://download.pytorch.org/whl/cu132 \
+      --extra-index-url https://pypi.org/simple \
+      --constraint /tmp/torch-cu132-constraints.txt \
+      "transformers==5.3.0" \
+      "fastsafetensors==0.2.2" \
+      "b12x==0.14.0" \
+ && (/opt/venv/bin/python -m pip cache purge || true)
+
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}" \
     CUDA_DEVICE_ORDER=PCI_BUS_ID \
@@ -419,7 +430,6 @@ ENV VIRTUAL_ENV=/opt/venv \
     NCCL_PR2127_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     LD_PRELOAD=/opt/libnccl-local-inference.so.2.30.4 \
-    NCCL_GRAPH_FILE="" \
     NCCL_IB_DISABLE=1 \
     NCCL_P2P_LEVEL=SYS \
     NCCL_PROTO=LL,LL128,Simple \
@@ -460,4 +470,5 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi imag
       local-inference.vllm.branch="${VLLM_REF}" \
       local-inference.vllm.commit="${VLLM_COMMIT}" \
       local-inference.b12x.commit="${B12X_COMMIT}" \
+      local-inference.b12x.runtime_version="0.14.0" \
       local-inference.flashinfer.commit="${FLASHINFER_COMMIT}"
