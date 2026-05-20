@@ -22,24 +22,28 @@ ARG PYTHON_VERSION=3.12
 
 ARG NCCL_REPO=https://github.com/local-inference-lab/nccl-canonical.git
 ARG NCCL_REF=canonical/cu132-nccl2304-amd-noxml
+ARG NCCL_COMMIT=dfab7c1ace32da250ba97757879429c341b7bcf9
 ARG NCCL_SONAME=libnccl.so.2.30.4
 
 ARG FLASHINFER_REPO=https://github.com/flashinfer-ai/flashinfer.git
-ARG FLASHINFER_COMMIT=6885e76a5e12a59220b9dc199d86a64fbe5f6d78
+ARG FLASHINFER_REF=main
+ARG FLASHINFER_COMMIT=9035311e975a6aeb2d229f5162e999dfb7c9a733
 
 ARG B12X_REPO=https://github.com/local-inference-lab/b12x.git
+ARG B12X_REF=codex/glm51-kimi-b12x-a16-cpuhangfix-cutedsl45-20260512
 ARG B12X_COMMIT=c929144c7689668b07ca65af10ceadf1c745165d
 
 ARG VLLM_REPO=https://github.com/voipmonitor/vllm.git
 ARG VLLM_REF=codex/glm51-kimi-canonical-rebase-test-20260514
-ARG VLLM_COMMIT=5de88dbd6ca3486bd1dbe247fc08f96cdc7b2d2c
+ARG VLLM_COMMIT=
 ARG VLLM_BUILD_VERSION=0.20.2+glm51kimi.cu132.20260518
 ARG LAUNCHER_REPO=https://github.com/voipmonitor/vllm.git
 ARG LAUNCHER_REF=codex/glm51-kimi-canonical-rebase-test-20260514
-ARG LAUNCHER_COMMIT=5de88dbd6ca3486bd1dbe247fc08f96cdc7b2d2c
+ARG LAUNCHER_COMMIT=
 
 ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
 ARG CUTLASS_REF=main
+ARG CUTLASS_COMMIT=982cb9e718bcd4d7ac546b1795702a08326dfe4b
 
 ARG MAX_JOBS=128
 ARG NVCC_THREADS=1
@@ -53,6 +57,7 @@ FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS nccl-bui
 
 ARG NCCL_REPO
 ARG NCCL_REF
+ARG NCCL_COMMIT
 ARG DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
@@ -70,6 +75,7 @@ WORKDIR /build
 RUN git clone "${NCCL_REPO}" nccl \
  && cd nccl \
  && git checkout "${NCCL_REF}" \
+ && if [[ -n "${NCCL_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${NCCL_COMMIT}"; fi \
  && make -j"$(nproc)" src.build CUDA_HOME=/usr/local/cuda \
  && strings "build/lib/libnccl.so.2.30.4" | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2"
 
@@ -176,31 +182,26 @@ RUN if [[ -d /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda && ! -e /usr
     fi
 
 # =============================================================================
-# Stage 2: build FlashInfer, B12X and vLLM
+# Stage 2a: build FlashInfer and flashinfer-cubin.
+#
+# Keep this stage independent from vLLM args so local BuildKit cache reuses the
+# expensive FlashInfer/CUBIN build until CUDA/Torch/CUTLASS/FlashInfer changes.
 # =============================================================================
-FROM base AS vllm-build
+FROM base AS flashinfer-build
 
 ARG FLASHINFER_REPO
+ARG FLASHINFER_REF
 ARG FLASHINFER_COMMIT
-ARG B12X_REPO
-ARG B12X_COMMIT
-ARG VLLM_REPO
-ARG VLLM_REF
-ARG VLLM_COMMIT
-ARG VLLM_BUILD_VERSION
-ARG LAUNCHER_REPO
-ARG LAUNCHER_REF
-ARG LAUNCHER_COMMIT
 ARG CUTLASS_REPO
 ARG CUTLASS_REF
-ARG VLLM_MAX_JOBS
-ARG VLLM_NVCC_THREADS
+ARG CUTLASS_COMMIT
 
 WORKDIR /build
 
 RUN git clone --filter=blob:none "${CUTLASS_REPO}" /build/cutlass \
  && cd /build/cutlass \
  && git checkout "${CUTLASS_REF}" \
+ && if [[ -n "${CUTLASS_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${CUTLASS_COMMIT}"; fi \
  && grep "CUTLASS_MAJOR\\|CUTLASS_MINOR\\|CUTLASS_PATCH" include/cutlass/version.h | head -3
 
 RUN CUTLASS_DSL="$(python -c 'import cutlass.utils.blockscaled_layout as m; print(m.__file__)')" \
@@ -221,9 +222,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       tabulate \
       tqdm
 
-RUN git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src \
+RUN --mount=type=cache,target=/root/.ccache \
+    git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src \
  && cd /tmp/flashinfer-src \
- && git checkout "${FLASHINFER_COMMIT}" \
+ && git checkout "${FLASHINFER_REF}" \
+ && if [[ -n "${FLASHINFER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}"; fi \
  && git submodule update --init --recursive \
  && python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true \
  && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
@@ -243,16 +246,43 @@ import flashinfer
 print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 PY
 
+# =============================================================================
+# Stage 2b: build B12X on top of the cached FlashInfer stage.
+# =============================================================================
+FROM flashinfer-build AS b12x-build
+
+ARG B12X_REPO
+ARG B12X_REF
+ARG B12X_COMMIT
+
 RUN git clone --filter=blob:none "${B12X_REPO}" /tmp/b12x-src \
  && cd /tmp/b12x-src \
- && git checkout "${B12X_COMMIT}" \
+ && git checkout "${B12X_REF}" \
+ && if [[ -n "${B12X_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${B12X_COMMIT}"; fi \
  && python -m pip install --no-deps --force-reinstall . \
  && rm -rf /tmp/b12x-src
+
+# =============================================================================
+# Stage 2c: build vLLM on top of cached FlashInfer/B12X.
+# =============================================================================
+FROM b12x-build AS vllm-build
+
+ARG VLLM_REPO
+ARG VLLM_REF
+ARG VLLM_COMMIT
+ARG VLLM_BUILD_VERSION
+ARG LAUNCHER_REPO
+ARG LAUNCHER_REF
+ARG LAUNCHER_COMMIT
+ARG VLLM_MAX_JOBS
+ARG VLLM_NVCC_THREADS
+
+WORKDIR /build
 
 RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
  && cd /opt/vllm \
  && git checkout "${VLLM_REF}" \
- && test "$(git rev-parse HEAD)" = "${VLLM_COMMIT}" \
+ && if [[ -n "${VLLM_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${VLLM_COMMIT}"; fi \
  && grep -v '^torch==' requirements/build/cuda.txt > /tmp/vllm-build-notorch.txt \
  && python -m pip install -r /tmp/vllm-build-notorch.txt \
  && python -m pip install -r requirements/common.txt \
@@ -275,7 +305,7 @@ RUN --mount=type=cache,target=/root/.ccache \
       git clone --filter=blob:none "${LAUNCHER_REPO}" /tmp/vllm-launchers; \
       cd /tmp/vllm-launchers; \
       git checkout "${LAUNCHER_REF}"; \
-      test "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}"; \
+      if [[ -n "${LAUNCHER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}"; fi; \
       launcher_root=/tmp/vllm-launchers; \
       cd /opt/vllm; \
     fi \
@@ -354,7 +384,9 @@ ARG NCCL_SONAME
 ARG VLLM_REPO
 ARG VLLM_REF
 ARG VLLM_COMMIT
+ARG B12X_REF
 ARG B12X_COMMIT
+ARG FLASHINFER_REF
 ARG FLASHINFER_COMMIT
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -409,12 +441,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       --constraint /tmp/torch-cu132-constraints.txt \
       "numba==0.65.0" \
       "quack-kernels>=0.3.3" \
+      "humming-kernels[cu13]==0.1.0" \
       "tilelang==0.1.9" \
       "tokenspeed-mla==0.1.2" \
       "transformers>=5.5.1" \
       "apache-tvm-ffi==0.1.9" \
       "fastsafetensors==0.2.2" \
-      "b12x==0.14.0" \
  && (/opt/venv/bin/python -m pip cache purge || true)
 
 ENV VIRTUAL_ENV=/opt/venv \
@@ -465,7 +497,7 @@ WORKDIR /
 
 CMD ["/usr/local/bin/run-kimi26-vllm"]
 
-LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, B12X and pinned vLLM" \
+LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, B12X and canonical vLLM branch" \
       local-inference.cuda.version="13.2.1" \
       local-inference.torch.version="2.12.0+cu132" \
       local-inference.nccl.repo="local-inference-lab/nccl-canonical" \
@@ -474,6 +506,8 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi imag
       local-inference.vllm.repo="${VLLM_REPO}" \
       local-inference.vllm.branch="${VLLM_REF}" \
       local-inference.vllm.commit="${VLLM_COMMIT}" \
+      local-inference.b12x.branch="${B12X_REF}" \
       local-inference.b12x.commit="${B12X_COMMIT}" \
-      local-inference.b12x.runtime_version="0.14.0" \
+      local-inference.b12x.runtime_version="source" \
+      local-inference.flashinfer.branch="${FLASHINFER_REF}" \
       local-inference.flashinfer.commit="${FLASHINFER_COMMIT}"
