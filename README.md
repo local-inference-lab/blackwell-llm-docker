@@ -108,7 +108,14 @@ import torch
 print(torch.__version__, torch.version.cuda)
 PY
 nvcc --version | tail -n 1
-dpkg-query -W "libcublas-13-2" "libcublas-dev-13-2"
+dpkg-query -W \
+  "cuda-compat-13-2" \
+  "cublas-cuda-13" \
+  "libcublas13-cuda-13" \
+  "libcublas13-dev-cuda-13" \
+  "libcudnn9-cuda-13" \
+  "libcudnn9-dev-cuda-13" \
+  "libcudnn9-headers-cuda-13"
 '
 ```
 
@@ -132,10 +139,12 @@ dpkg-query -W "libcublas-13-2" "libcublas-dev-13-2"
 
 `Dockerfile.glm-kimi-cu132` is intentionally self-contained: it starts from
 `nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04` and does not inherit from any
-previous `voipmonitor/vllm` image. It installs PyTorch `2.12.0+cu132` from the
-official PyTorch wheel index, builds patched NCCL `2.30.4` from
-`local-inference-lab/nccl-canonical`, then builds FlashInfer, B12X and the
-canonical GLM/Kimi vLLM branch.
+previous `voipmonitor/vllm` image. It keeps the CUDA toolkit on 13.2.1, overlays
+the latest CUDA 13 library packages currently used by this image (`cuBLAS`
+13.4.1, `cuDNN` 9.22, `cuda-compat-13-2` 595.71), installs PyTorch
+`2.12.0+cu132` from the official PyTorch wheel index, builds patched NCCL
+`2.30.4` from `local-inference-lab/nccl-canonical`, then builds FlashInfer,
+B12X and the canonical GLM/Kimi vLLM branch.
 
 The final image defaults to `/usr/local/bin/run-kimi26-vllm`; GLM is available
 through `/usr/local/bin/run-glm51-vllm`.

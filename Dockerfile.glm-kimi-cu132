@@ -4,6 +4,7 @@
 #
 # Source stack:
 #   NVIDIA CUDA 13.2.1 cuDNN devel base
+#   Latest CUDA 13.2-compatible NVIDIA library overlays: cuBLAS 13.4.1, cuDNN 9.22
 #   PyTorch 2.12.0+cu132 from the official PyTorch wheel index
 #   Patched NCCL 2.30.4 from local-inference-lab/nccl-canonical
 #   FlashInfer from pinned upstream git
@@ -19,6 +20,9 @@
 ARG CUDA_VERSION=13.2.1
 ARG UBUNTU_VERSION=24.04
 ARG PYTHON_VERSION=3.12
+ARG CUBLAS_CUDA13_VERSION=13.4.1.2-1
+ARG CUDNN_CUDA13_VERSION=9.22.0.52-1
+ARG CUDA_COMPAT_13_2_VERSION=595.71.05-1ubuntu1
 
 ARG NCCL_REPO=https://github.com/local-inference-lab/nccl-canonical.git
 ARG NCCL_REF=canonical/cu132-nccl2304-amd-noxml
@@ -88,6 +92,9 @@ ARG PYTHON_VERSION
 ARG NCCL_SONAME
 ARG MAX_JOBS
 ARG NVCC_THREADS
+ARG CUBLAS_CUDA13_VERSION
+ARG CUDNN_CUDA13_VERSION
+ARG CUDA_COMPAT_13_2_VERSION
 ARG DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
@@ -98,7 +105,9 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Keep the toolkit on 13.2.1, but overlay the latest CUDA 13 libraries NVIDIA
+# publishes for Ubuntu 24.04 without pulling CUDA 13.3 packages.
+RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-dev \
     python${PYTHON_VERSION}-venv \
@@ -123,6 +132,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libnuma-dev \
     libibverbs-dev \
     pciutils \
+    cuda-compat-13-2=${CUDA_COMPAT_13_2_VERSION} \
+    libcublas13-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcublas13-dev-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    cublas-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcudnn9-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-dev-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-headers-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-static-cuda-13=${CUDNN_CUDA13_VERSION} \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
@@ -381,6 +399,9 @@ FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS final
 
 ARG PYTHON_VERSION
 ARG NCCL_SONAME
+ARG CUBLAS_CUDA13_VERSION
+ARG CUDNN_CUDA13_VERSION
+ARG CUDA_COMPAT_13_2_VERSION
 ARG VLLM_REPO
 ARG VLLM_REF
 ARG VLLM_COMMIT
@@ -398,7 +419,9 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Keep the toolkit on 13.2.1, but overlay the latest CUDA 13 libraries NVIDIA
+# publishes for Ubuntu 24.04 without pulling CUDA 13.3 packages.
+RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-dev \
     python${PYTHON_VERSION}-venv \
@@ -421,6 +444,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     patchelf \
     pciutils \
+    cuda-compat-13-2=${CUDA_COMPAT_13_2_VERSION} \
+    libcublas13-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcublas13-dev-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    cublas-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcudnn9-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-dev-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-headers-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-static-cuda-13=${CUDNN_CUDA13_VERSION} \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
@@ -499,6 +531,9 @@ CMD ["/usr/local/bin/run-kimi26-vllm"]
 
 LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, B12X and canonical vLLM branch" \
       local-inference.cuda.version="13.2.1" \
+      local-inference.cuda.compat.version="${CUDA_COMPAT_13_2_VERSION}" \
+      local-inference.cublas.version="${CUBLAS_CUDA13_VERSION}" \
+      local-inference.cudnn.version="${CUDNN_CUDA13_VERSION}" \
       local-inference.torch.version="2.12.0+cu132" \
       local-inference.nccl.repo="local-inference-lab/nccl-canonical" \
       local-inference.nccl.branch="canonical/cu132-nccl2304-amd-noxml" \
