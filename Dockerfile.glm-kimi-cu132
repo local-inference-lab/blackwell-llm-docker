@@ -260,9 +260,14 @@ ARG CUTLASS_COMMIT
 
 WORKDIR /build
 
-RUN git clone --filter=blob:none "${CUTLASS_REPO}" /build/cutlass \
- && cd /build/cutlass \
- && git checkout "${CUTLASS_REF}" \
+RUN if [[ "${CUTLASS_REF}" =~ ^[0-9a-f]{40}$ ]]; then \
+      git clone --filter=blob:none "${CUTLASS_REPO}" /build/cutlass; \
+      cd /build/cutlass; \
+      git checkout "${CUTLASS_REF}"; \
+    else \
+      git clone --depth 1 --branch "${CUTLASS_REF}" "${CUTLASS_REPO}" /build/cutlass; \
+      cd /build/cutlass; \
+    fi \
  && if [[ -n "${CUTLASS_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${CUTLASS_COMMIT}"; fi \
  && grep "CUTLASS_MAJOR\\|CUTLASS_MINOR\\|CUTLASS_PATCH" include/cutlass/version.h | head -3
 
