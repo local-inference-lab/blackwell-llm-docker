@@ -455,14 +455,27 @@ COPY --from=vllm-build /usr/local/bin/run-kimi26-vllm /usr/local/bin/run-kimi26-
 COPY --from=vllm-build /usr/local/bin/verify-glm-kimi-cu132 /usr/local/bin/verify-glm-kimi-cu132
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    printf 'torch==2.12.0+cu132\ntorchvision==0.27.0+cu132\n' > /tmp/torch-cu132-constraints.txt \
+    printf '%s\n' \
+      'torch==2.12.0+cu132' \
+      'torchvision==0.27.0+cu132' \
+      'cuda-bindings==13.2.0' \
+      'cuda-python==13.2.0' \
+      'nvidia-cuda-cccl==13.2.75' \
+      'nvidia-cuda-crt==13.2.78' \
+      'nvidia-cuda-nvcc==13.2.78' \
+      'nvidia-nvjitlink==13.2.78' \
+      'nvidia-nvvm==13.2.78' \
+      > /tmp/torch-cu132-constraints.txt \
  && /opt/venv/bin/python -m pip install --upgrade \
       --index-url https://download.pytorch.org/whl/cu132 \
       --extra-index-url https://pypi.org/simple \
       --constraint /tmp/torch-cu132-constraints.txt \
+      "cuda-bindings==13.2.0" \
+      "cuda-python==13.2.0" \
       "numba==0.65.0" \
       "quack-kernels>=0.3.3" \
       "humming-kernels[cu13]==0.1.2" \
+      "nvidia-nvjitlink==13.2.78" \
       "tilelang==0.1.9" \
       "tokenspeed-mla==0.1.2" \
       "transformers>=5.5.1" \
