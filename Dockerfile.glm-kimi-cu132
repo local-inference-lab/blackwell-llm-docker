@@ -66,7 +66,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN for attempt in {1..5}; do \
+      if apt-get update; then break; fi; \
+      if [[ "${attempt}" == "5" ]]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --no-install-recommends \
     git \
     python3 \
     build-essential \
@@ -107,7 +113,13 @@ ENV LANG=C.UTF-8 \
 
 # Keep the toolkit on 13.2.1, but overlay the latest CUDA 13 libraries NVIDIA
 # publishes for Ubuntu 24.04 without pulling CUDA 13.3 packages.
-RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
+RUN for attempt in {1..5}; do \
+      if apt-get update; then break; fi; \
+      if [[ "${attempt}" == "5" ]]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --allow-change-held-packages --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-dev \
     python${PYTHON_VERSION}-venv \
@@ -421,7 +433,13 @@ ENV LANG=C.UTF-8 \
 
 # Keep the toolkit on 13.2.1, but overlay the latest CUDA 13 libraries NVIDIA
 # publishes for Ubuntu 24.04 without pulling CUDA 13.3 packages.
-RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
+RUN for attempt in {1..5}; do \
+      if apt-get update; then break; fi; \
+      if [[ "${attempt}" == "5" ]]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --allow-change-held-packages --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-dev \
     python${PYTHON_VERSION}-venv \
