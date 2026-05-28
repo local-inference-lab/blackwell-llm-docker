@@ -80,6 +80,38 @@ docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.vllm-cu130 -t voipm
 IMAGE=voipmonitor/vllm:glm-kimi-cu132-20260518 ./build-glm-kimi-cu132.sh
 ```
 
+### Current GLM/Kimi CUDA 13.2 base image
+
+The current base image is the `base` stage from `Dockerfile.glm-kimi-cu132`.
+It is intentionally built from the public NVIDIA CUDA 13.2.1 cuDNN devel image,
+not from an older `voipmonitor/vllm` image.
+
+```bash
+git clone https://github.com/local-inference-lab/blackwell-llm-docker.git
+cd blackwell-llm-docker
+
+DOCKER_BUILDKIT=1 docker build \
+  --progress=plain \
+  -f Dockerfile.glm-kimi-cu132 \
+  --target base \
+  -t local-inference/glm-kimi-cu132-base:test \
+  .
+```
+
+Useful sanity check after the build:
+
+```bash
+docker run --rm local-inference/glm-kimi-cu132-base:test bash -lc '
+python --version
+python - <<PY
+import torch
+print(torch.__version__, torch.version.cuda)
+PY
+nvcc --version | tail -n 1
+dpkg-query -W "libcublas-13-2" "libcublas-dev-13-2"
+'
+```
+
 ## Hardware
 
 - NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) or compatible
