@@ -9,7 +9,7 @@ Docker images for LLM inference on NVIDIA Blackwell GPUs (SM120).
 | `voipmonitor/sglang:cu130` | `Dockerfile.sglang-cu130` | CUDA 13.0, torch 2.11 stable cu130, FlashInfer source (PR #2913), SGLang + b12x + PCIe allreduce |
 | `voipmonitor/sglang:cu132` | `Dockerfile.sglang-cu132` | CUDA 13.2, torch 2.12 from source, FlashInfer source (PR #2913), SGLang + b12x |
 | `voipmonitor/vllm:cu130` | `Dockerfile.vllm-cu130` | CUDA 13.0, torch 2.11 stable cu130, FlashInfer source (PR #2913), vLLM + cherry-picks |
-| `voipmonitor/vllm:glm-kimi-cu132` | `Dockerfile.glm-kimi-cu132` | Clean CUDA 13.2.1, PyTorch 2.12 cu132 wheels, patched NCCL 2.30.4, FlashInfer, B12X, canonical GLM/Kimi vLLM |
+| `voipmonitor/vllm:vllm-b12x-cu132` | `Dockerfile.vllm-b12x-cu132` | Clean CUDA 13.2.1, PyTorch 2.12 cu132 wheels, patched NCCL 2.30.4, FlashInfer, DeepGEMM, B12X, vLLM |
 
 Base image for cu132 (torch + FlashInfer compiled from source):
 
@@ -76,44 +76,53 @@ docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.sglang-cu132 -t voi
 # vLLM cu130
 docker build --build-arg CACHEBUST=$(date +%s) -f Dockerfile.vllm-cu130 -t voipmonitor/vllm:cu130 .
 
-# Clean GLM/Kimi vLLM cu132. This builds the reusable system/build base images
+# Clean vLLM+B12X cu132. This builds the reusable system/build base images
 # first, then builds the final vLLM image from those base images.
-IMAGE=voipmonitor/vllm:glm-kimi-cu132-20260518 ./build-glm-kimi-cu132.sh
+IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
+
+# Reproduce the pushed black-benediction PR11 image exactly.
+./build-black-benediction-b12xpr11-cu132.sh
 ```
 
-### Current GLM/Kimi CUDA 13.2 base image
+### Current vLLM+B12X CUDA 13.2 base image
 
-The GLM/Kimi build uses two reusable base images:
+The vLLM+B12X build uses two reusable base images:
 
-- `voipmonitor/vllm:glm-kimi-cu132-system-base-20260528`: CUDA 13.2.1 cuDNN devel base, cuBLAS 13.4.1, cuDNN 9.22, Python 3.12, build/runtime OS packages, and patched NCCL 2.30.4.
-- `voipmonitor/vllm:glm-kimi-cu132-build-base-20260528`: the system base plus `/opt/venv` with PyTorch `2.12.0+cu132`, torchvision `0.27.0+cu132`, CUDA tile, and CUTLASS DSL `4.5.2`.
+- `voipmonitor/vllm:vllm-b12x-cu132-system-base`: CUDA 13.2.1 cuDNN devel base, cuBLAS 13.4.1, cuDNN 9.22, Python 3.12, build/runtime OS packages, and patched NCCL 2.30.4.
+- `voipmonitor/vllm:vllm-b12x-cu132-build-base`: the system base plus `/opt/venv` with PyTorch `2.12.0+cu132`, torchvision `0.27.0+cu132`, CUDA tile, and CUTLASS DSL `4.5.2`.
 
 The final image is built `FROM` the system base and copies the completed vLLM
 venv from the build stages. This keeps the final image from carrying a stale
 base venv while avoiding repeated apt/PyTorch downloads on normal source-only
-rebases.
+rebases. The historical 2026-06-08 black-benediction build reused the already
+published `glm-kimi-cu132-system-base-20260608` and
+`glm-kimi-cu132-build-base-20260608` tags; the preset below preserves that exact
+input stack.
 
 ```bash
 git clone https://github.com/local-inference-lab/blackwell-llm-docker.git
 cd blackwell-llm-docker
 
-SYSTEM_BASE_IMAGE=voipmonitor/vllm:glm-kimi-cu132-system-base-20260528 \
-BUILD_BASE_IMAGE_TAG=voipmonitor/vllm:glm-kimi-cu132-build-base-20260528 \
-IMAGE=voipmonitor/vllm:glm-kimi-cu132-20260518 \
-./build-glm-kimi-cu132.sh
+SYSTEM_BASE_IMAGE=voipmonitor/vllm:vllm-b12x-cu132-system-base \
+BUILD_BASE_IMAGE_TAG=voipmonitor/vllm:vllm-b12x-cu132-build-base \
+IMAGE=voipmonitor/vllm:vllm-b12x-cu132 \
+./build-vllm-b12x-cu132.sh
 
 # Push the reusable base images when publishing a new stack baseline.
-SYSTEM_BASE_IMAGE=voipmonitor/vllm:glm-kimi-cu132-system-base-20260528 \
-BUILD_BASE_IMAGE_TAG=voipmonitor/vllm:glm-kimi-cu132-build-base-20260528 \
-IMAGE=voipmonitor/vllm:glm-kimi-cu132-20260518 \
+SYSTEM_BASE_IMAGE=voipmonitor/vllm:vllm-b12x-cu132-system-base \
+BUILD_BASE_IMAGE_TAG=voipmonitor/vllm:vllm-b12x-cu132-build-base \
+IMAGE=voipmonitor/vllm:vllm-b12x-cu132 \
 PUSH_BASE_IMAGE=1 \
-./build-glm-kimi-cu132.sh
+./build-vllm-b12x-cu132.sh
+
+# Exact black-benediction PR11 image from 2026-06-08.
+./build-black-benediction-b12xpr11-cu132.sh
 ```
 
 Useful sanity check after the build:
 
 ```bash
-docker run --rm voipmonitor/vllm:glm-kimi-cu132-system-base-20260528 bash -lc '
+docker run --rm voipmonitor/vllm:vllm-b12x-cu132-system-base bash -lc '
 python --version
 nvcc --version | tail -n 1
 strings /opt/libnccl-local-inference.so.2.30.4 | grep "NCCL version 2.30.4 compiled with CUDA 13.2"
@@ -127,7 +136,7 @@ dpkg-query -W \
   "libcudnn9-headers-cuda-13"
 '
 
-docker run --rm voipmonitor/vllm:glm-kimi-cu132-build-base-20260528 bash -lc '
+docker run --rm voipmonitor/vllm:vllm-b12x-cu132-build-base bash -lc '
 python - <<PY
 import torch
 import cutlass
@@ -153,16 +162,16 @@ PY
 - **Adaptive speculative decoding** (PR #21599) — dynamically adjusts num_steps
 - Pre-tuned Triton MoE configs for RTX PRO 6000 Blackwell
 
-## GLM/Kimi CUDA 13.2 Image
+## vLLM+B12X CUDA 13.2 Image
 
-`Dockerfile.glm-kimi-cu132` is intentionally based on reusable base images that
+`Dockerfile.vllm-b12x-cu132` is intentionally based on reusable base images that
 are themselves built from `nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04`, not from
 an older `voipmonitor/vllm` image. The system base keeps the CUDA toolkit on
 13.2.1, overlays the latest CUDA 13 library packages currently used by this
 image (`cuBLAS` 13.4.1, `cuDNN` 9.22, `cuda-compat-13-2` 595.71), and includes
 patched NCCL `2.30.4` from `local-inference-lab/nccl-canonical`. The build base
 adds PyTorch `2.12.0+cu132` from the official PyTorch wheel index and CUTLASS
-DSL. The final image then builds FlashInfer, B12X and the canonical GLM/Kimi
+DSL. The final image then builds FlashInfer, DeepGEMM, B12X and the selected
 vLLM branch on top of those bases.
 
 The final image defaults to `/usr/local/bin/run-kimi26-vllm`; GLM is available

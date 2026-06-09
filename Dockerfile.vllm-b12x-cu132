@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# Clean GLM/Kimi vLLM image for Blackwell on CUDA 13.2.
+# Clean vLLM+B12X image for Blackwell on CUDA 13.2.
 #
 # Source stack:
 #   NVIDIA CUDA 13.2.1 cuDNN devel base
@@ -8,13 +8,13 @@
 #   PyTorch 2.12.0+cu132 from the official PyTorch wheel index
 #   Patched NCCL 2.30.4 from local-inference-lab/nccl-canonical
 #   FlashInfer from pinned upstream git
-#   B12X from pinned local-inference-lab git
-#   vLLM from pinned voipmonitor canonical GLM/Kimi branch
+#   B12X from pinned git
+#   vLLM from pinned git
 #
 # Build:
 #   DOCKER_BUILDKIT=1 docker build \
-#     -f Dockerfile.glm-kimi-cu132 \
-#     -t voipmonitor/vllm:glm-kimi-cu132-20260518 .
+#     -f Dockerfile.vllm-b12x-cu132 \
+#     -t voipmonitor/vllm:vllm-b12x-cu132 .
 # =============================================================================
 
 ARG CUDA_VERSION=13.2.1
@@ -23,8 +23,8 @@ ARG PYTHON_VERSION=3.12
 ARG CUBLAS_CUDA13_VERSION=13.4.1.2-1
 ARG CUDNN_CUDA13_VERSION=9.22.0.52-1
 ARG CUDA_COMPAT_13_2_VERSION=595.71.05-1ubuntu1
-ARG GLM_KIMI_CU132_SYSTEM_BASE_IMAGE=glm-kimi-cu132-system-base-build
-ARG GLM_KIMI_CU132_BUILD_BASE_IMAGE=glm-kimi-cu132-build-base-build
+ARG VLLM_B12X_CU132_SYSTEM_BASE_IMAGE=vllm-b12x-cu132-system-base-build
+ARG VLLM_B12X_CU132_BUILD_BASE_IMAGE=vllm-b12x-cu132-build-base-build
 
 ARG NCCL_REPO=https://github.com/local-inference-lab/nccl-canonical.git
 ARG NCCL_REF=canonical/cu132-nccl2304-amd-noxml
@@ -32,19 +32,23 @@ ARG NCCL_COMMIT=dfab7c1ace32da250ba97757879429c341b7bcf9
 ARG NCCL_SONAME=libnccl.so.2.30.4
 
 ARG FLASHINFER_REPO=https://github.com/flashinfer-ai/flashinfer.git
-ARG FLASHINFER_REF=main
+ARG FLASHINFER_REF=refs/pull/3395/head
 ARG FLASHINFER_COMMIT=9035311e975a6aeb2d229f5162e999dfb7c9a733
 
-ARG B12X_REPO=https://github.com/local-inference-lab/b12x.git
-ARG B12X_REF=codex/glm51-kimi-b12x-a16-cpuhangfix-cutedsl45-20260512
+ARG DEEPGEMM_REPO=https://github.com/deepseek-ai/DeepGEMM.git
+ARG DEEPGEMM_REF=refs/pull/324/head
+ARG DEEPGEMM_COMMIT=
+
+ARG B12X_REPO=https://github.com/lukealonso/b12x.git
+ARG B12X_REF=refs/pull/11/head
 ARG B12X_COMMIT=c929144c7689668b07ca65af10ceadf1c745165d
 
-ARG VLLM_REPO=https://github.com/voipmonitor/vllm.git
-ARG VLLM_REF=codex/glm51-kimi-canonical-rebase-test-20260514
+ARG VLLM_REPO=https://github.com/local-inference-lab/vllm.git
+ARG VLLM_REF=dev/black-benediction
 ARG VLLM_COMMIT=
-ARG VLLM_BUILD_VERSION=0.20.2+glm51kimi.cu132.20260518
-ARG LAUNCHER_REPO=https://github.com/voipmonitor/vllm.git
-ARG LAUNCHER_REF=codex/glm51-kimi-canonical-rebase-test-20260514
+ARG VLLM_BUILD_VERSION=0.11.2.dev279+black.benediction.b12x.cu132
+ARG LAUNCHER_REPO=https://github.com/local-inference-lab/vllm.git
+ARG LAUNCHER_REF=dev/black-benediction
 ARG LAUNCHER_COMMIT=
 
 ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
@@ -94,7 +98,7 @@ RUN git clone "${NCCL_REPO}" nccl \
 # =============================================================================
 # Stage 1: reusable CUDA/Python/NCCL system base
 # =============================================================================
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS glm-kimi-cu132-system-base-build
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS vllm-b12x-cu132-system-base-build
 
 ARG PYTHON_VERSION
 ARG NCCL_SONAME
@@ -155,6 +159,27 @@ RUN for attempt in {1..5}; do \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
+RUN cublas="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublas.so.13)" \
+ && cublas_lt="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublasLt.so.13)" \
+ && cublas_name="$(basename "${cublas}")" \
+ && cublas_lt_name="$(basename "${cublas_lt}")" \
+ && test -f "${cublas}" \
+ && test -f "${cublas_lt}" \
+ && for cuda_libdir in /usr/local/cuda/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_VERSION}/targets/x86_64-linux/lib; do \
+      if [[ -d "${cuda_libdir}" ]]; then \
+        cuda_libdir="$(readlink -f "${cuda_libdir}")"; \
+        rm -f "${cuda_libdir}"/libcublas.so "${cuda_libdir}"/libcublas.so.13 "${cuda_libdir}"/libcublas.so.13.*; \
+        rm -f "${cuda_libdir}"/libcublasLt.so "${cuda_libdir}"/libcublasLt.so.13 "${cuda_libdir}"/libcublasLt.so.13.*; \
+        ln -s "${cublas}" "${cuda_libdir}/${cublas_name}"; \
+        ln -s "${cublas_name}" "${cuda_libdir}/libcublas.so.13"; \
+        ln -s libcublas.so.13 "${cuda_libdir}/libcublas.so"; \
+        ln -s "${cublas_lt}" "${cuda_libdir}/${cublas_lt_name}"; \
+        ln -s "${cublas_lt_name}" "${cuda_libdir}/libcublasLt.so.13"; \
+        ln -s libcublasLt.so.13 "${cuda_libdir}/libcublasLt.so"; \
+      fi; \
+    done \
+ && ldconfig
+
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
  && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1
 
@@ -165,7 +190,7 @@ ENV NCCL_LOCAL_INFERENCE_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     NCCL_GRAPH_FILE=""
 
-LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 GLM/Kimi system base with latest CUDA 13.2-compatible cuBLAS/cuDNN overlays and patched NCCL 2.30.4" \
+LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 vLLM+B12X system base with latest CUDA 13.2-compatible cuBLAS/cuDNN overlays and patched NCCL 2.30.4" \
       local-inference.cuda.version="13.2.1" \
       local-inference.cuda.compat.version="${CUDA_COMPAT_13_2_VERSION}" \
       local-inference.cublas.version="${CUBLAS_CUDA13_VERSION}" \
@@ -177,7 +202,7 @@ LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 GLM/Kimi system
 # =============================================================================
 # Stage 1b: reusable PyTorch/CUTLASS build base
 # =============================================================================
-FROM ${GLM_KIMI_CU132_SYSTEM_BASE_IMAGE} AS glm-kimi-cu132-build-base-build
+FROM ${VLLM_B12X_CU132_SYSTEM_BASE_IMAGE} AS vllm-b12x-cu132-build-base-build
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
@@ -220,14 +245,14 @@ ENV CCACHE_DIR=/root/.ccache \
     FLASHINFER_DISABLE_VERSION_CHECK=1 \
     AOT_MAX_JOBS_CAP=8
 
-LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 GLM/Kimi build base with PyTorch 2.12 cu132 and CUTLASS DSL" \
+LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 vLLM+B12X build base with PyTorch 2.12 cu132 and CUTLASS DSL" \
       local-inference.torch.version="2.12.0+cu132" \
       local-inference.cutlass_dsl.version="4.5.2"
 
 # =============================================================================
 # Stage 1c: build settings overlay
 # =============================================================================
-FROM ${GLM_KIMI_CU132_BUILD_BASE_IMAGE} AS base
+FROM ${VLLM_B12X_CU132_BUILD_BASE_IMAGE} AS base
 
 ARG MAX_JOBS
 ARG NVCC_THREADS
@@ -292,7 +317,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.ccache \
     git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src \
  && cd /tmp/flashinfer-src \
- && git checkout "${FLASHINFER_REF}" \
+ && if [[ "${FLASHINFER_REF}" == refs/* ]]; then \
+      git fetch origin "${FLASHINFER_REF}"; \
+      git checkout FETCH_HEAD; \
+    else \
+      git checkout "${FLASHINFER_REF}"; \
+    fi \
  && if [[ -n "${FLASHINFER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}"; fi \
  && git submodule update --init --recursive \
  && python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true \
@@ -314,9 +344,35 @@ print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 PY
 
 # =============================================================================
-# Stage 2b: build B12X on top of the cached FlashInfer stage.
+# Stage 2b: build DeepGEMM on top of the cached FlashInfer stage.
 # =============================================================================
-FROM flashinfer-build AS b12x-build
+FROM flashinfer-build AS deepgemm-build
+
+ARG DEEPGEMM_REPO
+ARG DEEPGEMM_REF
+ARG DEEPGEMM_COMMIT
+
+RUN --mount=type=cache,target=/root/.ccache \
+    git clone --recursive "${DEEPGEMM_REPO}" /tmp/deepgemm-src \
+ && cd /tmp/deepgemm-src \
+ && if [[ "${DEEPGEMM_REF}" == refs/* ]]; then \
+      git fetch origin "${DEEPGEMM_REF}"; \
+      git checkout FETCH_HEAD; \
+    else \
+      git checkout "${DEEPGEMM_REF}"; \
+    fi \
+ && if [[ -n "${DEEPGEMM_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${DEEPGEMM_COMMIT}"; fi \
+ && git submodule update --init --recursive \
+ && DG_FORCE_BUILD=1 DG_USE_LOCAL_VERSION=1 \
+    python -m pip install --no-build-isolation --no-deps --force-reinstall . \
+ && cd / \
+ && python -c 'import importlib.metadata as md; import deep_gemm; print("deep_gemm", getattr(deep_gemm, "__version__", md.version("deep_gemm")))' \
+ && rm -rf /tmp/deepgemm-src
+
+# =============================================================================
+# Stage 2c: build B12X on top of cached FlashInfer/DeepGEMM.
+# =============================================================================
+FROM deepgemm-build AS b12x-build
 
 ARG B12X_REPO
 ARG B12X_REF
@@ -324,13 +380,18 @@ ARG B12X_COMMIT
 
 RUN git clone --filter=blob:none "${B12X_REPO}" /tmp/b12x-src \
  && cd /tmp/b12x-src \
- && git checkout "${B12X_REF}" \
+ && if [[ "${B12X_REF}" == refs/* ]]; then \
+      git fetch origin "${B12X_REF}"; \
+      git checkout FETCH_HEAD; \
+    else \
+      git checkout "${B12X_REF}"; \
+    fi \
  && if [[ -n "${B12X_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${B12X_COMMIT}"; fi \
  && python -m pip install --no-deps --force-reinstall . \
  && rm -rf /tmp/b12x-src
 
 # =============================================================================
-# Stage 2c: build vLLM on top of cached FlashInfer/B12X.
+# Stage 2d: build vLLM on top of cached FlashInfer/DeepGEMM/B12X.
 # =============================================================================
 FROM b12x-build AS vllm-build
 
@@ -367,19 +428,6 @@ RUN --mount=type=cache,target=/root/.ccache \
     CMAKE_BUILD_PARALLEL_LEVEL="${VLLM_MAX_JOBS}" \
     NVCC_THREADS="${VLLM_NVCC_THREADS}" \
     python -m pip install --no-build-isolation --no-deps --force-reinstall . \
- && launcher_root=/opt/vllm \
- && if [[ ! -f "${launcher_root}/scripts/run-glm51-vllm" || ! -f "${launcher_root}/scripts/run-kimi26-vllm" ]]; then \
-      git clone --filter=blob:none "${LAUNCHER_REPO}" /tmp/vllm-launchers; \
-      cd /tmp/vllm-launchers; \
-      git checkout "${LAUNCHER_REF}"; \
-      if [[ -n "${LAUNCHER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}"; fi; \
-      launcher_root=/tmp/vllm-launchers; \
-      cd /opt/vllm; \
-    fi \
- && install -m 0755 "${launcher_root}/scripts/run-glm51-vllm" /usr/local/bin/run-glm51-vllm \
- && install -m 0755 "${launcher_root}/scripts/run-kimi26-vllm" /usr/local/bin/run-kimi26-vllm \
- && bash -n /usr/local/bin/run-glm51-vllm \
- && bash -n /usr/local/bin/run-kimi26-vllm \
  && for so in \
       /opt/venv/lib/python3.12/site-packages/vllm/_C.abi3.so \
       /opt/venv/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so \
@@ -395,8 +443,41 @@ print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 print("vllm", getattr(vllm, "__version__", "unknown"))
 PY
 
+RUN launcher_root=/opt/vllm \
+ && if [[ ! -f "${launcher_root}/scripts/run-glm51-vllm" && ! -f "${launcher_root}/serve-glm51.sh" ]]; then \
+      git clone --filter=blob:none "${LAUNCHER_REPO}" /tmp/vllm-launchers; \
+      cd /tmp/vllm-launchers; \
+      git checkout "${LAUNCHER_REF}"; \
+      if [[ -n "${LAUNCHER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}"; fi; \
+      launcher_root=/tmp/vllm-launchers; \
+      cd /opt/vllm; \
+    fi \
+ && for script in "${launcher_root}"/serve-*.sh; do \
+      if [[ -f "${script}" ]]; then install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; fi; \
+    done \
+ && if [[ -f "${launcher_root}/scripts/run-glm51-vllm" ]]; then \
+      install -m 0755 "${launcher_root}/scripts/run-glm51-vllm" /usr/local/bin/run-glm51-vllm; \
+    elif [[ -f /usr/local/bin/serve-glm51.sh ]]; then \
+      cp /usr/local/bin/serve-glm51.sh /usr/local/bin/run-glm51-vllm; \
+      chmod 0755 /usr/local/bin/run-glm51-vllm; \
+    else \
+      printf '%s\n' '#!/usr/bin/env bash' 'echo "GLM launcher is not available in this vLLM ref" >&2' 'exit 2' > /usr/local/bin/run-glm51-vllm; \
+      chmod 0755 /usr/local/bin/run-glm51-vllm; \
+    fi \
+ && if [[ -f "${launcher_root}/scripts/run-kimi26-vllm" ]]; then \
+      install -m 0755 "${launcher_root}/scripts/run-kimi26-vllm" /usr/local/bin/run-kimi26-vllm; \
+    elif [[ -f /usr/local/bin/serve-kimi26.sh ]]; then \
+      cp /usr/local/bin/serve-kimi26.sh /usr/local/bin/run-kimi26-vllm; \
+      chmod 0755 /usr/local/bin/run-kimi26-vllm; \
+    else \
+      printf '%s\n' '#!/usr/bin/env bash' 'echo "Kimi launcher is not available in this vLLM ref" >&2' 'exit 2' > /usr/local/bin/run-kimi26-vllm; \
+      chmod 0755 /usr/local/bin/run-kimi26-vllm; \
+    fi \
+ && bash -n /usr/local/bin/run-glm51-vllm \
+ && bash -n /usr/local/bin/run-kimi26-vllm
+
 RUN <<'SH' bash -eux
-cat > /usr/local/bin/verify-glm-kimi-cu132 <<'VERIFY'
+cat > /usr/local/bin/verify-vllm-b12x-cu132 <<'VERIFY'
 #!/usr/bin/env bash
 set -euo pipefail
 root="${1:-/opt/vllm}"
@@ -409,6 +490,7 @@ python - <<'PY'
 import importlib.metadata as md
 import torch
 import flashinfer
+import deep_gemm
 import vllm
 
 assert torch.__version__.startswith("2.12.0+cu132"), torch.__version__
@@ -416,12 +498,13 @@ assert torch.version.cuda == "13.2", torch.version.cuda
 print("torch", torch.__version__, torch.version.cuda)
 print("torch nccl", torch.cuda.nccl.version())
 print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+print("deep_gemm", getattr(deep_gemm, "__version__", md.version("deep_gemm")))
 print("vllm", getattr(vllm, "__version__", "unknown"))
 print("b12x", md.version("b12x"))
 PY
 VERIFY
-chmod 0755 /usr/local/bin/verify-glm-kimi-cu132
-/usr/local/bin/verify-glm-kimi-cu132 /opt/vllm
+chmod 0755 /usr/local/bin/verify-vllm-b12x-cu132
+/usr/local/bin/verify-vllm-b12x-cu132 /opt/vllm
 SH
 
 RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu13==4.5.2 \
@@ -437,6 +520,7 @@ RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu
       /opt/vllm/docs \
       /opt/vllm/examples \
       /opt/vllm/tests \
+      /tmp/deepgemm-src \
  && find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true \
  && find /opt/venv -name "*.pyc" -delete 2>/dev/null || true \
  && find /opt/venv -name "*.a" -delete 2>/dev/null || true
@@ -444,7 +528,7 @@ RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu
 # =============================================================================
 # Stage 3: clean final runtime
 # =============================================================================
-FROM ${GLM_KIMI_CU132_SYSTEM_BASE_IMAGE} AS final
+FROM ${VLLM_B12X_CU132_SYSTEM_BASE_IMAGE} AS final
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
@@ -452,7 +536,8 @@ COPY --from=vllm-build /opt/venv /opt/venv
 COPY --from=vllm-build /opt/vllm /opt/vllm
 COPY --from=vllm-build /usr/local/bin/run-glm51-vllm /usr/local/bin/run-glm51-vllm
 COPY --from=vllm-build /usr/local/bin/run-kimi26-vllm /usr/local/bin/run-kimi26-vllm
-COPY --from=vllm-build /usr/local/bin/verify-glm-kimi-cu132 /usr/local/bin/verify-glm-kimi-cu132
+COPY --from=vllm-build /usr/local/bin/serve-*.sh /usr/local/bin/
+COPY --from=vllm-build /usr/local/bin/verify-vllm-b12x-cu132 /usr/local/bin/verify-vllm-b12x-cu132
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     printf '%s\n' \
@@ -474,13 +559,35 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "cuda-python==13.2.0" \
       "numba==0.65.0" \
       "quack-kernels>=0.3.3" \
-      "humming-kernels[cu13]==0.1.2" \
+      "humming-kernels[cu13]==0.1.4" \
       "nvidia-nvjitlink==13.2.78" \
       "tilelang==0.1.9" \
       "tokenspeed-mla==0.1.2" \
       "transformers>=5.5.1" \
       "apache-tvm-ffi==0.1.9" \
-      "fastsafetensors==0.2.2"
+      "fastsafetensors>=0.3.2" \
+ && /opt/venv/bin/python -m pip check
+
+RUN cublas="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublas.so.13)" \
+ && cublas_lt="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublasLt.so.13)" \
+ && cublas_name="$(basename "${cublas}")" \
+ && cublas_lt_name="$(basename "${cublas_lt}")" \
+ && test -f "${cublas}" \
+ && test -f "${cublas_lt}" \
+ && for cuda_libdir in /usr/local/cuda/targets/x86_64-linux/lib /usr/local/cuda-13.2/targets/x86_64-linux/lib; do \
+      if [[ -d "${cuda_libdir}" ]]; then \
+        cuda_libdir="$(readlink -f "${cuda_libdir}")"; \
+        rm -f "${cuda_libdir}"/libcublas.so "${cuda_libdir}"/libcublas.so.13 "${cuda_libdir}"/libcublas.so.13.*; \
+        rm -f "${cuda_libdir}"/libcublasLt.so "${cuda_libdir}"/libcublasLt.so.13 "${cuda_libdir}"/libcublasLt.so.13.*; \
+        ln -s "${cublas}" "${cuda_libdir}/${cublas_name}"; \
+        ln -s "${cublas_name}" "${cuda_libdir}/libcublas.so.13"; \
+        ln -s libcublas.so.13 "${cuda_libdir}/libcublas.so"; \
+        ln -s "${cublas_lt}" "${cuda_libdir}/${cublas_lt_name}"; \
+        ln -s "${cublas_lt_name}" "${cuda_libdir}/libcublasLt.so.13"; \
+        ln -s libcublasLt.so.13 "${cuda_libdir}/libcublasLt.so"; \
+      fi; \
+    done \
+ && ldconfig
 
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}" \
@@ -515,12 +622,14 @@ ENV VIRTUAL_ENV=/opt/venv \
 
 RUN mkdir -p /cache/jit/triton /cache/jit/torch_extensions /cache/jit/vllm /cache/jit/flashinfer \
  && strings /opt/libnccl-local-inference.so.2.30.4 | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2" \
- && /usr/local/bin/verify-glm-kimi-cu132 /opt/vllm \
+ && /usr/local/bin/verify-vllm-b12x-cu132 /opt/vllm \
  && python - <<'PY'
 import torch, flashinfer, vllm
+import deep_gemm
 print("torch", torch.__version__, torch.version.cuda)
 print("torch nccl", torch.cuda.nccl.version())
 print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
+print("deep_gemm", getattr(deep_gemm, "__version__", "unknown"))
 print("vllm", getattr(vllm, "__version__", "unknown"))
 assert torch.__version__.startswith("2.12.0+cu132")
 assert torch.version.cuda == "13.2"
@@ -537,11 +646,13 @@ ARG B12X_REF
 ARG B12X_COMMIT
 ARG FLASHINFER_REF
 ARG FLASHINFER_COMMIT
+ARG DEEPGEMM_REF
+ARG DEEPGEMM_COMMIT
 ARG CUBLAS_CUDA13_VERSION
 ARG CUDNN_CUDA13_VERSION
 ARG CUDA_COMPAT_13_2_VERSION
 
-LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, B12X and canonical vLLM branch" \
+LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, DeepGEMM, B12X and selected vLLM branch" \
       local-inference.cuda.version="13.2.1" \
       local-inference.cuda.compat.version="${CUDA_COMPAT_13_2_VERSION}" \
       local-inference.cublas.version="${CUBLAS_CUDA13_VERSION}" \
@@ -557,4 +668,6 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM GLM/Kimi imag
       local-inference.b12x.commit="${B12X_COMMIT}" \
       local-inference.b12x.runtime_version="source" \
       local-inference.flashinfer.branch="${FLASHINFER_REF}" \
-      local-inference.flashinfer.commit="${FLASHINFER_COMMIT}"
+      local-inference.flashinfer.commit="${FLASHINFER_COMMIT}" \
+      local-inference.deepgemm.branch="${DEEPGEMM_REF}" \
+      local-inference.deepgemm.commit="${DEEPGEMM_COMMIT}"

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="${IMAGE:-voipmonitor/vllm:glm-kimi-cu132-20260518}"
-SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260528}"
-BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260528}"
+IMAGE="${IMAGE:-voipmonitor/vllm:vllm-b12x-cu132}"
+SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:vllm-b12x-cu132-system-base}"
+BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:vllm-b12x-cu132-build-base}"
 BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-1}"
 PUSH_BASE_IMAGE="${PUSH_BASE_IMAGE:-0}"
-MAX_JOBS="${MAX_JOBS:-128}"
-VLLM_MAX_JOBS="${VLLM_MAX_JOBS:-128}"
+MAX_JOBS="${MAX_JOBS:-64}"
+VLLM_MAX_JOBS="${VLLM_MAX_JOBS:-64}"
 NVCC_THREADS="${NVCC_THREADS:-1}"
 VLLM_NVCC_THREADS="${VLLM_NVCC_THREADS:-1}"
 PIN_SOURCE_COMMITS="${PIN_SOURCE_COMMITS:-1}"
@@ -15,16 +15,18 @@ PIN_SOURCE_COMMITS="${PIN_SOURCE_COMMITS:-1}"
 NCCL_REPO="${NCCL_REPO:-https://github.com/local-inference-lab/nccl-canonical.git}"
 NCCL_REF="${NCCL_REF:-canonical/cu132-nccl2304-amd-noxml}"
 FLASHINFER_REPO="${FLASHINFER_REPO:-https://github.com/flashinfer-ai/flashinfer.git}"
-FLASHINFER_REF="${FLASHINFER_REF:-main}"
-B12X_REPO="${B12X_REPO:-https://github.com/local-inference-lab/b12x.git}"
-B12X_REF="${B12X_REF:-codex/glm51-kimi-b12x-a16-cpuhangfix-cutedsl45-20260512}"
-VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-VLLM_REF="${VLLM_REF:-codex/glm51-kimi-canonical-rebase-test-20260514}"
+FLASHINFER_REF="${FLASHINFER_REF:-refs/pull/3395/head}"
+DEEPGEMM_REPO="${DEEPGEMM_REPO:-https://github.com/deepseek-ai/DeepGEMM.git}"
+DEEPGEMM_REF="${DEEPGEMM_REF:-refs/pull/324/head}"
+B12X_REPO="${B12X_REPO:-https://github.com/lukealonso/b12x.git}"
+B12X_REF="${B12X_REF:-refs/pull/11/head}"
+VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
+VLLM_REF="${VLLM_REF:-dev/black-benediction}"
 LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
 CUTLASS_REPO="${CUTLASS_REPO:-https://github.com/NVIDIA/cutlass.git}"
 CUTLASS_REF="${CUTLASS_REF:-main}"
-VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.20.2+glm51kimi.cu132.20260518}"
+VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev279+black.benediction.b12x.cu132}"
 
 resolve_ref() {
   local repo="$1"
@@ -53,6 +55,7 @@ resolve_ref() {
 if [[ "${PIN_SOURCE_COMMITS}" == "1" ]]; then
   NCCL_COMMIT="${NCCL_COMMIT:-$(resolve_ref "${NCCL_REPO}" "${NCCL_REF}")}"
   FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-$(resolve_ref "${FLASHINFER_REPO}" "${FLASHINFER_REF}")}"
+  DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-$(resolve_ref "${DEEPGEMM_REPO}" "${DEEPGEMM_REF}")}"
   B12X_COMMIT="${B12X_COMMIT:-$(resolve_ref "${B12X_REPO}" "${B12X_REF}")}"
   VLLM_COMMIT="${VLLM_COMMIT:-$(resolve_ref "${VLLM_REPO}" "${VLLM_REF}")}"
   LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-$(resolve_ref "${LAUNCHER_REPO}" "${LAUNCHER_REF}")}"
@@ -60,6 +63,7 @@ if [[ "${PIN_SOURCE_COMMITS}" == "1" ]]; then
 else
   NCCL_COMMIT="${NCCL_COMMIT:-}"
   FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-}"
+  DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-}"
   B12X_COMMIT="${B12X_COMMIT:-}"
   VLLM_COMMIT="${VLLM_COMMIT:-}"
   LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-}"
@@ -76,6 +80,7 @@ echo "  VLLM_MAX_JOBS=${VLLM_MAX_JOBS}"
 echo "  NVCC_THREADS=${NVCC_THREADS}"
 echo "  VLLM_NVCC_THREADS=${VLLM_NVCC_THREADS}"
 echo "  FLASHINFER_REF=${FLASHINFER_REF} ${FLASHINFER_COMMIT}"
+echo "  DEEPGEMM_REF=${DEEPGEMM_REF} ${DEEPGEMM_COMMIT}"
 echo "  B12X_REF=${B12X_REF} ${B12X_COMMIT}"
 echo "  VLLM_REF=${VLLM_REF} ${VLLM_COMMIT}"
 echo "  LAUNCHER_REF=${LAUNCHER_REF} ${LAUNCHER_COMMIT}"
@@ -84,21 +89,21 @@ echo "  NCCL_REF=${NCCL_REF} ${NCCL_COMMIT}"
 
 if [[ "${BUILD_BASE_IMAGE}" == "1" ]]; then
   DOCKER_BUILDKIT=1 docker build \
-    --target glm-kimi-cu132-system-base-build \
+    --target vllm-b12x-cu132-system-base-build \
     --build-arg NCCL_REPO="${NCCL_REPO}" \
     --build-arg NCCL_REF="${NCCL_REF}" \
     --build-arg NCCL_COMMIT="${NCCL_COMMIT}" \
     --progress=plain \
-    -f Dockerfile.glm-kimi-cu132 \
+    -f Dockerfile.vllm-b12x-cu132 \
     -t "${SYSTEM_BASE_IMAGE}" \
     "$@" \
     .
 
   DOCKER_BUILDKIT=1 docker build \
-    --target glm-kimi-cu132-build-base-build \
-    --build-arg GLM_KIMI_CU132_SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE}" \
+    --target vllm-b12x-cu132-build-base-build \
+    --build-arg VLLM_B12X_CU132_SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE}" \
     --progress=plain \
-    -f Dockerfile.glm-kimi-cu132 \
+    -f Dockerfile.vllm-b12x-cu132 \
     -t "${BUILD_BASE_IMAGE_TAG}" \
     "$@" \
     .
@@ -110,8 +115,8 @@ if [[ "${BUILD_BASE_IMAGE}" == "1" ]]; then
 fi
 
 DOCKER_BUILDKIT=1 docker build \
-  --build-arg GLM_KIMI_CU132_SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE}" \
-  --build-arg GLM_KIMI_CU132_BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE_TAG}" \
+  --build-arg VLLM_B12X_CU132_SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE}" \
+  --build-arg VLLM_B12X_CU132_BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE_TAG}" \
   --build-arg MAX_JOBS="${MAX_JOBS}" \
   --build-arg VLLM_MAX_JOBS="${VLLM_MAX_JOBS}" \
   --build-arg NVCC_THREADS="${NVCC_THREADS}" \
@@ -122,6 +127,9 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg FLASHINFER_REPO="${FLASHINFER_REPO}" \
   --build-arg FLASHINFER_REF="${FLASHINFER_REF}" \
   --build-arg FLASHINFER_COMMIT="${FLASHINFER_COMMIT}" \
+  --build-arg DEEPGEMM_REPO="${DEEPGEMM_REPO}" \
+  --build-arg DEEPGEMM_REF="${DEEPGEMM_REF}" \
+  --build-arg DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT}" \
   --build-arg B12X_REPO="${B12X_REPO}" \
   --build-arg B12X_REF="${B12X_REF}" \
   --build-arg B12X_COMMIT="${B12X_COMMIT}" \
@@ -136,7 +144,7 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg CUTLASS_REF="${CUTLASS_REF}" \
   --build-arg CUTLASS_COMMIT="${CUTLASS_COMMIT}" \
   --progress=plain \
-  -f Dockerfile.glm-kimi-cu132 \
+  -f Dockerfile.vllm-b12x-cu132 \
   -t "${IMAGE}" \
   "$@" \
   .
