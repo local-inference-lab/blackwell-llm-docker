@@ -1,60 +1,268 @@
 # =============================================================================
-# SGLang inference stack for RTX Blackwell (sm_120a)
+# SGLang inference stack for RTX PRO 6000 Blackwell (sm_120a) — June 2026
+# CUDA 13.2.1 + torch 2.12.0+cu132 wheels + patched NCCL 2.30.4 + b12x 0.20.0
 #
-# Based on voipmonitor/torch:cu132 (torch + FlashInfer compiled from source,
-# system CUDA libs, no pip nvidia-cublas/cudnn/nccl version conflicts).
+# Replaces voipmonitor/sglang:cu130 (CUDA 13.0.1, torch 2.11, b12x 0.7.2-0.10).
+# Platform modernization based on Dockerfile.vllm-b12x-cu132 (June 2026);
+# SGLang source = voipmonitor/sglang @ blackwell-cu130 260194aa (2026-04-13
+# rebuild: upstream main 2026-04-08 + 14 PR cherry-picks + lukealonso b12x
+# integration incl. the "MoE path via apply" modelopt fix — never shipped).
 #
-# Contains all cherry-picks and patches from Dockerfile.cu130:
-#   - PCIe allreduce + b12x NVFP4 MoE backend (lukealonso)
-#   - PR #21314: CUTLASS NVFP4 GEMM for SM120
-#   - PR #21599: Adaptive speculative decoding (EAGLE topk=1)
-#   - PR #21601: FP4 KV cache SM120
-#   - PR #20059, #20114, #20182, #20275, #20433, #20439, #20445, #20448,
-#     #20460, #20479, #20534, #20949
-#   - Runtime patches (KLD logit capture, GLM MoE strip whitespace,
-#     FlashInfer backend assert, Triton SMEM autotuning, NVFP4 dual gencode)
+# Why NOT current upstream main: the June upstream refactored the CUDA-graph /
+# attention-replay architecture (#23906, #27192, #27193) — the b12x attention
+# backend would need a full port, not a rebase. Audit 2026-06-11:
+#   merged upstream since April: #20479 #21599 #20114 #20460 #21314 (+#20439
+#   superseded); obsolete runtime patches: fix-blackwell-flashinfer-backend-
+#   assert, fix-glm-moe-strip-whitespace, apply-indexcache, (all upstreamed) —
+#   but still REQUIRED here because the 260194aa tree predates those merges.
 #
-# Build:
-#   docker build --build-arg CACHEBUST=$(date +%s) \
-#     -f Dockerfile.sglang-cu132 -t voipmonitor/sglang:test-cu132 .
+# Build (cap sgl-kernel parallelism — see KERNEL_MAX_JOBS — and avoid
+# building while a co-located inference service is loading weights):
+#   podman build -f Dockerfile.sglang-cu132 -t voipmonitor/sglang:cu132 .
 # =============================================================================
 
-FROM voipmonitor/torch:cu132
+ARG CUDA_VERSION=13.2.1
+ARG UBUNTU_VERSION=24.04
+ARG PYTHON_VERSION=3.12
+ARG CUBLAS_CUDA13_VERSION=13.4.1.2-1
+ARG CUDNN_CUDA13_VERSION=9.22.0.52-1
 
-ARG MAX_JOBS=128
-ARG NVCC_THREADS=8
+ARG NCCL_REPO=https://github.com/local-inference-lab/nccl-canonical.git
+ARG NCCL_REF=canonical/cu132-nccl2304-amd-noxml
+ARG NCCL_COMMIT=dfab7c1ace32da250ba97757879429c341b7bcf9
+ARG NCCL_SONAME=libnccl.so.2.30.4
+
+ARG SGLANG_REPO=https://github.com/voipmonitor/sglang.git
+ARG SGLANG_COMMIT=260194aafb4f90b948140acce4a83b925fe78df3
+
+ARG TORCH_VERSION=2.12.0+cu132
+ARG TORCHVISION_VERSION=0.27.0+cu132
+ARG CUTLASS_DSL_VERSION=4.5.2
+ARG B12X_VERSION=0.20.0
+ARG FLASHINFER_VERSION=0.6.12
+
 ARG TORCH_CUDA_ARCH_LIST="12.0a"
 ARG CMAKE_CUDA_ARCHITECTURES="120a"
 ARG FLASHINFER_CUDA_ARCH_LIST="12.0a"
-ARG CACHEBUST=0
+# sgl-kernel compile parallelism. 48 jobs OOMed a 251GB host (and killed the
+# production service); 12 peaks ~100GB alongside a loaded serving stack.
+ARG KERNEL_MAX_JOBS=12
 
-ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
-    FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST} \
-    MAX_JOBS=${MAX_JOBS} \
-    NVCC_THREADS=${NVCC_THREADS} \
-    FLASHINFER_DISABLE_VERSION_CHECK=1
+# =============================================================================
+# Stage 0: patched NCCL 2.30.4 (local-inference-lab PCIe-tuned canonical)
+# =============================================================================
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS nccl-build
+
+ARG NCCL_REPO
+ARG NCCL_REF
+ARG NCCL_COMMIT
+ARG NCCL_SONAME
+ARG DEBIAN_FRONTEND=noninteractive
+
+
+RUN for attempt in 1 2 3 4 5; do \
+      if apt-get update; then break; fi; \
+      if [ "${attempt}" = "5" ]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --no-install-recommends \
+    git python3 build-essential make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
+RUN git clone "${NCCL_REPO}" nccl \
+ && cd nccl \
+ && git checkout "${NCCL_REF}" \
+ && test "$(git rev-parse HEAD)" = "${NCCL_COMMIT}" \
+ && make -j"$(nproc)" src.build CUDA_HOME=/usr/local/cuda \
+ && strings "build/lib/${NCCL_SONAME}" | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2"
 
 # =============================================================================
-# CUTLASS headers from git (latest, needed for blockscaled_layout.py)
+# Stage 1: base — CUDA 13.2.1 + latest 13.2-compatible cuBLAS/cuDNN + Python
 # =============================================================================
-RUN git clone --depth 1 https://github.com/NVIDIA/cutlass.git /build/cutlass && \
-    grep "CUTLASS_MAJOR\|CUTLASS_MINOR\|CUTLASS_PATCH" /build/cutlass/include/cutlass/version.h | head -3
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS base
 
-# Patch cutlass-dsl: copy blockscaled_layout.py from git main (adds sm120_make_smem_layout_sfa)
-RUN CUTLASS_DSL=$(python -c 'import cutlass.utils.blockscaled_layout as m; print(m.__file__)') && \
-    cp /build/cutlass/python/CuTeDSL/cutlass/utils/blockscaled_layout.py "$CUTLASS_DSL" && \
-    python -c 'from cutlass.utils.blockscaled_layout import sm120_make_smem_layout_sfa; print("OK: sm120_make_smem_layout_sfa available")'
+ARG PYTHON_VERSION
+ARG CUBLAS_CUDA13_VERSION
+ARG CUDNN_CUDA13_VERSION
+ARG CUDA_VERSION
+ARG NCCL_SONAME
+ARG DEBIAN_FRONTEND=noninteractive
+
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Toolkit stays 13.2.1; overlay the newest CUDA-13.2-compatible cuBLAS/cuDNN
+RUN for attempt in 1 2 3 4 5; do \
+      if apt-get update; then break; fi; \
+      if [ "${attempt}" = "5" ]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --allow-change-held-packages --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+    python3-pip \
+    git git-lfs wget curl ca-certificates \
+    build-essential cmake ninja-build ccache pkg-config patchelf \
+    libssl-dev libffi-dev libjpeg-dev libpng-dev \
+    libgomp1 numactl libnuma-dev libibverbs-dev pciutils \
+    libcublas13-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcublas13-dev-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    cublas-cuda-13=${CUBLAS_CUDA13_VERSION} \
+    libcudnn9-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-dev-cuda-13=${CUDNN_CUDA13_VERSION} \
+    libcudnn9-headers-cuda-13=${CUDNN_CUDA13_VERSION} \
+    && ldconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# Point the CUDA toolkit dir at the overlaid cuBLAS (same trick as the
+# vllm-b12x-cu132 base — toolkit libs would otherwise shadow the new ones)
+RUN cublas="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublas.so.13)" \
+ && cublas_lt="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublasLt.so.13)" \
+ && cublas_name="$(basename "${cublas}")" \
+ && cublas_lt_name="$(basename "${cublas_lt}")" \
+ && test -f "${cublas}" && test -f "${cublas_lt}" \
+ && for cuda_libdir in /usr/local/cuda/targets/x86_64-linux/lib /usr/local/cuda-${CUDA_VERSION}/targets/x86_64-linux/lib; do \
+      if [ -d "${cuda_libdir}" ]; then \
+        cuda_libdir="$(readlink -f "${cuda_libdir}")"; \
+        rm -f "${cuda_libdir}"/libcublas.so "${cuda_libdir}"/libcublas.so.13 "${cuda_libdir}"/libcublas.so.13.*; \
+        rm -f "${cuda_libdir}"/libcublasLt.so "${cuda_libdir}"/libcublasLt.so.13 "${cuda_libdir}"/libcublasLt.so.13.*; \
+        ln -s "${cublas}" "${cuda_libdir}/${cublas_name}"; \
+        ln -s "${cublas_name}" "${cuda_libdir}/libcublas.so.13"; \
+        ln -s libcublas.so.13 "${cuda_libdir}/libcublas.so"; \
+        ln -s "${cublas_lt}" "${cuda_libdir}/${cublas_lt_name}"; \
+        ln -s "${cublas_lt_name}" "${cuda_libdir}/libcublasLt.so.13"; \
+        ln -s libcublasLt.so.13 "${cuda_libdir}/libcublasLt.so"; \
+      fi; \
+    done \
+ && ldconfig
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+ && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1
+
+RUN python${PYTHON_VERSION} -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}"
+RUN pip install --upgrade pip setuptools wheel
+
+ENV CCACHE_DIR=/root/.ccache \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+
+COPY --from=nccl-build /build/nccl/build/lib/${NCCL_SONAME} /opt/${NCCL_SONAME}
 
 # =============================================================================
-# Python dependencies (no torch/nvidia reinstalls — all from base image)
+# Stage 2: deps — torch 2.12 cu132 + cutlass-dsl + b12x + flashinfer
 # =============================================================================
+FROM base AS deps
 
-# transformers (pinned — 5.4+ breaks Qwen3.5 composite config)
+ARG TORCH_VERSION
+ARG TORCHVISION_VERSION
+ARG CUTLASS_DSL_VERSION
+ARG B12X_VERSION
+ARG FLASHINFER_VERSION
+ARG NCCL_SONAME
+ARG TORCH_CUDA_ARCH_LIST
+ARG FLASHINFER_CUDA_ARCH_LIST
+
+
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
+
+# -- PyTorch 2.12.0 cu132 official wheels --------------------------------------
+RUN pip install \
+    --index-url https://download.pytorch.org/whl/cu132 \
+    "torch==${TORCH_VERSION}" \
+    "torchvision==${TORCHVISION_VERSION}"
+
+# -- Patched NCCL 2.30.4: replace the pip wheel's lib so torch loads it --------
+# (sglang's pynccl additionally honors SGLANG_NCCL_SO_PATH, set in final stage)
+# NOTE: 'nvidia' is a namespace package (find_spec origin is None) — locate the
+# libs by searching site-packages directly. Fail the build if none found, and
+# verify the replaced libs really report >= 2.30.4 (encoded 23004) via ctypes.
+RUN SITE=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+ && FOUND=0 \
+ && for f in $(find "$SITE" -name 'libnccl.so.2*' -not -name '*.orig' -type f); do \
+      cp "$f" "$f.orig"; \
+      cp /opt/${NCCL_SONAME} "$f"; \
+      FOUND=1; \
+      echo "OK: replaced $f with patched 2.30.4"; \
+    done \
+ && if [ "$FOUND" = "0" ]; then echo "ERROR: no pip libnccl.so found to replace"; exit 1; fi \
+ && python -c "import ctypes,glob,sysconfig; site=sysconfig.get_paths()['purelib']; \
+libs=[p for p in glob.glob(site+'/**/libnccl.so.2*', recursive=True) if not p.endswith('.orig')]; \
+assert libs, 'no libnccl found'; \
+vals={p: (lambda l,v: (l.ncclGetVersion(ctypes.byref(v)), v.value)[1])(ctypes.CDLL(p), ctypes.c_int()) for p in libs}; \
+print(vals); \
+assert all(v >= 23004 for v in vals.values()), f'patched NCCL not active: {vals}'"
+
+# -- CUTLASS DSL 4.5.2 (libs-cu13 reinstalled LAST — NVVM/ptxas 13.x must win) --
+RUN pip install "nvidia-cutlass-dsl[cu13]==${CUTLASS_DSL_VERSION}" \
+ && pip install --force-reinstall --no-deps "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
+ && python -c "from cutlass._mlir._mlir_libs import _cutlass_ir; print('OK: cutlass MLIR loaded')"
+
+# sm120 blockscaled layout helper must exist (cutlass-dsl >= 4.5 ships it;
+# the 4.4.2-era git-overlay hack is no longer needed)
+RUN python -c 'from cutlass.utils.blockscaled_layout import sm120_make_smem_layout_sfa; print("OK: sm120_make_smem_layout_sfa available")'
+
+# -- b12x (SM120 CuTe-DSL NVFP4 GEMM/MoE + paged attention) --------------------
+# deps installed explicitly above/below; --no-deps keeps torch untouched
+RUN pip install "apache-tvm-ffi>=0.1.6,!=0.1.8,!=0.1.8.post0,<0.2" rich \
+ && pip install "b12x==${B12X_VERSION}" --no-deps \
+ && python -c "import b12x; print('b12x', getattr(b12x,'__version__','?'))"
+
+# -- FlashInfer (JIT mode, kernels compile at runtime into /cache/jit) ---------
+RUN pip install "nvidia-cudnn-frontend>=1.13.0" pynvml nvidia-ml-py packaging numpy einops \
+        requests click tabulate tqdm \
+ && pip install "flashinfer-python==${FLASHINFER_VERSION}" --no-deps \
+ && pip install "flashinfer-cubin==${FLASHINFER_VERSION}" --no-deps || true
+ENV FLASHINFER_DISABLE_VERSION_CHECK=1
+RUN python -c "import flashinfer; print('FlashInfer:', flashinfer.__version__)"
+
+# -- transformers pinned: 5.4+ breaks Qwen3.5 composite config -----------------
 RUN pip install "transformers>=5.3.0,<5.4"
 
-# Safe packages (no torch dependency)
+RUN python -c "import torch; v=torch.__version__; print('torch', v); assert v.startswith('2.12.0+cu132'), v"
+
+# =============================================================================
+# Stage 3: SGLang fork @ 260194aa + sgl-kernel
+# =============================================================================
+FROM deps AS sglang-build
+
+ARG SGLANG_REPO
+ARG SGLANG_COMMIT
+ARG KERNEL_MAX_JOBS
+ARG TORCH_CUDA_ARCH_LIST
+ARG CMAKE_CUDA_ARCHITECTURES
+
+
+RUN git clone "${SGLANG_REPO}" /opt/sglang \
+ && cd /opt/sglang \
+ && git checkout "${SGLANG_COMMIT}" \
+ && git submodule update --init --recursive \
+ && git log -1 --format='sglang fork @ %H %s'
+
+# Apply the full local pick set (python + sgl-kernel) BEFORE the kernel build
+# so sgl-kernel compiles with #25775 (case-512 topk gating softmax) included.
+# Same diff the runtime hotfix layer uses, unfiltered here.
+COPY patches/cherry-picks-20260611.diff /tmp/picks.diff
+RUN cd /opt/sglang \
+ && git apply --stat /tmp/picks.diff | tail -2 \
+ && git apply /tmp/picks.diff \
+ && rm /tmp/picks.diff \
+ && echo "OK: pick set applied to source tree (incl. sgl-kernel)"
+
+WORKDIR /opt/sglang
+
+# -- SGLang runtime deps (no torch reinstalls) ---------------------------------
 RUN pip install \
         ipython orjson \
         aiohttp fastapi uvicorn uvloop \
@@ -63,157 +271,84 @@ RUN pip install \
         multipart python-multipart decord soundfile librosa \
         prometheus-client prometheus-fastapi-instrumentator \
         partial_json_parser tiktoken modelscope pybase64 \
-        huggingface_hub \
-        setproctitle gguf dill pyzmq \
+        huggingface_hub hf_transfer \
+        setproctitle gguf dill pyzmq einops \
         lark-parser \
         sniffio distro loguru jsonschema \
         accelerate safetensors tokenizers sentencepiece bitsandbytes \
-        rich click tabulate \
-    2>/dev/null || true
-
-# Packages that might pull torch — install with --no-deps
+        click tabulate \
+    || true
 RUN pip install --no-deps \
         xgrammar outlines compressed-tensors interegular \
-    2>/dev/null || true
+        openai anthropic openai-harmony fastsafetensors \
+    || true
+RUN pip install --no-deps xformers || true
 
-# fastsafetensors + xformers (optional, --no-deps)
-RUN pip install fastsafetensors || true
-RUN pip install xformers --no-deps || true
+# cmake >= 3.26 for sgl-kernel; scikit-build-core + uv for its Makefile
+RUN pip install --upgrade cmake scikit-build-core uv
 
-# b12x: TP-only NVFP4 MoE/GEMM backend for SM120 (--no-deps to avoid torch conflicts)
-RUN pip install b12x --no-deps
-
-# Upgrade cmake (sgl-kernel needs cmake >= 3.26)
-RUN pip install --upgrade cmake scikit-build-core
-
-# =============================================================================
-# SGLang from source + cherry-picks
-# =============================================================================
-RUN git clone --recursive https://github.com/sgl-project/sglang.git /opt/sglang
-WORKDIR /opt/sglang
-
-# -- Copy conflict resolution scripts -----------------------------------------
-COPY patches/fix-cuda-arch-suffix.py /tmp/patches/fix-cuda-arch-suffix.py
-COPY patches/fix-mamba-leak-conflict.py /tmp/patches/fix-mamba-leak-conflict.py
-COPY patches/fix-fp4-kvcache-conflict.py /tmp/patches/fix-fp4-kvcache-conflict.py
-
-# -- Cherry-pick unmerged PRs --------------------------------------------------
-RUN git config user.email "build@docker" && git config user.name "build" && \
-    git fetch origin \
-        pull/20059/head:pr-20059 \
-        pull/20114/head:pr-20114 \
-        pull/20182/head:pr-20182 \
-        pull/20275/head:pr-20275 \
-        pull/20433/head:pr-20433 \
-        pull/20439/head:pr-20439 \
-        pull/20445/head:pr-20445 \
-        pull/20448/head:pr-20448 \
-        pull/20460/head:pr-20460 \
-        pull/20479/head:pr-20479 \
-        pull/20534/head:pr-20534 \
-        pull/20949/head:pr-20949 \
-        pull/21599/head:pr-21599 \
-        pull/21601/head:pr-21601 && \
-    echo "=== PR #19963: Fix arch suffix (adapted for refactored code) ===" && \
-    python3 /tmp/patches/fix-cuda-arch-suffix.py && \
-    echo "=== PR #20439: Fix AWQ modules_to_not_convert for FusedMoE ===" && \
-    git cherry-pick --no-commit 23aa58fa1b7c && \
-    echo "=== PR #20059: Fuse normal_decode_set_metadata into Triton kernel ===" && \
-    git cherry-pick --no-commit 1e5d20c64aac e0137cc66274 3345601bab22 556f00b70aec 39f312d94c5e && \
-    echo "=== PR #20114: support HybridLinearAttnBackend in TboAttnBackend ===" && \
-    git cherry-pick --no-commit b961a4124855 && \
-    echo "=== PR #20275: GLM-5 thinking budget logit processor ===" && \
-    git cherry-pick --no-commit 45baf2e56ab5 42b872677423 && \
-    echo "=== PR #20448: mm_input_embeds in piecewise graph replay ===" && \
-    git cherry-pick --no-commit 6bcb570f95a8 && \
-    echo "=== PR #20460: HiCache synchronization for context parallelism ===" && \
-    git cherry-pick --no-commit 614b7815b53f && \
-    echo "=== PR #20479: Triton MLA FP8 KV cache (SM120) ===" && \
-    git cherry-pick --no-commit 3019db47e505 64cc6ffa1d4d 3e8774f6f6d1 0e25a1cb74c4 b6551f2ba4af c69aa5debd47 75d4edbbadf9 && \
-    echo "=== PR #20534: FP8 K/K_scale for CP indexer prefill gather ===" && \
-    git cherry-pick --no-commit 4578257732bf f695b901400833 && \
-    echo "=== PR #20949: cuBLAS/cuBLASLt warmup for BF16 ===" && \
-    git cherry-pick --no-commit f6c25c12c && \
-    echo "=== PR #21599: Adaptive speculative decoding for EAGLE topk=1 ===" && \
-    git cherry-pick --no-commit 06488d367 5f9b9554a 0fc903cc5 6e8f2abe4 e486262df 3200fa2f9 3bd9c1e15 && \
-    echo "=== PR #20445: Avoid GPU syncs in mamba/GDN track metadata ===" && \
-    git cherry-pick --no-commit cc4a43a1698bd61acbe03af6656f366d963476ce && \
-    echo "=== PR #20433: Async extra buffer track indices (+15% MTP throughput) ===" && \
-    git cherry-pick --no-commit 0433bc88b5ae59b397113fa297b3948fc0910a8a dc0a80235e9175cc4fdb16de900c97134ab408f7 && \
-    echo "=== PR #20182: Fix mamba memory leak (conflict: hisparse_coordinator) ===" && \
-    git cherry-pick --no-commit a38e09ac8ace2676de23d6b646bd15312a3afa6e; \
-    python3 /tmp/patches/fix-mamba-leak-conflict.py && \
-    git add -A && \
-    git cherry-pick --no-commit 6be4ccd441fb588f53cbc474f774c34dde9b571a 27d36e52e1eed766b41b00576e2f081e2fc5e87a && \
-    echo "=== PR #21601: FP4 KV cache SM120 (conflict: flashinfer+trtllm backends) ===" && \
-    git cherry-pick --no-commit 4473ed79fa3054c7fa40ae74717c2cd21d530a15; \
-    python3 /tmp/patches/fix-fp4-kvcache-conflict.py && \
-    git add -A && \
-    echo "=== All cherry-picks applied ==="
-
-# -- PR #21314: CUTLASS NVFP4 GEMM for SM120 (git diff to avoid conflicts) ----
-RUN git fetch origin pull/21314/head:pr-21314 && \
-    git diff $(git merge-base HEAD pr-21314)..pr-21314 -- \
-        python/sglang/jit_kernel/csrc/gemm/nvfp4/ \
-        python/sglang/srt/layers/quantization/ \
-        python/sglang/srt/server_args.py \
-    | git apply --3way --allow-empty && \
-    git add -A
-
-# -- b12x integration (lukealonso fork, no PCIe allreduce) ---------------------
-COPY patches/fix-pcie-allreduce-conflict.py /tmp/patches/fix-pcie-allreduce-conflict.py
-COPY patches/fix-modelopt-merge.py /tmp/patches/fix-modelopt-merge.py
-RUN git remote add lukealonso https://github.com/lukealonso/sglang.git && \
-    git fetch lukealonso c70c22a15a16961c65b8c61f7f18fae07995ec38
-RUN echo "=== b12x backend (c70c22a1) ===" && \
-    git cherry-pick --no-commit c70c22a15a16961c65b8c61f7f18fae07995ec38; \
-    python /tmp/patches/fix-pcie-allreduce-conflict.py && \
-    python /tmp/patches/fix-modelopt-merge.py && \
-    git add -A && \
-    python3 -c "import ast,glob; [ast.parse(open(f,encoding='utf-8-sig').read(),f) for f in glob.glob('python/sglang/srt/**/*.py',recursive=True)]" && \
-    echo "=== b12x applied, syntax verified ==="
-
-# =============================================================================
-# Triton MoE configs for Blackwell GPUs
-# =============================================================================
+# -- Triton MoE tuned configs for RTX PRO 6000 Blackwell -----------------------
 COPY configs/ /tmp/triton-configs/
-RUN SGLANG_PKG="/opt/sglang/python" && \
-    TRITON_CONFIGS_DIR="${SGLANG_PKG}/sglang/srt/layers/moe/fused_moe_triton/configs/triton_3_6_0" && \
-    mkdir -p "$TRITON_CONFIGS_DIR" && \
-    for f in /tmp/triton-configs/*.json; do \
+RUN SGLANG_PKG="/opt/sglang/python" \
+ && TRITON_VER=$(python -c "import triton; print(triton.__version__.replace('.','_'))") \
+ && TRITON_CONFIGS_DIR="${SGLANG_PKG}/sglang/srt/layers/moe/fused_moe_triton/configs/triton_${TRITON_VER}" \
+ && mkdir -p "$TRITON_CONFIGS_DIR" \
+ && for f in /tmp/triton-configs/*.json; do \
         base=$(basename "$f"); \
         cp "$f" "$TRITON_CONFIGS_DIR/$base"; \
         cp "$f" "${TRITON_CONFIGS_DIR}/$(echo "$base" | sed 's/\.json$/_down.json/')"; \
         nodt=$(echo "$base" | sed 's/,dtype=[^.]*//'); \
         cp "$f" "$TRITON_CONFIGS_DIR/$nodt"; \
         cp "$f" "${TRITON_CONFIGS_DIR}/$(echo "$nodt" | sed 's/\.json$/_down.json/')"; \
-    done && \
-    rm -rf /tmp/triton-configs && \
-    ls -la "$TRITON_CONFIGS_DIR/"
+    done \
+ && rm -rf /tmp/triton-configs \
+ && echo "MoE configs installed to ${TRITON_CONFIGS_DIR}" && ls "$TRITON_CONFIGS_DIR" | head -4
 
-# =============================================================================
-# Build sgl-kernel LAST (after all pip deps are finalized)
-# =============================================================================
+# -- Build sgl-kernel (memory-capped parallelism — see KERNEL_MAX_JOBS note) ---
 WORKDIR /opt/sglang/sgl-kernel
 RUN --mount=type=cache,target=/root/.ccache \
-    TORCH_CUDA_ARCH_LIST="12.0a" \
-    CMAKE_CUDA_ARCHITECTURES="120a" \
-    MAX_JOBS=${MAX_JOBS} \
+    TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
+    CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
+    MAX_JOBS=${KERNEL_MAX_JOBS} \
     make build CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_BELOW_SM90=0"
 
-# Install SGLang Python package (editable)
+# -- SGLang editable install ----------------------------------------------------
 WORKDIR /opt/sglang
 RUN pip install --no-build-isolation --no-deps -e "./python[all]"
+RUN python -c "import sglang; print('SGLang', getattr(sglang,'__version__','editable'))"
+
+# Clean caches
+RUN pip cache purge 2>/dev/null || true \
+ && rm -rf /root/.cache/pip /tmp/pip-* \
+ && find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+ && find /opt/venv -name "*.pyc" -delete 2>/dev/null || true
 
 # =============================================================================
-# Runtime env
+# Stage 4: final — runtime image (devel base: FlashInfer JIT needs nvcc)
 # =============================================================================
-ENV NCCL_P2P_DISABLE=0 \
+FROM base AS final
+
+ARG TORCH_CUDA_ARCH_LIST
+ARG FLASHINFER_CUDA_ARCH_LIST
+ARG NCCL_SONAME
+ARG BUILD_ID=unknown
+
+
+COPY --from=sglang-build /opt/venv /opt/venv
+COPY --from=sglang-build /opt/sglang /opt/sglang
+
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST} \
+    FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=1 \
+    NCCL_P2P_DISABLE=0 \
     NCCL_IB_DISABLE=0 \
-    CUDA_DEVICE_MAX_CONNECTIONS=32
+    CUDA_DEVICE_MAX_CONNECTIONS=32 \
+    SGLANG_NCCL_SO_PATH=/opt/${NCCL_SONAME}
 
-# JIT cache directories
-ENV TRITON_CACHE_DIR=/cache/jit/triton \
+RUN echo "${BUILD_ID}" > /etc/jit-build-id
+ENV JIT_BUILD_ID=${BUILD_ID} \
+    TRITON_CACHE_DIR=/cache/jit/triton \
     TORCH_EXTENSIONS_DIR=/cache/jit/torch_extensions \
     FLASHINFER_WORKSPACE_BASE=/cache/jit/flashinfer \
     TVM_FFI_CACHE_DIR=/cache/jit/tvm-ffi \
@@ -222,53 +357,64 @@ ENV TRITON_CACHE_DIR=/cache/jit/triton \
 
 RUN mkdir -p /cache/jit/triton /cache/jit/torch_extensions
 
-# =============================================================================
-# Runtime patches
-# =============================================================================
+ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# CCCL symlink (CUDA 13.2 moved headers under cccl/ prefix)
+RUN if [ -d /usr/local/cuda/targets/x86_64-linux/include/cccl ] && \
+       [ ! -e /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda ]; then \
+        ln -sf /usr/local/cuda/targets/x86_64-linux/include/cuda \
+               /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda; \
+    fi; \
+    test -d /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda && \
+    ln -sf /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda /usr/local/cuda/include/cuda || true
+
+# libcudart.so.12 compat symlink (prebuilt JIT-cache binaries may want it)
+RUN CUDA_LIB=$(find /usr/local/cuda/targets -name 'libcudart.so' -print -quit 2>/dev/null) \
+ && if [ -n "$CUDA_LIB" ]; then \
+        ln -sf "$CUDA_LIB" "$(dirname $CUDA_LIB)/libcudart.so.12"; \
+    fi
+
+COPY jit-cache-invalidate.sh /usr/local/bin/jit-cache-invalidate.sh
+RUN chmod +x /usr/local/bin/jit-cache-invalidate.sh \
+ && echo 'source /usr/local/bin/jit-cache-invalidate.sh' >> /root/.bashrc
+ENV BASH_ENV=/usr/local/bin/jit-cache-invalidate.sh
+
+COPY entrypoint-sglang.sh /entrypoint.sh
+COPY scripts/sglang_kld_eval.py /workspace/sglang_kld_eval.py
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /workspace
+
+# -- Runtime patches -------------------------------------------------------------
+# Still needed on the 260194aa tree (upstream merged equivalents only AFTER it):
+#   fix-blackwell-flashinfer-backend-assert (required: --prefill-attention-backend
+#     flashinfer on Blackwell hybrid GDN), fix-glm-moe-strip-whitespace,
+#   apply-indexcache, fix-nvfp4-dual-gencode, sglang-kld-logit-capture (eval).
+# fix-triton-smem-autotuning-sm120 targets torch._inductor — validated against
+#   the installed torch (script skips gracefully if torch 2.12 moved the marker).
+# fix-pcie-allreduce-conflict is a no-op on a committed tree (kept for parity).
 COPY patches/sglang-kld-logit-capture.py /tmp/patches/
 COPY patches/fix-glm-moe-strip-whitespace.py /tmp/patches/
 COPY patches/apply-indexcache.py /tmp/patches/
 COPY patches/fix-blackwell-flashinfer-backend-assert.py /tmp/patches/
-COPY patches/fix-pcie-allreduce-conflict.py /tmp/patches/
 COPY patches/fix-triton-smem-autotuning-sm120.py /tmp/patches/
 COPY patches/fix-nvfp4-dual-gencode.py /tmp/patches/
-RUN python /tmp/patches/sglang-kld-logit-capture.py && \
-    python /tmp/patches/fix-glm-moe-strip-whitespace.py && \
-    python /tmp/patches/apply-indexcache.py && \
-    python /tmp/patches/fix-blackwell-flashinfer-backend-assert.py && \
-    python /tmp/patches/fix-pcie-allreduce-conflict.py && \
-    python /tmp/patches/fix-triton-smem-autotuning-sm120.py && \
-    python /tmp/patches/fix-nvfp4-dual-gencode.py && \
-    rm -rf /tmp/patches
+COPY patches/fix-pcie-oneshot-nccl-group.py /tmp/patches/
+RUN python /tmp/patches/sglang-kld-logit-capture.py \
+ && python /tmp/patches/fix-glm-moe-strip-whitespace.py \
+ && python /tmp/patches/apply-indexcache.py \
+ && python /tmp/patches/fix-blackwell-flashinfer-backend-assert.py \
+ && python /tmp/patches/fix-triton-smem-autotuning-sm120.py \
+ && python /tmp/patches/fix-nvfp4-dual-gencode.py \
+ && python /tmp/patches/fix-pcie-oneshot-nccl-group.py \
+ && rm -rf /tmp/patches
 
-# =============================================================================
-# Entrypoint + scripts
-# =============================================================================
-COPY entrypoint-sglang.sh /entrypoint.sh
-COPY scripts/sglang_kld_eval.py /workspace/sglang_kld_eval.py
-COPY jit-cache-invalidate.sh /usr/local/bin/jit-cache-invalidate.sh
-RUN chmod +x /entrypoint.sh /usr/local/bin/jit-cache-invalidate.sh && \
-    echo 'source /usr/local/bin/jit-cache-invalidate.sh' >> /root/.bashrc
-ENV BASH_ENV=/usr/local/bin/jit-cache-invalidate.sh
+# -- Smoke test (no GPU at build time) -------------------------------------------
+# NOTE: plain COPY, not a heredoc — podman/buildah 1.33 lacks heredoc support
+COPY smoke_test_cu132.py /tmp/smoke_test.py
+RUN python /tmp/smoke_test.py && rm /tmp/smoke_test.py
 
-WORKDIR /workspace
-
-# Reinstall cutlass-dsl-libs-cu13 LAST (in case anything overwrote it)
-RUN pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu13
-
-# =============================================================================
-# Smoke test
-# =============================================================================
-RUN python -c "\
-import torch; \
-import flashinfer; \
-import transformers; \
-import sglang; \
-print(f'PyTorch:      {torch.__version__}'); \
-print(f'CUDA:         {torch.version.cuda}'); \
-print(f'FlashInfer:   {flashinfer.__version__}'); \
-print(f'Transformers: {transformers.__version__}'); \
-print(f'SGLang:       {getattr(sglang, \"__version__\", \"editable-install\")}'); \
-"
+COPY profiles/ /profiles/
+COPY configs/nccl_graph_opt.xml /etc/nccl_graph_opt.xml
 
 ENTRYPOINT ["/entrypoint.sh"]
