@@ -5076,6 +5076,89 @@ index ecaab3cc0e..c805502306 100644
          # Set constant
          from sglang.srt.speculative.eagle_info import EagleDraftInput
  
+diff --git a/python/sglang/srt/utils/hf_transformers_utils.py b/python/sglang/srt/utils/hf_transformers_utils.py
+index b928b08d4d..c2cf0b9a31 100644
+--- a/python/sglang/srt/utils/hf_transformers_utils.py
++++ b/python/sglang/srt/utils/hf_transformers_utils.py
+@@ -475,6 +475,69 @@ def _ensure_gguf_version():
+         pass
+ 
+ 
++_ROPE_OVERRIDE_KEYS = ("rope_scaling", "rope_parameters")
++
++# Sub-config attributes that may hold the language-model config of a
++# composite (VLM / omni) model. Mirrors get_hf_text_config priority.
++# (Ported from upstream PR #27983, issue #27974.)
++_TEXT_SUB_CONFIG_ATTRS = (
++    "thinker_config",
++    "llm_config",
++    "language_config",
++    "text_config",
++)
++
++
++def _resolve_text_sub_config(config):
++    for attr in _TEXT_SUB_CONFIG_ATTRS:
++        sub = getattr(config, attr, None)
++        if isinstance(sub, PretrainedConfig):
++            if attr == "thinker_config":
++                inner = getattr(sub, "text_config", None)
++                if isinstance(inner, PretrainedConfig):
++                    return inner
++            return sub
++    return None
++
++
++def _merged_rope_override(config, key, value):
++    existing = getattr(config, key, None)
++    if isinstance(value, dict) and isinstance(existing, dict):
++        return {**existing, **value}
++    return value
++
++
++def apply_model_override_args(config, model_override_args: dict) -> None:
++    """Apply --json-model-override-args to a (possibly composite) config.
++
++    Ported from upstream PR #27983 (issue #27974): recurse into sub-configs
++    for the nested form (was: crash), merge partial rope dicts, and mirror
++    flat rope overrides onto the text sub-config (was: silent no-op).
++    """
++    flat_overrides = {}
++    for key, value in model_override_args.items():
++        existing = getattr(config, key, None)
++        if isinstance(value, dict) and isinstance(existing, PretrainedConfig):
++            apply_model_override_args(existing, value)
++        elif key in _ROPE_OVERRIDE_KEYS:
++            flat_overrides[key] = _merged_rope_override(config, key, value)
++        else:
++            flat_overrides[key] = value
++    if flat_overrides:
++        config.update(flat_overrides)
++
++    rope_keys = [k for k in _ROPE_OVERRIDE_KEYS if k in flat_overrides]
++    if rope_keys:
++        text_config = _resolve_text_sub_config(config)
++        if text_config is not None:
++            text_config.update(
++                {
++                    k: _merged_rope_override(text_config, k, model_override_args[k])
++                    for k in rope_keys
++                }
++            )
++
++
+ @lru_cache_frozenset(maxsize=32)
+ def get_config(
+     model: str,
+@@ -652,7 +715,7 @@ def get_config(
+         config.update({"architectures": ["LongcatFlashForCausalLM"]})
+ 
+     if model_override_args:
+-        config.update(model_override_args)
++        apply_model_override_args(config, model_override_args)
+ 
+     # Special architecture mapping check for GGUF models
+     if is_gguf:
 diff --git a/python/sglang/srt/utils/patch_tokenizer.py b/python/sglang/srt/utils/patch_tokenizer.py
 index 7ad1114da8..1d083180f4 100644
 --- a/python/sglang/srt/utils/patch_tokenizer.py
