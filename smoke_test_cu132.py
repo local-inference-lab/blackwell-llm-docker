@@ -34,8 +34,12 @@ from sglang.srt.server_args import ServerArgs
 
 _parser = argparse.ArgumentParser()
 ServerArgs.add_cli_args(_parser)
-_args = _parser.parse_args(['--model-path', 'smoke-test-dummy',
-                            '--enable-strict-thinking'])
+# --enable-strict-thinking exists only once the cherry-pick layer is applied;
+# this script also gates the base image build, so probe before passing it.
+_argv = ['--model-path', 'smoke-test-dummy']
+if '--enable-strict-thinking' in _parser._option_string_actions:
+    _argv.append('--enable-strict-thinking')
+_args = _parser.parse_args(_argv)
 try:
     ServerArgs.from_cli_args(_args)
 except AttributeError as e:
