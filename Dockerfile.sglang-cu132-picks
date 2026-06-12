@@ -1,0 +1,33 @@
+# Cherry-pick layer on the cu132 image (2026-06-11):
+#   #21593 tool-call constrained decoding fixes for native-format models
+#   #21722 structural tags for strict tool calling (needs xgrammar>=0.2.0)
+#   #23953 two-phase reasoning grammar + --enable-strict-thinking
+#   #23476/#26433 JSON Schema type normalization for tool params
+#   #27463 topk>1 tree drafting for mamba/hybrid models (EXPERIMENTAL on this
+#          tree at topk>1 — identical behavior at production topk=1)
+# Source branch: sglang-fork blackwell-cu132-picks (260194aa + 6 picks);
+# patch generated via `git diff 260194aa..blackwell-cu132-picks`.
+FROM localhost/voipmonitor/sglang:cu132
+
+COPY patches/cherry-picks-20260611.diff /tmp/picks.diff
+# plain apply (no --3way: the tree is intentionally dirty from runtime patches,
+# so the index can't be used); only runtime package paths matter in the image
+RUN cd /opt/sglang \
+ && git apply --include='python/sglang/*' --stat /tmp/picks.diff | tail -2 \
+ && git apply --include='python/sglang/*' /tmp/picks.diff \
+ && rm /tmp/picks.diff \
+ && python -c "import ast,glob; [ast.parse(open(f,encoding='utf-8-sig').read(),f) for f in glob.glob('python/sglang/srt/**/*.py',recursive=True)]" \
+ && echo "OK: picks applied, full srt syntax check passed"
+
+# 21722 needs xgrammar>=0.2.0; the cu132 base already ships 0.2.1 — verify only
+RUN python -c "from importlib.metadata import version; v=version('xgrammar'); print('xgrammar', v); assert tuple(map(int, v.split('.')[:2])) >= (0,2), v"
+
+COPY smoke_test_cu132.py /tmp/smoke_test.py
+# from_cli_args is the real gate: it maps EVERY dataclass field from the
+# argparse namespace, so an orphaned field (added without its CLI arg)
+# crashes here — exactly the failure mode that broke the first deploy.
+RUN python /tmp/smoke_test.py && rm /tmp/smoke_test.py \
+ && python -c "import argparse; from sglang.srt.server_args import ServerArgs; \
+p=argparse.ArgumentParser(); ServerArgs.add_cli_args(p); \
+a=p.parse_args(['--model-path','x','--enable-strict-thinking']); \
+exec('''try:\n ServerArgs.from_cli_args(a)\nexcept AttributeError as e:\n raise SystemExit(f\"FATAL orphaned field: {e}\")\nexcept Exception as e:\n print(f\"OK: field mapping passed (post-init stopped at expected {type(e).__name__})\")\nelse:\n print(\"OK: from_cli_args full round-trip\")''')"
