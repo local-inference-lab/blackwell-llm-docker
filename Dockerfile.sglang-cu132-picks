@@ -4,7 +4,11 @@
 # tools = port of open PR #25881, tree-drafting #27463, EAGLE #27390 #26397
 # #26800 #26424, mamba leaks #24244 #25770 #26941, detok #25309 #24659, #25155
 # #24627, GDN #26206, sgl-kernel case-512 #25775 — the kernel pick is inert in
-# this layer and takes effect via the main Dockerfile's in-tree apply).
+# this layer and takes effect via the main Dockerfile's in-tree apply.
+# Also: port of open PR #27983 — rope overrides reach text_config, fixes the
+# --json-model-override-args silent no-op/crash on VLM-format models (issue
+# #27974); and the open PR #27324 guard — None mamba_next_track_idx crash in
+# spec v2 verify under extra_buffer (issue #27325, hit 5x in production)).
 # Source branch: sglang-fork blackwell-cu132-picks;
 # patch generated via `git diff 260194aa..blackwell-cu132-picks`.
 FROM localhost/voipmonitor/sglang:cu132
