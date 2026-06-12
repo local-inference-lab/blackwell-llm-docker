@@ -359,14 +359,18 @@ RUN mkdir -p /cache/jit/triton /cache/jit/torch_extensions
 
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
-# CCCL symlink (CUDA 13.2 moved headers under cccl/ prefix)
-RUN if [ -d /usr/local/cuda/targets/x86_64-linux/include/cccl ] && \
-       [ ! -e /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda ]; then \
-        ln -sf /usr/local/cuda/targets/x86_64-linux/include/cuda \
-               /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda; \
+# CCCL symlink (CUDA 13.2 moved headers under cccl/ prefix). Skipping when the
+# layout doesn't need it is fine; a FAILED ln is not — don't mask it (CodeRabbit).
+RUN CCCL=/usr/local/cuda/targets/x86_64-linux/include/cccl; \
+    if [ -d "$CCCL" ] && [ ! -e "$CCCL/cuda" ]; then \
+        ln -sf /usr/local/cuda/targets/x86_64-linux/include/cuda "$CCCL/cuda"; \
     fi; \
-    test -d /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda && \
-    ln -sf /usr/local/cuda/targets/x86_64-linux/include/cccl/cuda /usr/local/cuda/include/cuda || true
+    if [ -d "$CCCL/cuda" ]; then \
+        ln -sf "$CCCL/cuda" /usr/local/cuda/include/cuda \
+        && echo "OK: CCCL include symlink in place"; \
+    else \
+        echo "OK: CUDA layout has no cccl prefix — symlink not needed"; \
+    fi
 
 # libcudart.so.12 compat symlink (prebuilt JIT-cache binaries may want it)
 RUN CUDA_LIB=$(find /usr/local/cuda/targets -name 'libcudart.so' -print -quit 2>/dev/null) \

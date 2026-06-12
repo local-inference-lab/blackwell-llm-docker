@@ -24,3 +24,25 @@ assert importlib.util.find_spec('sglang.srt.layers.attention.b12x_backend'), 'b1
 import sgl_kernel
 from sglang.srt.server_args import ServerArgs
 print('OK: smoke test passed')
+
+# --- ServerArgs.from_cli_args gate (CodeRabbit: moved out of inline Dockerfile
+# python). An orphaned dataclass field (added without its CLI arg) raises
+# AttributeError here — the exact failure mode that once crashed a deploy at
+# server start. Network/config errors in __post_init__ are expected offline.
+import argparse
+from sglang.srt.server_args import ServerArgs
+
+_parser = argparse.ArgumentParser()
+ServerArgs.add_cli_args(_parser)
+_args = _parser.parse_args(['--model-path', 'smoke-test-dummy',
+                            '--enable-strict-thinking'])
+try:
+    ServerArgs.from_cli_args(_args)
+except AttributeError as e:
+    print(f'FATAL orphaned dataclass field: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'OK: field mapping passed (post-init stopped at expected '
+          f'{type(e).__name__})')
+else:
+    print('OK: from_cli_args full round-trip')
