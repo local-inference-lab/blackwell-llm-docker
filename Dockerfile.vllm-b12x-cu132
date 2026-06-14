@@ -319,37 +319,45 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       tabulate \
       tqdm
 
+COPY .tmp-flashinfer-wheels/ /tmp/prebuilt-flashinfer-wheels/
+
 RUN --mount=type=cache,target=/root/.ccache \
-    git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src \
- && cd /tmp/flashinfer-src \
- && if [[ "${FLASHINFER_REF}" =~ ^[0-9a-f]{40}$ ]]; then \
-      git fetch --depth=1 origin "${FLASHINFER_REF}"; \
-      git checkout FETCH_HEAD; \
-    elif [[ "${FLASHINFER_REF}" == refs/* ]]; then \
-      git fetch origin "${FLASHINFER_REF}"; \
-      git checkout FETCH_HEAD; \
+    if compgen -G "/tmp/prebuilt-flashinfer-wheels/flashinfer_python-*.whl" >/dev/null; then \
+      ls -lh /tmp/prebuilt-flashinfer-wheels; \
+      (python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true); \
+      python -m pip install --no-deps --force-reinstall \
+        /tmp/prebuilt-flashinfer-wheels/flashinfer_python-*.whl \
+        /tmp/prebuilt-flashinfer-wheels/flashinfer_cubin-*.whl \
+        /tmp/prebuilt-flashinfer-wheels/flashinfer_jit_cache-*.whl; \
     else \
-      git checkout "${FLASHINFER_REF}"; \
+      git clone --recursive "${FLASHINFER_REPO}" /tmp/flashinfer-src; \
+      cd /tmp/flashinfer-src; \
+      if [[ "${FLASHINFER_REF}" =~ ^[0-9a-f]{40}$ ]]; then \
+        git fetch --depth=1 origin "${FLASHINFER_REF}"; \
+        git checkout FETCH_HEAD; \
+      elif [[ "${FLASHINFER_REF}" == refs/* ]]; then \
+        git fetch origin "${FLASHINFER_REF}"; \
+        git checkout FETCH_HEAD; \
+      else \
+        git checkout "${FLASHINFER_REF}"; \
+      fi; \
+      if [[ -n "${FLASHINFER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}"; fi; \
+      git submodule update --init --recursive; \
+      (python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true); \
+      FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+        FLASHINFER_ENABLE_SM90=0 \
+        MAX_JOBS="${MAX_JOBS}" \
+        python -m pip install --no-build-isolation --no-deps -v .; \
+      FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+        MAX_JOBS="${MAX_JOBS}" \
+        python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-cubin; \
+      python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_cubin-*.whl; \
+      FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
+        MAX_JOBS="${MAX_JOBS}" \
+        python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-jit-cache; \
+      python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_jit_cache-*.whl; \
     fi \
- && if [[ -n "${FLASHINFER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}"; fi \
- && git submodule update --init --recursive \
- && (python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true) \
- && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
-    FLASHINFER_ENABLE_SM90=0 \
-    MAX_JOBS="${MAX_JOBS}" \
-    python -m pip install --no-build-isolation --no-deps -v . \
- && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
-    MAX_JOBS="${MAX_JOBS}" \
-    python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-cubin \
- && python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_cubin-*.whl \
- && FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
-    MAX_JOBS="${MAX_JOBS}" \
-    python -m pip wheel --no-build-isolation --no-deps -w /tmp/flashinfer-wheels ./flashinfer-jit-cache \
- && python -m pip install --no-deps --force-reinstall /tmp/flashinfer-wheels/flashinfer_jit_cache-*.whl \
- && python - <<'PY'
-import flashinfer
-print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
-PY
+ && python -c 'import flashinfer; print("flashinfer", getattr(flashinfer, "__version__", "unknown"))'
 
 # =============================================================================
 # Stage 2b: build DeepGEMM on top of the cached FlashInfer stage.
