@@ -464,7 +464,12 @@ RUN --mount=type=cache,target=/root/.ccache \
       export TRITON_KERNELS_SRC_DIR=/build/triton/python/triton_kernels/triton_kernels; \
     fi; \
     python -m pip install --no-build-isolation --no-deps --force-reinstall . \
+ && python tools/build_rust.py --release \
+ && test -f vllm/_rust_tool_parser.abi3.so \
+ && test -x vllm/vllm-rs \
  && site_packages="$(python -c 'import site; print(site.getsitepackages()[0])')" \
+ && install -m 0755 vllm/_rust_tool_parser.abi3.so "${site_packages}/vllm/_rust_tool_parser.abi3.so" \
+ && install -m 0755 vllm/vllm-rs "${site_packages}/vllm/vllm-rs" \
  && if [[ -d "${site_packages}/vllm/third_party/triton_kernels" && ! -e "${site_packages}/triton_kernels" ]]; then \
       ln -s vllm/third_party/triton_kernels "${site_packages}/triton_kernels"; \
     fi \
