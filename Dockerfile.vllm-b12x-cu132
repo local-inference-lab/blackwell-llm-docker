@@ -141,6 +141,8 @@ RUN for attempt in {1..5}; do \
     cmake \
     ninja-build \
     ccache \
+    libprotobuf-dev \
+    protobuf-compiler \
     pkg-config \
     patchelf \
     libssl-dev \
@@ -420,10 +422,19 @@ RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
  && grep -v '^torch==' requirements/build/cuda.txt > /tmp/vllm-build-notorch.txt \
  && python -m pip install -r /tmp/vllm-build-notorch.txt \
  && python -m pip install -r requirements/common.txt \
+ && python -m pip install "fastapi[standard]>=0.115.0,<0.137" \
  && python -m pip install setuptools_scm \
  && python -m pip check || true
 
 WORKDIR /opt/vllm
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none \
+ && . /root/.cargo/env \
+ && rust_toolchain="$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')" \
+ && rustup toolchain install "${rust_toolchain}" \
+ && rustup default "${rust_toolchain}" \
+ && cargo --version \
+ && rustc --version
 
 RUN if [[ -f use_existing_torch.py ]]; then python use_existing_torch.py; fi
 
@@ -439,6 +450,8 @@ RUN --mount=type=cache,target=/root/.ccache \
     export VLLM_VERSION_OVERRIDE="${VLLM_BUILD_VERSION}"; \
     export VLLM_TARGET_DEVICE=cuda; \
     export VLLM_USE_PRECOMPILED=0; \
+    export VLLM_REQUIRE_RUST_FRONTEND=1; \
+    export PATH="/root/.cargo/bin:${PATH}"; \
     export VLLM_CUTLASS_SRC_DIR=/build/cutlass; \
     export MAX_JOBS="${VLLM_MAX_JOBS}"; \
     export CMAKE_BUILD_PARALLEL_LEVEL="${VLLM_MAX_JOBS}"; \
@@ -461,11 +474,15 @@ RUN --mount=type=cache,target=/root/.ccache \
     done \
  && TRITON_KERNELS_REF="${TRITON_KERNELS_REF}" python - <<'PY'
 import importlib
+import importlib.util
 import os
 import torch, flashinfer, vllm
 print("torch", torch.__version__, torch.version.cuda)
 print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 print("vllm", getattr(vllm, "__version__", "unknown"))
+spec = importlib.util.find_spec("vllm._rust_tool_parser")
+assert spec is not None, "vllm._rust_tool_parser missing"
+print("rust_tool_parser", spec.origin)
 if os.environ.get("TRITON_KERNELS_REF"):
     importlib.import_module("vllm.third_party.triton_kernels.matmul_ogs")
 PY
@@ -515,6 +532,7 @@ bash -n /usr/local/bin/run-glm51-vllm
 bash -n /usr/local/bin/run-kimi26-vllm
 python - <<'PY'
 import importlib.metadata as md
+import importlib.util
 import torch
 import flashinfer
 import deep_gemm
@@ -528,6 +546,9 @@ print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 print("deep_gemm", getattr(deep_gemm, "__version__", md.version("deep_gemm")))
 print("vllm", getattr(vllm, "__version__", "unknown"))
 print("b12x", md.version("b12x"))
+spec = importlib.util.find_spec("vllm._rust_tool_parser")
+assert spec is not None, "vllm._rust_tool_parser missing"
+print("rust_tool_parser", spec.origin)
 PY
 VERIFY
 chmod 0755 /usr/local/bin/verify-vllm-b12x-cu132
