@@ -452,7 +452,7 @@ RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
  && python -m pip install -r /tmp/vllm-build-notorch.txt \
  && python -m pip install -r requirements/common.txt \
  && python -m pip install "fastapi[standard]>=0.115.0,<0.137" \
- && python -m pip install setuptools_scm \
+ && python -m pip install setuptools_scm "setuptools-rust>=1.9.0" \
  && python -m pip check || true
 
 WORKDIR /opt/vllm
