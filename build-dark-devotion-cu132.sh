@@ -44,7 +44,7 @@ export B12X_COMMIT="${B12X_COMMIT:-5b2e018d1c5228436a3ca23f67b17dab55c9cf65}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/dark-devotion-dcp-dflash-tools-20260619}"
-export VLLM_COMMIT="${VLLM_COMMIT:-772aac698351de5373bdbaafc0d6e0f95f11a46b}"
+export VLLM_COMMIT="${VLLM_COMMIT:-772aac698351626db6493088a47b80ad5b9c6440}"
 export VLLM_PATCH_URL="${VLLM_PATCH_URL:-}"
 export VLLM_PATCH_SHA256="${VLLM_PATCH_SHA256:-}"
 export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev279+dark.devotion.772aac6.b12x5b2e018.fi9c5ed7c.pr26.pr27.pr24.pr22.ds4tool.cu132.20260619}"
