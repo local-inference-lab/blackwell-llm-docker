@@ -664,6 +664,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       'nvidia-cuda-tileiras==13.2.78' \
       'nvidia-nvjitlink==13.2.78' \
       'nvidia-nvvm==13.2.78' \
+      'nvidia-cutlass-dsl==4.5.2' \
+      'nvidia-cutlass-dsl-libs-base==4.5.2' \
+      'nvidia-cutlass-dsl-libs-cu13==4.5.2' \
       > /tmp/torch-cu132-constraints.txt \
  && /opt/venv/bin/python -m pip install --upgrade \
       --index-url https://download.pytorch.org/whl/cu132 \
@@ -679,6 +682,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "cuda-tile>=1.4.0" \
       "tilelang==0.1.9" \
       "tokenspeed-mla==0.1.2" \
+      "nvidia-cutlass-dsl[cu13]==4.5.2" \
       "transformers>=5.5.1" \
       "apache-tvm-ffi==0.1.9" \
       "fastsafetensors>=0.3.2" \
