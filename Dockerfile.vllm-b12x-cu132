@@ -97,7 +97,7 @@ WORKDIR /build
 RUN git clone "${NCCL_REPO}" nccl \
  && cd nccl \
  && git checkout "${NCCL_REF}" \
- && if [[ -n "${NCCL_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${NCCL_COMMIT}"; fi \
+ && if [[ -n "${NCCL_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${NCCL_COMMIT}" ]] || { echo "ERROR: NCCL_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${NCCL_COMMIT}" >&2; exit 1; }; fi \
  && make -j"$(nproc)" src.build CUDA_HOME=/usr/local/cuda \
  && strings "build/lib/libnccl.so.2.30.4" | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2"
 
@@ -301,7 +301,7 @@ RUN if [[ "${CUTLASS_REF}" =~ ^[0-9a-f]{40}$ ]]; then \
       git clone --depth 1 --branch "${CUTLASS_REF}" "${CUTLASS_REPO}" /build/cutlass; \
       cd /build/cutlass; \
     fi \
- && if [[ -n "${CUTLASS_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${CUTLASS_COMMIT}"; fi \
+ && if [[ -n "${CUTLASS_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${CUTLASS_COMMIT}" ]] || { echo "ERROR: CUTLASS_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${CUTLASS_COMMIT}" >&2; exit 1; }; fi \
  && grep "CUTLASS_MAJOR\\|CUTLASS_MINOR\\|CUTLASS_PATCH" include/cutlass/version.h | head -3
 
 RUN CUTLASS_DSL="$(python -c 'import cutlass.utils.blockscaled_layout as m; print(m.__file__)')" \
@@ -344,7 +344,7 @@ RUN --mount=type=cache,target=/root/.ccache \
       else \
         git checkout "${FLASHINFER_REF}"; \
       fi; \
-      if [[ -n "${FLASHINFER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}"; fi; \
+      if [[ -n "${FLASHINFER_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${FLASHINFER_COMMIT}" ]] || { echo "ERROR: FLASHINFER_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${FLASHINFER_COMMIT}" >&2; exit 1; }; fi; \
       git submodule update --init --recursive; \
       (python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true); \
       FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST}" \
@@ -383,7 +383,7 @@ RUN --mount=type=cache,target=/root/.ccache \
     else \
       git checkout "${DEEPGEMM_REF}"; \
     fi \
- && if [[ -n "${DEEPGEMM_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${DEEPGEMM_COMMIT}"; fi \
+ && if [[ -n "${DEEPGEMM_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${DEEPGEMM_COMMIT}" ]] || { echo "ERROR: DEEPGEMM_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${DEEPGEMM_COMMIT}" >&2; exit 1; }; fi \
  && git submodule update --init --recursive \
  && DG_FORCE_BUILD=1 DG_USE_LOCAL_VERSION=1 \
     python -m pip install --no-build-isolation --no-deps --force-reinstall . \
@@ -411,7 +411,7 @@ RUN git clone --filter=blob:none "${B12X_REPO}" /tmp/b12x-src \
     else \
       git checkout "${B12X_REF}"; \
     fi \
- && if [[ -n "${B12X_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${B12X_COMMIT}"; fi \
+ && if [[ -n "${B12X_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${B12X_COMMIT}" ]] || { echo "ERROR: B12X_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${B12X_COMMIT}" >&2; exit 1; }; fi \
  && python -m pip install --no-deps --force-reinstall . \
  && rm -rf /tmp/b12x-src
 
@@ -440,7 +440,7 @@ WORKDIR /build
 RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
  && cd /opt/vllm \
  && git checkout "${VLLM_REF}" \
- && if [[ -n "${VLLM_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${VLLM_COMMIT}"; fi \
+ && if [[ -n "${VLLM_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${VLLM_COMMIT}" ]] || { echo "ERROR: VLLM_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${VLLM_COMMIT}" >&2; exit 1; }; fi \
  && if [[ -n "${VLLM_PATCH_URL}" ]]; then \
       curl -fsSL "${VLLM_PATCH_URL}" -o /tmp/vllm-extra.patch; \
       if [[ -n "${VLLM_PATCH_SHA256}" ]]; then \
@@ -501,7 +501,7 @@ RUN if [[ -n "${TRITON_KERNELS_REF}" ]]; then \
       git clone --filter=blob:none "${TRITON_KERNELS_REPO}" /build/triton; \
       cd /build/triton; \
       git checkout "${TRITON_KERNELS_REF}"; \
-      if [[ -n "${TRITON_KERNELS_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${TRITON_KERNELS_COMMIT}"; fi; \
+      if [[ -n "${TRITON_KERNELS_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${TRITON_KERNELS_COMMIT}" ]] || { echo "ERROR: TRITON_KERNELS_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${TRITON_KERNELS_COMMIT}" >&2; exit 1; }; fi; \
       test -d /build/triton/python/triton_kernels/triton_kernels; \
     fi
 
@@ -557,7 +557,7 @@ RUN launcher_root=/opt/vllm \
       git clone --filter=blob:none "${LAUNCHER_REPO}" /tmp/vllm-launchers; \
       cd /tmp/vllm-launchers; \
       git checkout "${LAUNCHER_REF}"; \
-      if [[ -n "${LAUNCHER_COMMIT}" ]]; then test "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}"; fi; \
+      if [[ -n "${LAUNCHER_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${LAUNCHER_COMMIT}" ]] || { echo "ERROR: LAUNCHER_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${LAUNCHER_COMMIT}" >&2; exit 1; }; fi; \
       launcher_root=/tmp/vllm-launchers; \
       cd /opt/vllm; \
     fi \
