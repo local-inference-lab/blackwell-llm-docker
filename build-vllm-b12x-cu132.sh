@@ -31,6 +31,7 @@ CUTLASS_REF="${CUTLASS_REF:-main}"
 VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev279+black.benediction.b12x.cu132}"
 TRITON_KERNELS_REPO="${TRITON_KERNELS_REPO:-https://github.com/triton-lang/triton.git}"
 TRITON_KERNELS_REF="${TRITON_KERNELS_REF:-}"
+HUMMING_KERNELS_SPEC="${HUMMING_KERNELS_SPEC:-humming-kernels[cu13]==0.1.4}"
 
 resolve_ref() {
   local repo="$1"
@@ -99,6 +100,7 @@ echo "  LAUNCHER_REF=${LAUNCHER_REF} ${LAUNCHER_COMMIT}"
 echo "  CUTLASS_REF=${CUTLASS_REF} ${CUTLASS_COMMIT}"
 echo "  TRITON_KERNELS_REF=${TRITON_KERNELS_REF} ${TRITON_KERNELS_COMMIT}"
 echo "  NCCL_REF=${NCCL_REF} ${NCCL_COMMIT}"
+echo "  HUMMING_KERNELS_SPEC=${HUMMING_KERNELS_SPEC}"
 
 if [[ "${BUILD_BASE_IMAGE}" == "1" ]]; then
   DOCKER_BUILDKIT=1 docker build \
@@ -161,6 +163,7 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg TRITON_KERNELS_REPO="${TRITON_KERNELS_REPO}" \
   --build-arg TRITON_KERNELS_REF="${TRITON_KERNELS_REF}" \
   --build-arg TRITON_KERNELS_COMMIT="${TRITON_KERNELS_COMMIT}" \
+  --build-arg HUMMING_KERNELS_SPEC="${HUMMING_KERNELS_SPEC}" \
   --progress=plain \
   -f Dockerfile.vllm-b12x-cu132 \
   -t "${IMAGE}" \

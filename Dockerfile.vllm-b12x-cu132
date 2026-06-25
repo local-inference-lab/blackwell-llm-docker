@@ -652,6 +652,8 @@ COPY --from=vllm-build /usr/local/bin/run-kimi26-vllm /usr/local/bin/run-kimi26-
 COPY --from=vllm-build /usr/local/bin/serve-*.sh /usr/local/bin/
 COPY --from=vllm-build /usr/local/bin/verify-vllm-b12x-cu132 /usr/local/bin/verify-vllm-b12x-cu132
 
+ARG HUMMING_KERNELS_SPEC="humming-kernels[cu13]==0.1.4"
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     printf '%s\n' \
       'torch==2.12.0+cu132' \
@@ -676,7 +678,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "cuda-python==13.2.0" \
       "numba==0.65.0" \
       "quack-kernels>=0.3.3" \
-      "humming-kernels[cu13]==0.1.4" \
+      "${HUMMING_KERNELS_SPEC}" \
       "nvidia-cuda-tileiras==13.2.78" \
       "nvidia-nvjitlink==13.2.78" \
       "cuda-tile>=1.4.0" \
