@@ -52,6 +52,9 @@ ARG VLLM_PATCH_SHA256=
 ARG LAUNCHER_REPO=https://github.com/local-inference-lab/vllm.git
 ARG LAUNCHER_REF=dev/black-benediction
 ARG LAUNCHER_COMMIT=
+ARG INSTANTTENSOR_REPO=https://github.com/scitix/InstantTensor.git
+ARG INSTANTTENSOR_REF=main
+ARG INSTANTTENSOR_COMMIT=
 
 ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
 ARG CUTLASS_REF=main
@@ -231,8 +234,37 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "nvidia-cutlass-dsl[cu13]==4.5.2" \
  && python -m pip install --force-reinstall --no-deps \
       nvidia-cutlass-dsl-libs-cu13==4.5.2 \
- && python -m pip check \
+ && python -m pip check
+
+RUN torch_nccl=/opt/venv/lib/python3.12/site-packages/nvidia/nccl/lib/libnccl.so.2 \
+ && local_nccl=/opt/libnccl-local-inference.so.2.30.4 \
+ && normal_nccl=/opt/libnccl.so.2.30.4 \
+ && test -e "${torch_nccl}" \
+ && test -e "${local_nccl}" \
+ && if [[ ! -e "${normal_nccl}" ]]; then cp -aL "${local_nccl}" "${normal_nccl}"; fi \
+ && if [[ ! -e "${local_nccl}.orig" ]]; then cp -aL "${local_nccl}" "${local_nccl}.orig"; fi \
+ && if [[ ! -e "${torch_nccl}.torch-bundled-2.29.7" ]]; then cp -aL "${torch_nccl}" "${torch_nccl}.torch-bundled-2.29.7"; fi \
+ && readelf -d "${normal_nccl}" | grep -F 'Library soname: [libnccl.so.2]' \
+ && ln -sfn "${normal_nccl}" "${local_nccl}" \
+ && ln -sfn "${normal_nccl}" /opt/libnccl.so.2 \
+ && ln -sfn "${normal_nccl}" "${torch_nccl}" \
+ && ldconfig \
  && python - <<'PY'
+import torch
+
+paths = []
+with open("/proc/self/maps", encoding="utf-8") as maps:
+    for line in maps:
+        if "libnccl" in line:
+            paths.append(line.split()[-1])
+
+unique = sorted(set(paths))
+print("torch nccl api", torch.cuda.nccl.version())
+print("mapped libnccl paths", unique)
+assert unique == ["/opt/libnccl.so.2.30.4"], unique
+PY
+
+RUN python - <<'PY'
 import torch
 print("torch", torch.__version__)
 print("torch cuda", torch.version.cuda)
@@ -430,6 +462,7 @@ ARG VLLM_REF
 ARG VLLM_COMMIT
 ARG VLLM_PATCH_URL
 ARG VLLM_PATCH_SHA256
+ARG VLLM_PATCH_FILE
 ARG VLLM_BUILD_VERSION
 ARG LAUNCHER_REPO
 ARG LAUNCHER_REF
@@ -441,11 +474,16 @@ ARG TRITON_KERNELS_REF
 ARG TRITON_KERNELS_COMMIT
 
 WORKDIR /build
+COPY patches /tmp/build-patches
 
 RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
  && cd /opt/vllm \
  && git checkout "${VLLM_REF}" \
  && if [[ -n "${VLLM_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${VLLM_COMMIT}" ]] || { echo "ERROR: VLLM_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${VLLM_COMMIT}" >&2; exit 1; }; fi \
+ && if [[ -n "${VLLM_PATCH_FILE}" ]]; then \
+      git apply --verbose "/tmp/build-patches/${VLLM_PATCH_FILE}" \
+      && git diff --check; \
+    fi \
  && if [[ -n "${VLLM_PATCH_URL}" ]]; then \
       curl -fsSL "${VLLM_PATCH_URL}" -o /tmp/vllm-extra.patch; \
       if [[ -n "${VLLM_PATCH_SHA256}" ]]; then \
@@ -668,6 +706,9 @@ COPY --from=vllm-build /usr/local/bin/serve-*.sh /usr/local/bin/
 COPY --from=vllm-build /usr/local/bin/verify-vllm-b12x-cu132 /usr/local/bin/verify-vllm-b12x-cu132
 
 ARG HUMMING_KERNELS_SPEC="humming-kernels[cu13]==0.1.4"
+ARG INSTANTTENSOR_REPO
+ARG INSTANTTENSOR_REF
+ARG INSTANTTENSOR_COMMIT
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     printf '%s\n' \
@@ -704,6 +745,56 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "apache-tvm-ffi==0.1.9" \
       "fastsafetensors>=0.3.2" \
  && /opt/venv/bin/python -m pip check
+
+RUN if [[ -n "${INSTANTTENSOR_REF}" ]]; then \
+      git clone --recursive "${INSTANTTENSOR_REPO}" /tmp/instanttensor-src; \
+      cd /tmp/instanttensor-src; \
+      if [[ "${INSTANTTENSOR_REF}" =~ ^[0-9a-f]{40}$ ]]; then \
+        git fetch --depth=1 origin "${INSTANTTENSOR_REF}"; \
+        git checkout FETCH_HEAD; \
+      else \
+        git checkout "${INSTANTTENSOR_REF}"; \
+      fi; \
+      git submodule update --init --recursive; \
+      if [[ -n "${INSTANTTENSOR_COMMIT}" ]]; then [[ "$(git rev-parse HEAD)" = "${INSTANTTENSOR_COMMIT}" ]] || { echo "ERROR: INSTANTTENSOR_COMMIT mismatch: HEAD=$(git rev-parse HEAD) expected=${INSTANTTENSOR_COMMIT}" >&2; exit 1; }; fi; \
+      /opt/venv/bin/python -m pip install --no-build-isolation --no-deps --force-reinstall .; \
+      cd /; \
+      rm -rf /tmp/instanttensor-src; \
+    fi \
+ && /opt/venv/bin/python - <<'PY'
+import importlib.metadata as md
+import instanttensor
+
+print("instanttensor", md.version("instanttensor"), instanttensor.__file__)
+PY
+
+RUN torch_nccl=/opt/venv/lib/python3.12/site-packages/nvidia/nccl/lib/libnccl.so.2 \
+ && local_nccl=/opt/libnccl-local-inference.so.2.30.4 \
+ && normal_nccl=/opt/libnccl.so.2.30.4 \
+ && test -e "${torch_nccl}" \
+ && test -e "${local_nccl}" \
+ && if [[ ! -e "${normal_nccl}" ]]; then cp -aL "${local_nccl}" "${normal_nccl}"; fi \
+ && if [[ ! -e "${local_nccl}.orig" ]]; then cp -aL "${local_nccl}" "${local_nccl}.orig"; fi \
+ && if [[ ! -e "${torch_nccl}.torch-bundled-2.29.7" ]]; then cp -aL "${torch_nccl}" "${torch_nccl}.torch-bundled-2.29.7"; fi \
+ && readelf -d "${normal_nccl}" | grep -F 'Library soname: [libnccl.so.2]' \
+ && ln -sfn "${normal_nccl}" "${local_nccl}" \
+ && ln -sfn "${normal_nccl}" /opt/libnccl.so.2 \
+ && ln -sfn "${normal_nccl}" "${torch_nccl}" \
+ && ldconfig \
+ && /opt/venv/bin/python - <<'PY'
+import torch
+
+paths = []
+with open("/proc/self/maps", encoding="utf-8") as maps:
+    for line in maps:
+        if "libnccl" in line:
+            paths.append(line.split()[-1])
+
+unique = sorted(set(paths))
+print("torch nccl api", torch.cuda.nccl.version())
+print("mapped libnccl paths", unique)
+assert unique == ["/opt/libnccl.so.2.30.4"], unique
+PY
 
 RUN cublas="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublas.so.13)" \
  && cublas_lt="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublasLt.so.13)" \
@@ -754,6 +845,7 @@ ENV VIRTUAL_ENV=/opt/venv \
     VLLM_RTX6K_FUSED_ALLREDUCE_ADD=0 \
     VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER=0 \
     VLLM_DISABLE_SHARED_EXPERTS_STREAM=0 \
+    VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 \
     VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
     VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
 
@@ -781,6 +873,7 @@ ARG VLLM_REF
 ARG VLLM_COMMIT
 ARG VLLM_PATCH_URL
 ARG VLLM_PATCH_SHA256
+ARG VLLM_PATCH_FILE
 ARG B12X_REF
 ARG B12X_COMMIT
 ARG FLASHINFER_REF
@@ -789,6 +882,8 @@ ARG DEEPGEMM_REF
 ARG DEEPGEMM_COMMIT
 ARG TRITON_KERNELS_REF
 ARG TRITON_KERNELS_COMMIT
+ARG INSTANTTENSOR_REF
+ARG INSTANTTENSOR_COMMIT
 ARG CUBLAS_CUDA13_VERSION
 ARG CUDNN_CUDA13_VERSION
 ARG CUDA_COMPAT_13_2_VERSION
@@ -807,6 +902,7 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.vllm.commit="${VLLM_COMMIT}" \
       local-inference.vllm.patch_url="${VLLM_PATCH_URL}" \
       local-inference.vllm.patch_sha256="${VLLM_PATCH_SHA256}" \
+      local-inference.vllm.patch_file="${VLLM_PATCH_FILE}" \
       local-inference.b12x.branch="${B12X_REF}" \
       local-inference.b12x.commit="${B12X_COMMIT}" \
       local-inference.b12x.runtime_version="source" \
@@ -815,4 +911,6 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.deepgemm.branch="${DEEPGEMM_REF}" \
       local-inference.deepgemm.commit="${DEEPGEMM_COMMIT}" \
       local-inference.triton_kernels.branch="${TRITON_KERNELS_REF}" \
-      local-inference.triton_kernels.commit="${TRITON_KERNELS_COMMIT}"
+      local-inference.triton_kernels.commit="${TRITON_KERNELS_COMMIT}" \
+      local-inference.instanttensor.branch="${INSTANTTENSOR_REF}" \
+      local-inference.instanttensor.commit="${INSTANTTENSOR_COMMIT}"
