@@ -706,6 +706,7 @@ COPY --from=vllm-build /usr/local/bin/serve-*.sh /usr/local/bin/
 COPY --from=vllm-build /usr/local/bin/verify-vllm-b12x-cu132 /usr/local/bin/verify-vllm-b12x-cu132
 
 ARG HUMMING_KERNELS_SPEC="humming-kernels[cu13]==0.1.4"
+ARG VLLM_RUNTIME_EXTRA_PACKAGES=""
 ARG INSTANTTENSOR_REPO
 ARG INSTANTTENSOR_REF
 ARG INSTANTTENSOR_COMMIT
@@ -744,6 +745,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "transformers>=5.5.1" \
       "apache-tvm-ffi==0.1.9" \
       "fastsafetensors>=0.3.2" \
+ && if [[ -n "${VLLM_RUNTIME_EXTRA_PACKAGES}" ]]; then \
+      /opt/venv/bin/python -m pip install --upgrade \
+        --index-url https://download.pytorch.org/whl/cu132 \
+        --extra-index-url https://pypi.org/simple \
+        --constraint /tmp/torch-cu132-constraints.txt \
+        ${VLLM_RUNTIME_EXTRA_PACKAGES}; \
+    fi \
  && /opt/venv/bin/python -m pip check
 
 RUN if [[ -n "${INSTANTTENSOR_REF}" ]]; then \
