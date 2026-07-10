@@ -1,0 +1,24 @@
+services:
+  ds4:
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm61f32d0-b12x90172a5-fi7176f85-cu132-20260710}
+    command: ["/usr/local/bin/serve-ds4-flash.sh"]
+    network_mode: host
+    ipc: host
+    shm_size: 32gb
+    gpus: all
+    environment:
+      CUDA_VISIBLE_DEVICES: ${GPUS:-0,1}
+      PORT: ${PORT:-8000}
+      MODEL: ${MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
+      MODE: ${MODE:-dspark}
+      BACKEND: ${BACKEND:-lucifer-cutlass}
+      TP_SIZE: ${TP_SIZE:-2}
+      DCP_SIZE: ${DCP_SIZE:-1}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-262144}
+      MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-8192}
+      ALLREDUCE_MODE: ${ALLREDUCE_MODE:-b12x}
+    volumes:
+      - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ${MODEL_ROOT:-/root/models}:/root/models:ro
+      - ${JIT_CACHE:-./cache/ds4-v10}:/cache

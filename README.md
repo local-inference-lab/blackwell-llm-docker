@@ -86,7 +86,25 @@ IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
 
 # Build the Lucifer DS4 Flash/CUTLASS image from local-inference-lab/vllm:lucifer.
 ./build-lucifer-cu132.sh
+
+# Reproduce the DS4/DSpark v10 image from immutable vLLM, B12X, FlashInfer,
+# DeepGEMM, CUTLASS, InstantTensor, and NCCL commits.
+./build-fathomless-firmament-ds4-v10-cu132.sh
 ```
+
+The v10 image installs `/usr/local/bin/serve-ds4-flash.sh`. Start it with the
+minimal environment-only Compose file and override only the serving choices you
+need:
+
+```bash
+MODE=dspark BACKEND=lucifer-cutlass TP_SIZE=2 GPUS=0,1 \
+  docker compose -f examples/docker-compose-ds4-v10.yml up -d
+```
+
+Supported modes are `mtp0`, `mtp2`, `mtp3`, and `dspark`. Supported backend
+profiles are `b12x-a16`, `b12x-a8`, `b12x-a8-dglin`, `lucifer-default`, and
+`lucifer-cutlass`; the helper derives the CUDA graph cap from
+`MAX_NUM_SEQS`.
 
 ### Current vLLM+B12X CUDA 13.2 base image
 

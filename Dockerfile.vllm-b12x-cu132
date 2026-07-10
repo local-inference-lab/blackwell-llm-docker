@@ -52,6 +52,7 @@ ARG VLLM_PATCH_SHA256=
 ARG LAUNCHER_REPO=https://github.com/local-inference-lab/vllm.git
 ARG LAUNCHER_REF=dev/black-benediction
 ARG LAUNCHER_COMMIT=
+ARG VLLM_REQUIRED_LAUNCHERS=
 ARG INSTANTTENSOR_REPO=https://github.com/scitix/InstantTensor.git
 ARG INSTANTTENSOR_REF=main
 ARG INSTANTTENSOR_COMMIT=
@@ -467,6 +468,7 @@ ARG VLLM_BUILD_VERSION
 ARG LAUNCHER_REPO
 ARG LAUNCHER_REF
 ARG LAUNCHER_COMMIT
+ARG VLLM_REQUIRED_LAUNCHERS
 ARG VLLM_MAX_JOBS
 ARG VLLM_NVCC_THREADS
 ARG TRITON_KERNELS_REPO
@@ -635,8 +637,17 @@ RUN launcher_root=/opt/vllm \
       printf '%s\n' '#!/usr/bin/env bash' 'echo "Kimi launcher is not available in this vLLM ref" >&2' 'exit 2' > /usr/local/bin/run-kimi26-vllm; \
       chmod 0755 /usr/local/bin/run-kimi26-vllm; \
     fi \
+ && for required_launcher in ${VLLM_REQUIRED_LAUNCHERS}; do \
+      test -x "/usr/local/bin/${required_launcher}" || { \
+        echo "ERROR: required launcher ${required_launcher} was not installed" >&2; \
+        exit 1; \
+      }; \
+    done \
  && bash -n /usr/local/bin/run-glm51-vllm \
- && bash -n /usr/local/bin/run-kimi26-vllm
+ && bash -n /usr/local/bin/run-kimi26-vllm \
+ && for script in /usr/local/bin/serve-*.sh; do \
+      if [[ -f "${script}" ]]; then bash -n "${script}"; fi; \
+    done
 
 RUN <<'SH' bash -eux
 cat > /usr/local/bin/verify-vllm-b12x-cu132 <<'VERIFY'
@@ -648,6 +659,9 @@ test -x /usr/local/bin/run-glm51-vllm
 test -x /usr/local/bin/run-kimi26-vllm
 bash -n /usr/local/bin/run-glm51-vllm
 bash -n /usr/local/bin/run-kimi26-vllm
+for script in /usr/local/bin/serve-*.sh; do
+  if [[ -f "${script}" ]]; then bash -n "${script}"; fi
+done
 python - <<'PY'
 import importlib.metadata as md
 import importlib.util
