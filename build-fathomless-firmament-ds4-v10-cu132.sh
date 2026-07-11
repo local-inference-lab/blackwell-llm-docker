@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Reproducible DS4/DSpark v10 build. The source commits are immutable; refs are
 # retained in image labels so the corresponding review history remains visible.
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllmdd33b46-b12x90172a5-fi2cba2f7-cu132-20260711}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm4d84e89-b12x90172a5-fi2cba2f7-cu132-20260711}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -41,11 +41,11 @@ export B12X_COMMIT="${B12X_COMMIT:-90172a504e96d246e07cb1ebad3b291532445560}"
 # vLLM PR #88.
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-dspark-pr47979-combined-20260710}"
-export VLLM_COMMIT="${VLLM_COMMIT:-dd33b465c1f7e3f97aca99046207d37e0891d771}"
+export VLLM_COMMIT="${VLLM_COMMIT:-4d84e89b72575fd38dae55c22c5856f08fc98eff}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.ds4.v10.vllmdd33b46.b12x90172a5.fi2cba2f7.cu132.20260711}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.ds4.v10.vllm4d84e89.b12x90172a5.fi2cba2f7.cu132.20260711}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
