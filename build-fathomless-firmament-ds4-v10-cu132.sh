@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Reproducible DS4/DSpark v10 build. The source commits are immutable; refs are
 # retained in image labels so the corresponding review history remains visible.
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm61f32d0-b12x90172a5-fi7176f85-cu132-20260710}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllmdd33b46-b12x90172a5-fi2cba2f7-cu132-20260711}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -22,11 +22,11 @@ export NCCL_REPO="${NCCL_REPO:-https://github.com/local-inference-lab/nccl-canon
 export NCCL_REF="${NCCL_REF:-canonical/cu132-nccl2304-amd-noxml}"
 export NCCL_COMMIT="${NCCL_COMMIT:-dfab7c1ace32da250ba97757879429c341b7bcf9}"
 
-# 7176f85 is the tested combined source: FlashInfer PR #3871 plus the DS4
-# topk=256 dispatch submitted separately as flashinfer-ai/flashinfer#3923.
+# Tested combined source: current FlashInfer main plus PR #3871 and the
+# canonical DS4 TopK256 decode/prefill fixes #3817 and #3896.
 export FLASHINFER_REPO="${FLASHINFER_REPO:-https://github.com/voipmonitor/flashinfer.git}"
-export FLASHINFER_REF="${FLASHINFER_REF:-codex/sm120-dsv4-decode-pbs256-20260710}"
-export FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-7176f85bbaa12c851a7a4aabeedeea01449a0aac}"
+export FLASHINFER_REF="${FLASHINFER_REF:-codex/sm120-dspark-stack-20260711}"
+export FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-2cba2f7bbe8335fcabe18d29e6eb99de2093f991}"
 export FLASHINFER_BUILD_CUBIN="${FLASHINFER_BUILD_CUBIN:-0}"
 
 export DEEPGEMM_REPO="${DEEPGEMM_REPO:-https://github.com/deepseek-ai/DeepGEMM.git}"
@@ -41,11 +41,11 @@ export B12X_COMMIT="${B12X_COMMIT:-90172a504e96d246e07cb1ebad3b291532445560}"
 # vLLM PR #88.
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-dspark-pr47979-combined-20260710}"
-export VLLM_COMMIT="${VLLM_COMMIT:-61f32d047589113606800c67a505e8cc02262402}"
+export VLLM_COMMIT="${VLLM_COMMIT:-dd33b465c1f7e3f97aca99046207d37e0891d771}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev279+fathomless.firmament.ds4.v10.vllm61f32d0.b12x90172a5.fi7176f85.cu132.20260710}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.ds4.v10.vllmdd33b46.b12x90172a5.fi2cba2f7.cu132.20260711}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"

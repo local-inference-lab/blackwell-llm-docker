@@ -1,6 +1,6 @@
 services:
   ds4:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm61f32d0-b12x90172a5-fi7176f85-cu132-20260710}
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllmdd33b46-b12x90172a5-fi2cba2f7-cu132-20260711}
     command: ["/usr/local/bin/serve-ds4-flash.sh"]
     network_mode: host
     ipc: host
