@@ -9,7 +9,8 @@ services:
     environment:
       CUDA_VISIBLE_DEVICES: ${GPUS:-0,1}
       PORT: ${PORT:-8000}
-      MODEL: ${MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
+      STANDARD_MODEL: ${STANDARD_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
+      DSPARK_MODEL: ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
       MODE: ${MODE:-dspark}
       BACKEND: ${BACKEND:-lucifer-cutlass}
       TP_SIZE: ${TP_SIZE:-2}
