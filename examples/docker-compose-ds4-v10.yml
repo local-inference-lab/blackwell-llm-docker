@@ -1,7 +1,7 @@
 services:
   ds4:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm2a62b49-b12x90172a5-fi2cba2f7-cu132-20260711}
-    command: ["/usr/local/bin/serve-ds4-flash.sh"]
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllm7ca378f-b12x90172a5-fi2cba2f7-cu132-20260712}
+    entrypoint: ["/usr/local/bin/serve-ds4-flash.sh"]
     network_mode: host
     ipc: host
     shm_size: 32gb
@@ -18,12 +18,18 @@ services:
       MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
       MAX_MODEL_LEN: ${MAX_MODEL_LEN:-262144}
       MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-8192}
+      LOAD_FORMAT: ${LOAD_FORMAT:-instanttensor}
+      INSTANTTENSOR_BACKEND: ${INSTANTTENSOR_BACKEND:-BUFFERED}
       ALLREDUCE_MODE: ${ALLREDUCE_MODE:-b12x}
       INDEXER_BACKEND: ${INDEXER_BACKEND:-auto}
       B12X_PCIE_DMA: ${B12X_PCIE_DMA:-0}
       DSPARK_TOKENS: ${DSPARK_TOKENS:-5}
       DSPARK_CAPACITY: ${DSPARK_CAPACITY:-0}
+      DSPARK_CAPACITY_VERIFICATION_MODE: ${DSPARK_CAPACITY_VERIFICATION_MODE:-}
+      DSPARK_CAPACITY_ACTIVATION_BATCH_SIZE: ${DSPARK_CAPACITY_ACTIVATION_BATCH_SIZE:-0}
       DSPARK_DYNAMIC_DRAFT_DEPTH: ${DSPARK_DYNAMIC_DRAFT_DEPTH:-0}
+      DSPARK_ONLINE_STS: ${DSPARK_ONLINE_STS:-1}
+      DSPARK_SPS_CURVE: ${DSPARK_SPS_CURVE:-auto}
       DSPARK_FP8_DRAFT_HEAD: ${DSPARK_FP8_DRAFT_HEAD:-0}
       DSPARK_DRAFT_ATTENTION_BACKEND: ${DSPARK_DRAFT_ATTENTION_BACKEND:-auto}
     volumes:
