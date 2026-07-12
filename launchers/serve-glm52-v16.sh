@@ -7,6 +7,7 @@ die() {
 }
 
 MODEL="${MODEL:-lukealonso/GLM-5.2-NVFP4}"
+MODEL_REVISION="${MODEL_REVISION:-8a1f4a13204acf2b7ac840375efaed64c231c522}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-GLM-5.2-NVFP4}"
 PORT="${PORT:-8000}"
 GPUS="${GPUS:-0,1,2,3,4,5,6,7}"
@@ -205,6 +206,11 @@ if [[ "${MTP}" != "0" ]]; then
   spec_arg=(--speculative-config "${spec_json}")
 fi
 
+revision_args=()
+if [[ -n "${MODEL_REVISION}" && "${MODEL}" != /* ]]; then
+  revision_args=(--revision "${MODEL_REVISION}")
+fi
+
 linear_args=()
 if [[ "${LINEAR_BACKEND}" != "auto" ]]; then
   linear_args=(--linear-backend "${LINEAR_BACKEND}")
@@ -223,6 +229,7 @@ fi
 hf_overrides="$(printf '{"use_index_cache":true,"index_topk_pattern":"%s"}' "${GLM52_INDEX_TOPK_PATTERN}")"
 
 cmd=(vllm serve "${MODEL}" \
+  "${revision_args[@]}" \
   --served-model-name "${SERVED_MODEL_NAME}" \
   --host 0.0.0.0 \
   --port "${PORT}" \

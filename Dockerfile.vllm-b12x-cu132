@@ -538,8 +538,6 @@ RUN cd /opt/vllm \
 
 WORKDIR /opt/vllm
 
-COPY launchers/ /tmp/build-launchers/
-
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
@@ -608,6 +606,8 @@ print("rust_tool_parser", spec.origin)
 if os.environ.get("TRITON_KERNELS_REF"):
     importlib.import_module("vllm.third_party.triton_kernels.matmul_ogs")
 PY
+
+COPY launchers/ /tmp/build-launchers/
 
 RUN launcher_root=/opt/vllm \
  && if [[ ! -f "${launcher_root}/scripts/run-glm51-vllm" && ! -f "${launcher_root}/serve-glm51.sh" ]]; then \
