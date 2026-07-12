@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark v16 build. Every source is pinned by commit;
-# the model-specific behavior lives in the two embedded serve helpers.
+# model-specific behavior lives in two serve helpers selected by one dispatcher.
 export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi2cba2f7-cu132-20260712}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
@@ -48,7 +48,7 @@ export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmam
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
 export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-${VLLM_COMMIT}}"
-export VLLM_REQUIRED_LAUNCHERS="serve-ds4-flash.sh serve-glm52-v16.sh"
+export VLLM_REQUIRED_LAUNCHERS="serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh"
 
 export CUTLASS_REPO="${CUTLASS_REPO:-https://github.com/NVIDIA/cutlass.git}"
 export CUTLASS_REF="${CUTLASS_REF:-d80a4e53b52b42550659a8696dab32705265e324}"
@@ -78,6 +78,12 @@ docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
   -e MODE=dspark \
   -e BACKEND=lucifer-cutlass \
   -e TP_SIZE=2 \
+  "${IMAGE}"
+
+docker run --rm --entrypoint /usr/local/bin/serve-fathomless-firmament.sh \
+  -e MODEL_FAMILY=glm52 \
+  -e DRY_RUN=1 \
+  -e MODEL=lukealonso/GLM-5.2-NVFP4 \
   "${IMAGE}"
 
 if [[ "${PUSH_IMAGE}" == "1" ]]; then
