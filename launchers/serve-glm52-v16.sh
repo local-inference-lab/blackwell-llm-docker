@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 2
+}
+
+MODEL="${MODEL:-lukealonso/GLM-5.2-NVFP4}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-GLM-5.2-NVFP4}"
+PORT="${PORT:-8000}"
+GPUS="${GPUS:-0,1,2,3,4,5,6,7}"
+TP="${TP:-8}"
+DCP="${DCP:-1}"
+DCP_BACKEND="${DCP_BACKEND:-a2a}"
+DCP_A2A_MAX_TOKENS="${DCP_A2A_MAX_TOKENS:-64}"
+DCP_A2A_LARGE_BACKEND="${DCP_A2A_LARGE_BACKEND:-ag_rs}"
+MTP="${MTP:-0}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
+GRAPH="${GRAPH:-$((MAX_NUM_SEQS * 4))}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
+MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
+MOE_MODE="${MOE_MODE:-a4}"
+MOE_BACKEND="${MOE_BACKEND:-b12x}"
+LINEAR_BACKEND="${LINEAR_BACKEND:-auto}"
+ONLINE_MXFP8="${ONLINE_MXFP8:-0}"
+ONLINE_FP8="${ONLINE_FP8:-0}"
+ONLINE_FP8_MXFP4="${ONLINE_FP8_MXFP4:-0}"
+ONLINE_QUANT="${ONLINE_QUANT:-}"
+F8_DMA="${F8_DMA:-0}"
+LOAD_FORMAT="${LOAD_FORMAT:-instanttensor}"
+INSTANTTENSOR_BACKEND="${INSTANTTENSOR_BACKEND:-BUFFERED}"
+QUANTIZATION="${QUANTIZATION:-modelopt_fp4}"
+QUANTIZATION_CONFIG_JSON="${QUANTIZATION_CONFIG_JSON:-}"
+GLM52_INDEX_TOPK_PATTERN="${GLM52_INDEX_TOPK_PATTERN:-FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS}"
+
+case "${MOE_MODE}" in
+  a4|native|default)
+    B12X_MOE_FORCE_A8=0
+    B12X_MOE_FORCE_A16=0
+    ;;
+  a16|force-a16)
+    B12X_MOE_FORCE_A8=0
+    B12X_MOE_FORCE_A16=1
+    ;;
+  force-a8-experimental|a8-experimental|a8)
+    B12X_MOE_FORCE_A8=1
+    B12X_MOE_FORCE_A16=0
+    ;;
+  *)
+    die "MOE_MODE must be a4, a16, or force-a8-experimental"
+    ;;
+esac
+
+case "${F8_DMA}" in
+  0|ag|ring) ;;
+  *) die "F8_DMA must be 0, ag, or ring" ;;
+esac
+
+case "${DCP_A2A_LARGE_BACKEND}" in
+  ag_rs|a2a) ;;
+  *) die "DCP_A2A_LARGE_BACKEND must be ag_rs or a2a" ;;
+esac
+
+case "${MOE_BACKEND}" in
+  auto|triton|deep_gemm|deep_gemm_mega_moe|b12x|cutlass|flashinfer_trtllm|flashinfer_cutlass|flashinfer_cutedsl|flashinfer_b12x|marlin|humming|triton_unfused|aiter|flydsl|emulation) ;;
+  *) die "MOE_BACKEND is not a supported vLLM MoE backend: ${MOE_BACKEND}" ;;
+esac
+
+case "${LINEAR_BACKEND}" in
+  auto|b12x|cutlass|flashinfer_cutlass|flashinfer_cutedsl|flashinfer_trtllm|flashinfer_cudnn|flashinfer_b12x|marlin|triton|deep_gemm|torch|aiter|machete|fbgemm|conch|exllama|emulation) ;;
+  *) die "LINEAR_BACKEND is not a supported vLLM linear backend: ${LINEAR_BACKEND}" ;;
+esac
+
+[[ "${ONLINE_MXFP8}" =~ ^(0|1)$ ]] || die "ONLINE_MXFP8 must be 0 or 1"
+[[ "${ONLINE_FP8}" =~ ^(0|1)$ ]] || die "ONLINE_FP8 must be 0 or 1"
+[[ "${ONLINE_FP8_MXFP4}" =~ ^(0|1)$ ]] || die "ONLINE_FP8_MXFP4 must be 0 or 1"
+[[ "${MTP}" =~ ^[0-9]+$ ]] || die "MTP must be an integer token count"
+[[ "${DCP_A2A_MAX_TOKENS}" =~ ^[0-9]+$ ]] || die "DCP_A2A_MAX_TOKENS must be an integer token count"
+[[ "${MAX_NUM_SEQS}" =~ ^[0-9]+$ ]] || die "MAX_NUM_SEQS must be an integer"
+[[ "${GRAPH}" =~ ^[0-9]+$ ]] || die "GRAPH must be an integer"
+[[ "${#GLM52_INDEX_TOPK_PATTERN}" -eq 78 ]] || die "GLM52_INDEX_TOPK_PATTERN must be exactly 78 characters, got ${#GLM52_INDEX_TOPK_PATTERN}"
+
+if [[ -z "${ONLINE_QUANT}" ]]; then
+  enabled_quant_aliases=0
+  [[ "${ONLINE_MXFP8}" == "1" ]] && enabled_quant_aliases=$((enabled_quant_aliases + 1))
+  [[ "${ONLINE_FP8}" == "1" ]] && enabled_quant_aliases=$((enabled_quant_aliases + 1))
+  [[ "${ONLINE_FP8_MXFP4}" == "1" ]] && enabled_quant_aliases=$((enabled_quant_aliases + 1))
+  if ((enabled_quant_aliases > 1)); then
+    die "ONLINE_MXFP8, ONLINE_FP8, and ONLINE_FP8_MXFP4 are mutually exclusive"
+  elif [[ "${ONLINE_MXFP8}" == "1" ]]; then
+    ONLINE_QUANT=mxfp8
+  elif [[ "${ONLINE_FP8}" == "1" || "${ONLINE_FP8_MXFP4}" == "1" ]]; then
+    ONLINE_QUANT=fp8
+  else
+    ONLINE_QUANT=none
+  fi
+fi
+
+case "${ONLINE_QUANT}" in
+  none|0|off)
+    ONLINE_QUANT=none
+    ;;
+  mxfp8)
+    # kv_b_proj is dequantized at load for MLA absorb, so converting it adds
+    # rounding noise without changing the serving kernel.
+    if [[ -z "${QUANTIZATION_CONFIG_JSON}" ]]; then
+      QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"mxfp8"},"ignore":["re:.*kv_b_proj"]}'
+    fi
+    ;;
+  fp8|fp8_block|fp8-block|fp8-mxfp4)
+    ONLINE_QUANT=fp8
+    if [[ -z "${QUANTIZATION_CONFIG_JSON}" ]]; then
+      QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"fp8_per_block_static"},"ignore":["lm_head","model.layers.78.eh_proj","re:.*kv_b_proj","re:.*\\.mlp\\.gate$","re:.*\\.self_attn\\.indexer\\.weights_proj$","re:.*\\.self_attn\\.indexers_proj$"]}'
+    fi
+    ;;
+  custom)
+    [[ -n "${QUANTIZATION_CONFIG_JSON}" ]] || die "ONLINE_QUANT=custom requires QUANTIZATION_CONFIG_JSON"
+    ;;
+  *)
+    die "ONLINE_QUANT must be none, mxfp8, fp8, or custom"
+    ;;
+esac
+
+unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
+
+export CUDA_VISIBLE_DEVICES="${GPUS}"
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_DEVICE_MAX_CONNECTIONS=32
+export CUTE_DSL_ARCH=sm_120a
+export TORCH_CUDA_ARCH_LIST=12.0a
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export SAFETENSORS_FAST_GPU=1
+export INSTANTTENSOR_BACKEND="${INSTANTTENSOR_BACKEND}"
+export VLLM_USE_AOT_COMPILE=1
+export VLLM_USE_BREAKABLE_CUDAGRAPH=0
+export VLLM_USE_MEGA_AOT_ARTIFACT=1
+export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1
+export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
+export VLLM_USE_FLASHINFER_SAMPLER=1
+export VLLM_USE_B12X_WO_PROJECTION=1
+export VLLM_USE_B12X_MHC=1
+if [[ "${LINEAR_BACKEND}" == "auto" || "${LINEAR_BACKEND}" == "b12x" ]]; then
+  export VLLM_USE_B12X_FP8_GEMM=1
+else
+  export VLLM_USE_B12X_FP8_GEMM=0
+fi
+if [[ "${MOE_BACKEND}" == "b12x" || "${MOE_BACKEND}" == "flashinfer_b12x" ]]; then
+  export VLLM_USE_B12X_MOE=1
+else
+  export VLLM_USE_B12X_MOE=0
+fi
+export VLLM_USE_B12X_SPARSE_INDEXER=1
+export VLLM_USE_B12X_DCP_A2A=1
+export VLLM_DCP_A2A_MAX_TOKENS="${DCP_A2A_MAX_TOKENS}"
+export VLLM_DCP_A2A_LARGE_BACKEND="${DCP_A2A_LARGE_BACKEND}"
+export VLLM_USE_V2_MODEL_RUNNER=1
+export VLLM_ENABLE_PCIE_ALLREDUCE=1
+export VLLM_PCIE_ALLREDUCE_BACKEND=b12x
+export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB
+export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
+export VLLM_PCIE_DMA_FP8="${F8_DMA}"
+export B12X_PCIE_DMA_FP8="${F8_DMA}"
+export VLLM_DCP_GLOBAL_TOPK=1
+export VLLM_DCP_SHARD_DRAFT=1
+export B12X_MLA_SM120_UNIFIED=1
+export B12X_DENSE_SPLITK_TURBO=1
+export B12X_W4A16_TC_DECODE=1
+export B12X_W4A8_TINY_DECODE=1
+export B12X_MOE_FORCE_A8="${B12X_MOE_FORCE_A8}"
+export B12X_MOE_FORCE_A16="${B12X_MOE_FORCE_A16}"
+export NCCL_PROTO=LL,LL128,Simple
+export NCCL_P2P_LEVEL=SYS
+export NCCL_IB_DISABLE=1
+export LD_PRELOAD=/opt/libnccl-local-inference.so.2.30.4
+export VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4
+export TMPDIR="${TMPDIR:-/container-tmp}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/cache}"
+export VLLM_CACHE_DIR="${VLLM_CACHE_DIR:-/cache/vllm}"
+export TILELANG_CACHE_DIR="${TILELANG_CACHE_DIR:-/cache/tilelang}"
+export TILELANG_TMP_DIR="${TILELANG_TMP_DIR:-/cache/tilelang/tmp}"
+export TVM_CACHE_DIR="${TVM_CACHE_DIR:-/cache/tvm}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/cache/triton}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/cache/torchinductor}"
+export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-/cache/torch_extensions}"
+export FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-/cache/flashinfer}"
+
+mkdir -p \
+  "${TMPDIR}" \
+  "${VLLM_CACHE_DIR}" \
+  "${TILELANG_CACHE_DIR}" \
+  "${TILELANG_TMP_DIR}" \
+  "${TVM_CACHE_DIR}" \
+  "${TRITON_CACHE_DIR}" \
+  "${TORCHINDUCTOR_CACHE_DIR}" \
+  "${TORCH_EXTENSIONS_DIR}" \
+  "${FLASHINFER_WORKSPACE_BASE}"
+
+spec_arg=()
+if [[ "${MTP}" != "0" ]]; then
+  spec_json="$(printf '{"model":"%s","method":"mtp","num_speculative_tokens":%s,"moe_backend":"%s","draft_sample_method":"probabilistic"}' "${MODEL}" "${MTP}" "${MOE_BACKEND}")"
+  spec_arg=(--speculative-config "${spec_json}")
+fi
+
+linear_args=()
+if [[ "${LINEAR_BACKEND}" != "auto" ]]; then
+  linear_args=(--linear-backend "${LINEAR_BACKEND}")
+fi
+
+quant_args=(--quantization "${QUANTIZATION}")
+if [[ "${ONLINE_QUANT}" != "none" ]]; then
+  quant_args+=(--quantization-config "${QUANTIZATION_CONFIG_JSON}")
+fi
+
+dcp_args=(--decode-context-parallel-size "${DCP}")
+if [[ "${DCP}" != "1" ]]; then
+  dcp_args+=(--dcp-comm-backend "${DCP_BACKEND}" --dcp-kv-cache-interleave-size 1)
+fi
+
+hf_overrides="$(printf '{"use_index_cache":true,"index_topk_pattern":"%s"}' "${GLM52_INDEX_TOPK_PATTERN}")"
+
+cmd=(vllm serve "${MODEL}" \
+  --served-model-name "${SERVED_MODEL_NAME}" \
+  --host 0.0.0.0 \
+  --port "${PORT}" \
+  --trust-remote-code \
+  --tensor-parallel-size "${TP}" \
+  "${dcp_args[@]}" \
+  --kv-cache-dtype fp8 \
+  --attention-backend B12X_MLA_SPARSE \
+  --moe-backend "${MOE_BACKEND}" \
+  "${linear_args[@]}" \
+  "${quant_args[@]}" \
+  --load-format "${LOAD_FORMAT}" \
+  -cc.pass_config.fuse_allreduce_rms=True \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+  --max-model-len "${MAX_MODEL_LEN}" \
+  --max-num-seqs "${MAX_NUM_SEQS}" \
+  --max-num-batched-tokens "${MAX_BATCHED_TOKENS}" \
+  --max-cudagraph-capture-size "${GRAPH}" \
+  --async-scheduling \
+  --enable-chunked-prefill \
+  --enable-prefix-caching \
+  --enable-flashinfer-autotune \
+  --enable-auto-tool-choice \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
+  --enable-prompt-tokens-details \
+  --enable-force-include-usage \
+  --enable-request-id-headers \
+  --hf-overrides "${hf_overrides}" \
+  "${spec_arg[@]}")
+
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  printf 'CUDA_VISIBLE_DEVICES=%q\n' "${CUDA_VISIBLE_DEVICES}"
+  printf 'B12X_MOE_FORCE_A8=%q\n' "${B12X_MOE_FORCE_A8}"
+  printf 'B12X_MOE_FORCE_A16=%q\n' "${B12X_MOE_FORCE_A16}"
+  printf 'INSTANTTENSOR_BACKEND=%q\n' "${INSTANTTENSOR_BACKEND}"
+  printf 'Command:'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec "${cmd[@]}"

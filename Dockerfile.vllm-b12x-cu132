@@ -538,6 +538,8 @@ RUN cd /opt/vllm \
 
 WORKDIR /opt/vllm
 
+COPY launchers/ /tmp/build-launchers/
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
@@ -619,6 +621,9 @@ RUN launcher_root=/opt/vllm \
  && for script in "${launcher_root}"/serve-*.sh; do \
       if [[ -f "${script}" ]]; then install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; fi; \
     done \
+ && for script in /tmp/build-launchers/serve-*.sh; do \
+      if [[ -f "${script}" ]]; then install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; fi; \
+    done \
  && if [[ -f "${launcher_root}/scripts/run-glm51-vllm" ]]; then \
       install -m 0755 "${launcher_root}/scripts/run-glm51-vllm" /usr/local/bin/run-glm51-vllm; \
     elif [[ -f /usr/local/bin/serve-glm51.sh ]]; then \
@@ -691,6 +696,7 @@ RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu
  && python -m pip cache purge || true \
  && rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheels /root/.cache/pip /tmp/pip-* \
  && rm -rf /tmp/vllm-launchers \
+ && rm -rf /tmp/build-launchers \
  && rm -rf \
       /opt/vllm/.deps \
       /opt/vllm/.git \
@@ -906,6 +912,7 @@ ARG TRITON_KERNELS_REF
 ARG TRITON_KERNELS_COMMIT
 ARG INSTANTTENSOR_REF
 ARG INSTANTTENSOR_COMMIT
+ARG VLLM_REQUIRED_LAUNCHERS
 ARG CUBLAS_CUDA13_VERSION
 ARG CUDNN_CUDA13_VERSION
 ARG CUDA_COMPAT_13_2_VERSION
@@ -935,4 +942,5 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.triton_kernels.branch="${TRITON_KERNELS_REF}" \
       local-inference.triton_kernels.commit="${TRITON_KERNELS_COMMIT}" \
       local-inference.instanttensor.branch="${INSTANTTENSOR_REF}" \
-      local-inference.instanttensor.commit="${INSTANTTENSOR_COMMIT}"
+      local-inference.instanttensor.commit="${INSTANTTENSOR_COMMIT}" \
+      local-inference.launchers="${VLLM_REQUIRED_LAUNCHERS}"
