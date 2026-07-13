@@ -30,6 +30,7 @@ ONLINE_FP8="${ONLINE_FP8:-0}"
 ONLINE_FP8_MXFP4="${ONLINE_FP8_MXFP4:-0}"
 ONLINE_QUANT="${ONLINE_QUANT:-}"
 F8_DMA="${F8_DMA:-0}"
+B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}"
 LOAD_FORMAT="${LOAD_FORMAT:-instanttensor}"
 INSTANTTENSOR_BACKEND="${INSTANTTENSOR_BACKEND:-BUFFERED}"
 QUANTIZATION="${QUANTIZATION:-modelopt_fp4}"
@@ -57,6 +58,11 @@ esac
 case "${F8_DMA}" in
   0|ag|ring) ;;
   *) die "F8_DMA must be 0, ag, or ring" ;;
+esac
+
+case "${B12X_PCIE_DMA}" in
+  0|1) ;;
+  *) die "B12X_PCIE_DMA must be 0 or 1" ;;
 esac
 
 case "${DCP_A2A_LARGE_BACKEND}" in
@@ -163,6 +169,7 @@ export VLLM_ENABLE_PCIE_ALLREDUCE=1
 export VLLM_PCIE_ALLREDUCE_BACKEND=b12x
 export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB
 export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
+export VLLM_USE_B12X_PCIE_DMA="${B12X_PCIE_DMA}"
 export VLLM_PCIE_DMA_FP8="${F8_DMA}"
 export B12X_PCIE_DMA_FP8="${F8_DMA}"
 export VLLM_DCP_GLOBAL_TOPK=1
@@ -266,6 +273,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'CUDA_VISIBLE_DEVICES=%q\n' "${CUDA_VISIBLE_DEVICES}"
   printf 'B12X_MOE_FORCE_A8=%q\n' "${B12X_MOE_FORCE_A8}"
   printf 'B12X_MOE_FORCE_A16=%q\n' "${B12X_MOE_FORCE_A16}"
+  printf 'VLLM_USE_B12X_PCIE_DMA=%q\n' "${VLLM_USE_B12X_PCIE_DMA}"
   printf 'INSTANTTENSOR_BACKEND=%q\n' "${INSTANTTENSOR_BACKEND}"
   printf 'Command:'
   printf ' %q' "${cmd[@]}"
