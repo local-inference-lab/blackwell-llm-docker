@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark v16 build. Every source is pinned by commit;
 # model-specific behavior lives in two serve helpers selected by one dispatcher.
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi801d57a-cu132-20260713}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm3104056-b12x90172a5-fi801d57a-cu132-20260713}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -36,14 +36,14 @@ export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/ff-v15-cute-compile-fallback-20260709}"
 export B12X_COMMIT="${B12X_COMMIT:-90172a504e96d246e07cb1ebad3b291532445560}"
 
-# Current FF plus DS4 PR #88 and GLM DCP helper PR #90.
+# Current FF plus DS4 PR #88, GLM PRs #90/#91, and stream-lifetime PR #93.
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-v16-unified-20260712}"
-export VLLM_COMMIT="${VLLM_COMMIT:-5dffea89ba006387011073832f1443678e49ba53}"
+export VLLM_COMMIT="${VLLM_COMMIT:-3104056237fffb5cf925909036cf244c4426ff7d}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm5dffea8.b12x90172a5.fi801d57a.cu132.20260713}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm3104056.b12x90172a5.fi801d57a.cu132.20260713}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
