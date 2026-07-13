@@ -1,12 +1,13 @@
 services:
   ds4:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-ds4-v10-vllmadf15ca-b12x90172a5-fi2cba2f7-cu132-20260712}
-    entrypoint: ["/usr/local/bin/serve-ds4-flash.sh"]
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi801d57a-cu132-20260713}
+    entrypoint: ["/usr/local/bin/serve-fathomless-firmament.sh"]
     network_mode: host
     ipc: host
     shm_size: 32gb
     gpus: all
     environment:
+      MODEL_FAMILY: ds4
       CUDA_VISIBLE_DEVICES: ${GPUS:-0,1}
       PORT: ${PORT:-8000}
       STANDARD_MODEL: ${STANDARD_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
@@ -36,3 +37,4 @@ services:
       - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
       - ${MODEL_ROOT:-/root/models}:/root/models:ro
       - ${JIT_CACHE:-./cache/ds4-v10}:/cache
+      - ${CONTAINER_TMP:-./cache/ds4-v10/tmp}:/container-tmp

@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark v16 build. Every source is pinned by commit;
 # model-specific behavior lives in two serve helpers selected by one dispatcher.
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi2cba2f7-cu132-20260712}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi801d57a-cu132-20260713}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -24,7 +24,7 @@ export NCCL_COMMIT="${NCCL_COMMIT:-dfab7c1ace32da250ba97757879429c341b7bcf9}"
 
 export FLASHINFER_REPO="${FLASHINFER_REPO:-https://github.com/voipmonitor/flashinfer.git}"
 export FLASHINFER_REF="${FLASHINFER_REF:-codex/sm120-dspark-stack-20260711}"
-export FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-2cba2f7bbe8335fcabe18d29e6eb99de2093f991}"
+export FLASHINFER_COMMIT="${FLASHINFER_COMMIT:-801d57a08958c13d375ddbb6be3be4808f48a708}"
 export FLASHINFER_BUILD_CUBIN="${FLASHINFER_BUILD_CUBIN:-0}"
 
 export DEEPGEMM_REPO="${DEEPGEMM_REPO:-https://github.com/deepseek-ai/DeepGEMM.git}"
@@ -43,7 +43,7 @@ export VLLM_COMMIT="${VLLM_COMMIT:-5dffea89ba006387011073832f1443678e49ba53}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm5dffea8.b12x90172a5.fi2cba2f7.cu132.20260712}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm5dffea8.b12x90172a5.fi801d57a.cu132.20260713}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
