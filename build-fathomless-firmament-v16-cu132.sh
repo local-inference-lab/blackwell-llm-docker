@@ -87,7 +87,7 @@ tp2_dspark_command="$(docker run --rm --entrypoint /usr/local/bin/serve-ds4-flas
   -e MODE=dspark \
   -e BACKEND=lucifer-cutlass \
   -e TP_SIZE=2 \
-  "${IMAGE}")"
+  "${IMAGE}" 2>&1)"
 grep -q -- '--gpu-memory-utilization 0.9465' <<<"${tp2_dspark_command}"
 
 tp4_dspark_command="$(docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
@@ -95,7 +95,7 @@ tp4_dspark_command="$(docker run --rm --entrypoint /usr/local/bin/serve-ds4-flas
   -e MODE=dspark \
   -e BACKEND=lucifer-cutlass \
   -e TP_SIZE=4 \
-  "${IMAGE}")"
+  "${IMAGE}" 2>&1)"
 grep -q -- '--gpu-memory-utilization 0.94' <<<"${tp4_dspark_command}"
 
 docker run --rm --entrypoint /bin/bash "${IMAGE}" -lc \
