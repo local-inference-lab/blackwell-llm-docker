@@ -35,6 +35,7 @@ LOAD_FORMAT="${LOAD_FORMAT:-instanttensor}"
 INSTANTTENSOR_BACKEND="${INSTANTTENSOR_BACKEND:-BUFFERED}"
 QUANTIZATION="${QUANTIZATION:-modelopt_fp4}"
 QUANTIZATION_CONFIG_JSON="${QUANTIZATION_CONFIG_JSON:-}"
+KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
 GLM52_INDEX_TOPK_PATTERN="${GLM52_INDEX_TOPK_PATTERN:-FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS}"
 
 case "${MOE_MODE}" in
@@ -63,6 +64,11 @@ esac
 case "${B12X_PCIE_DMA}" in
   0|1) ;;
   *) die "B12X_PCIE_DMA must be 0 or 1" ;;
+esac
+
+case "${KV_CACHE_DTYPE}" in
+  fp8|fp8_ds_mla|nvfp4_ds_mla) ;;
+  *) die "KV_CACHE_DTYPE must be fp8, fp8_ds_mla, or nvfp4_ds_mla" ;;
 esac
 
 case "${DCP_A2A_LARGE_BACKEND}" in
@@ -223,7 +229,10 @@ if [[ "${LINEAR_BACKEND}" != "auto" ]]; then
   linear_args=(--linear-backend "${LINEAR_BACKEND}")
 fi
 
-quant_args=(--quantization "${QUANTIZATION}")
+quant_args=()
+if [[ -n "${QUANTIZATION}" && "${QUANTIZATION}" != "auto" && "${QUANTIZATION}" != "none" ]]; then
+  quant_args+=(--quantization "${QUANTIZATION}")
+fi
 if [[ "${ONLINE_QUANT}" != "none" ]]; then
   quant_args+=(--quantization-config "${QUANTIZATION_CONFIG_JSON}")
 fi
@@ -243,7 +252,7 @@ cmd=(vllm serve "${MODEL}" \
   --trust-remote-code \
   --tensor-parallel-size "${TP}" \
   "${dcp_args[@]}" \
-  --kv-cache-dtype fp8 \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --attention-backend B12X_MLA_SPARSE \
   --moe-backend "${MOE_BACKEND}" \
   "${linear_args[@]}" \
@@ -275,6 +284,8 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'B12X_MOE_FORCE_A16=%q\n' "${B12X_MOE_FORCE_A16}"
   printf 'VLLM_USE_B12X_PCIE_DMA=%q\n' "${VLLM_USE_B12X_PCIE_DMA}"
   printf 'INSTANTTENSOR_BACKEND=%q\n' "${INSTANTTENSOR_BACKEND}"
+  printf 'KV_CACHE_DTYPE=%q\n' "${KV_CACHE_DTYPE}"
+  printf 'QUANTIZATION=%q\n' "${QUANTIZATION}"
   printf 'Command:'
   printf ' %q' "${cmd[@]}"
   printf '\n'
