@@ -1,0 +1,23 @@
+services:
+  glm52-hybrid:
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm137d2eb-b12x1377d5f-fi801d57a-cu132-20260714}
+    entrypoint: ["/usr/local/bin/serve-glm52-hybrid-v17.sh"]
+    network_mode: host
+    ipc: host
+    shm_size: 32gb
+    gpus: all
+    environment:
+      GPUS: ${GPUS:-0,1,2,3}
+      PORT: ${PORT:-8000}
+      DCP: ${DCP:-1}
+      MTP: ${MTP:-0}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-8}
+      GRAPH: ${GRAPH:-64}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-262144}
+      MAX_BATCHED_TOKENS: ${MAX_BATCHED_TOKENS:-2048}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.96}
+    volumes:
+      - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ${MODEL_ROOT:-/root/models}:/root/models:ro
+      - ${JIT_CACHE:-./cache/glm52-hybrid-v17}:/cache
+      - ${CONTAINER_TMP:-./cache/glm52-hybrid-v17/tmp}:/container-tmp
