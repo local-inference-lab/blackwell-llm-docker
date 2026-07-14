@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark v16 build. Every source is pinned by commit;
 # model-specific behavior lives in two serve helpers selected by one dispatcher.
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm7ec611c-b12x90172a5-fi801d57a-cu132-20260713}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm8f86f42-b12xfe06f49-fi801d57a-cu132-20260714}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -31,19 +31,21 @@ export DEEPGEMM_REPO="${DEEPGEMM_REPO:-https://github.com/deepseek-ai/DeepGEMM.g
 export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
-# B12X master plus the CuTe compile fallback in PR #28.
+# B12X master plus the CuTe compile fallback in PR #28 and the cooperative
+# W4A8 resident-grid launch fix in PR #32.
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
-export B12X_REF="${B12X_REF:-codex/ff-v15-cute-compile-fallback-20260709}"
-export B12X_COMMIT="${B12X_COMMIT:-90172a504e96d246e07cb1ebad3b291532445560}"
+export B12X_REF="${B12X_REF:-codex/fathomless-firmament-v16-integration-20260714}"
+export B12X_COMMIT="${B12X_COMMIT:-fe06f494719267fa3b399878b67caffb915dbdc4}"
 
-# Current FF plus DS4 PR #88, GLM PRs #90/#91, and stream-lifetime PR #93.
+# Current FF plus DS4 PR #88 and its TP-aware memory follow-up, GLM PRs
+# #90/#91, and stream-lifetime PR #93.
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-v16-unified-20260712}"
-export VLLM_COMMIT="${VLLM_COMMIT:-7ec611cf0764543f45592c5970f0d05e55807b5f}"
+export VLLM_COMMIT="${VLLM_COMMIT:-8f86f425102cee08745462615d54115eee275f9f}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm7ec611c.b12x90172a5.fi801d57a.cu132.20260713}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v16.vllm8f86f42.b12xfe06f49.fi801d57a.cu132.20260714}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
@@ -79,6 +81,25 @@ docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
   -e BACKEND=lucifer-cutlass \
   -e TP_SIZE=2 \
   "${IMAGE}"
+
+tp2_dspark_command="$(docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
+  -e DRY_RUN=1 \
+  -e MODE=dspark \
+  -e BACKEND=lucifer-cutlass \
+  -e TP_SIZE=2 \
+  "${IMAGE}")"
+grep -q -- '--gpu-memory-utilization 0.9465' <<<"${tp2_dspark_command}"
+
+tp4_dspark_command="$(docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
+  -e DRY_RUN=1 \
+  -e MODE=dspark \
+  -e BACKEND=lucifer-cutlass \
+  -e TP_SIZE=4 \
+  "${IMAGE}")"
+grep -q -- '--gpu-memory-utilization 0.94' <<<"${tp4_dspark_command}"
+
+docker run --rm --entrypoint /bin/bash "${IMAGE}" -lc \
+  'grep -q "cooperative=True" /opt/venv/lib/python3.12/site-packages/b12x/moe/fused/dynamic.py'
 
 docker run --rm --entrypoint /usr/local/bin/serve-fathomless-firmament.sh \
   -e MODEL_FAMILY=glm52 \

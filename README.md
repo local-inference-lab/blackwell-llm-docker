@@ -97,6 +97,11 @@ dispatches to the GLM or DS4 helper through `MODEL_FAMILY`. Start either model
 with a minimal environment-only Compose file and override only the serving
 choices you need:
 
+```text
+voipmonitor/vllm:fathomless-firmament-v16-vllm8f86f42-b12xfe06f49-fi801d57a-cu132-20260714
+sha256:7a0ed4f956bc2f753fd8c67d32d4ee7358e71922794a471abdb9ae6513cabc54
+```
+
 ```bash
 MODE=dspark BACKEND=lucifer-cutlass TP_SIZE=2 GPUS=0,1 \
   docker compose -f examples/docker-compose-ds4-v10.yml up -d

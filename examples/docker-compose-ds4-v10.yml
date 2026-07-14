@@ -1,6 +1,6 @@
 services:
   ds4:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm5dffea8-b12x90172a5-fi801d57a-cu132-20260713}
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v16-vllm8f86f42-b12xfe06f49-fi801d57a-cu132-20260714}
     entrypoint: ["/usr/local/bin/serve-fathomless-firmament.sh"]
     network_mode: host
     ipc: host
