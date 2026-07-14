@@ -3,12 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm0db5be0-b12x1377d5f-fi801d57a-cu132-20260714}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm137d2eb-b12x1377d5f-fi801d57a-cu132-20260714}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-v17-dcp-prefill-opt-20260714}"
-export VLLM_COMMIT="${VLLM_COMMIT:-0db5be0a1ec21f92f6e134b372bfc27271f62995}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm0db5be0.b12x1377d5f.fi801d57a.cu132.20260714}"
+export VLLM_COMMIT="${VLLM_COMMIT:-137d2eb3931b62d7710d26573cb69dacbac52059}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm137d2eb.b12x1377d5f.fi801d57a.cu132.20260714}"
 
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/fathomless-firmament-v17-nf3-nvfp4kv-20260714}"
