@@ -90,16 +90,20 @@ IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
 # Build the unified GLM-5.2 and DS4/DSpark v16 image from immutable vLLM,
 # B12X, FlashInfer, DeepGEMM, CUTLASS, InstantTensor, and NCCL commits.
 ./build-fathomless-firmament-v16-cu132.sh
+
+# Build the current unified v17 image with NF3/NVFP4-KV support and the
+# validated TP4/TP6/TP8 sparse-MLA DCP prefill workspace paths.
+./build-fathomless-firmament-v17-cu132.sh
 ```
 
-The unified image installs `/usr/local/bin/serve-fathomless-firmament.sh`, which
-dispatches to the GLM or DS4 helper through `MODEL_FAMILY`. Start either model
-with a minimal environment-only Compose file and override only the serving
-choices you need:
+The current unified image installs
+`/usr/local/bin/serve-fathomless-firmament.sh`, which dispatches to the GLM or
+DS4 helper through `MODEL_FAMILY`. Start either model with a minimal
+environment-only Compose file and override only the serving choices you need:
 
 ```text
-voipmonitor/vllm:fathomless-firmament-v16-vllm8f86f42-b12xfe06f49-fi801d57a-cu132-20260714
-sha256:7a0ed4f956bc2f753fd8c67d32d4ee7358e71922794a471abdb9ae6513cabc54
+voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714
+sha256:a1ec6a43cbe4192abd5597123d9270cf16c6241ebfe74066dd7c2383bb41bb27
 ```
 
 ```bash
@@ -107,7 +111,7 @@ MODE=dspark BACKEND=lucifer-cutlass TP_SIZE=2 GPUS=0,1 \
   docker compose -f examples/docker-compose-ds4-v10.yml up -d
 
 MTP=0 DCP=1 MOE_MODE=a16 ONLINE_QUANT=mxfp8 \
-  docker compose -f examples/docker-compose-glm52-v16.yml up -d
+  docker compose -f examples/docker-compose-glm52-v17.yml up -d
 ```
 
 Supported modes are `mtp0`, `mtp2`, `mtp3`, and `dspark`. Supported backend
@@ -115,7 +119,9 @@ profiles are `b12x-a16`, `b12x-a8`, `b12x-a8-dglin`, `lucifer-default`, and
 `lucifer-cutlass`; the helper derives the CUDA graph cap from
 `MAX_NUM_SEQS`. The GLM helper likewise derives `GRAPH=4*MAX_NUM_SEQS` unless
 explicitly overridden. Both helpers default to InstantTensor with the
-page-cache-aware `BUFFERED` backend.
+page-cache-aware `BUFFERED` backend. The GLM v17 Compose also defaults
+`DCP_PREFILL_WORKSPACE=auto`, which enables the optimized eager prefill path
+only for its validated TP/DCP topology list.
 
 ### Current vLLM+B12X CUDA 13.2 base image
 
