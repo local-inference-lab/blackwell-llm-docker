@@ -50,7 +50,7 @@ export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmam
 export LAUNCHER_REPO="${LAUNCHER_REPO:-${VLLM_REPO}}"
 export LAUNCHER_REF="${LAUNCHER_REF:-${VLLM_REF}}"
 export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-${VLLM_COMMIT}}"
-export VLLM_REQUIRED_LAUNCHERS="serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh"
+export VLLM_REQUIRED_LAUNCHERS="${VLLM_REQUIRED_LAUNCHERS:-serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh}"
 
 export CUTLASS_REPO="${CUTLASS_REPO:-https://github.com/NVIDIA/cutlass.git}"
 export CUTLASS_REF="${CUTLASS_REF:-d80a4e53b52b42550659a8696dab32705265e324}"
