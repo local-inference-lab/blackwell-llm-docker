@@ -102,11 +102,10 @@ esac
 [[ "${#GLM52_INDEX_TOPK_PATTERN}" -eq 78 ]] || die "GLM52_INDEX_TOPK_PATTERN must be exactly 78 characters, got ${#GLM52_INDEX_TOPK_PATTERN}"
 
 if [[ "${DCP_PREFILL_WORKSPACE}" == "auto" ]]; then
-  if [[ "${TP}" == "4" && "${DCP}" == "4" && "${MAX_BATCHED_TOKENS}" == "3072" ]]; then
-    DCP_PREFILL_WORKSPACE=1
-  else
-    DCP_PREFILL_WORKSPACE=0
-  fi
+  case "${TP}:${DCP}" in
+    4:4|6:2|6:3|6:6|8:2|8:4|8:8) DCP_PREFILL_WORKSPACE=1 ;;
+    *) DCP_PREFILL_WORKSPACE=0 ;;
+  esac
 fi
 
 DCP_PROJECT_MIN_PREFILL_TOKENS=1024

@@ -3,12 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm137d2eb-b12x1377d5f-fi801d57a-cu132-20260714}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-v17-dcp-prefill-opt-20260714}"
-export VLLM_COMMIT="${VLLM_COMMIT:-137d2eb3931b62d7710d26573cb69dacbac52059}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm137d2eb.b12x1377d5f.fi801d57a.cu132.20260714}"
+export VLLM_COMMIT="${VLLM_COMMIT:-6ccc3ebbd17edb05ce11b095a5b14f25839774dd}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm6ccc3eb.b12x1377d5f.fi801d57a.cu132.20260714}"
 
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/fathomless-firmament-v17-nf3-nvfp4kv-20260714}"
@@ -35,6 +35,33 @@ grep -q -- '--quantization nvfp4_nf3_hybrid' /tmp/fathomless-firmament-v17-hybri
 grep -q -- '--load-format instanttensor' /tmp/fathomless-firmament-v17-hybrid-dry-run.txt
 grep -q -- 'VLLM_DCP_PROJECT_BEFORE_MERGE=1' /tmp/fathomless-firmament-v17-hybrid-dry-run.txt
 grep -q -- 'VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1' /tmp/fathomless-firmament-v17-hybrid-dry-run.txt
+
+for topology in 6:2 6:3 6:6 8:2 8:4 8:8; do
+  tp="${topology%%:*}"
+  dcp="${topology##*:}"
+  gpus="$(seq -s, 0 $((tp - 1)))"
+  dry_run="/tmp/fathomless-firmament-v17-tp${tp}-dcp${dcp}-dry-run.txt"
+  docker run --rm --entrypoint /usr/local/bin/serve-glm52-v16.sh \
+    -e DRY_RUN=1 \
+    -e MODEL=/model \
+    -e GPUS="${gpus}" \
+    -e TP="${tp}" \
+    -e DCP="${dcp}" \
+    "${IMAGE}" | tee "${dry_run}"
+  grep -q -- 'VLLM_DCP_PROJECT_BEFORE_MERGE=1' "${dry_run}"
+  grep -q -- 'VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1' "${dry_run}"
+done
+
+docker run --rm --entrypoint /usr/local/bin/serve-glm52-v16.sh \
+  -e DRY_RUN=1 \
+  -e MODEL=/model \
+  -e TP=8 \
+  -e DCP=4 \
+  -e DCP_PREFILL_WORKSPACE=0 \
+  "${IMAGE}" | tee /tmp/fathomless-firmament-v17-workspace-off-dry-run.txt
+
+grep -q -- 'VLLM_DCP_PROJECT_BEFORE_MERGE=0' /tmp/fathomless-firmament-v17-workspace-off-dry-run.txt
+grep -q -- 'VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=0' /tmp/fathomless-firmament-v17-workspace-off-dry-run.txt
 
 if [[ "${requested_push}" == "1" ]]; then
   docker push "${IMAGE}"
