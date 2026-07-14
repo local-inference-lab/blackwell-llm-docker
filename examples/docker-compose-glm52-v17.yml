@@ -4,8 +4,16 @@ services:
     entrypoint: ["/usr/local/bin/serve-fathomless-firmament.sh"]
     network_mode: host
     ipc: host
+    privileged: true
+    init: true
     shm_size: 32gb
     gpus: all
+    ulimits:
+      memlock: -1
+      stack: 67108864
+      nofile:
+        soft: 1048576
+        hard: 1048576
     environment:
       MODEL_FAMILY: glm52
       GPUS: ${GPUS:-0,1,2,3,4,5,6,7}
