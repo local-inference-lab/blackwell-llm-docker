@@ -1,6 +1,6 @@
 services:
   glm52-hybrid:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714}
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm05f50ae-b12x1377d5f-fi801d57a-cu132-20260715}
     entrypoint: ["/usr/local/bin/serve-glm52-hybrid-v17.sh"]
     network_mode: host
     ipc: host
@@ -16,6 +16,7 @@ services:
         hard: 1048576
     environment:
       GPUS: ${GPUS:-0,1,2,3}
+      TP: ${TP:-4}
       PORT: ${PORT:-8000}
       DCP: ${DCP:-1}
       DCP_PREFILL_WORKSPACE: ${DCP_PREFILL_WORKSPACE:-auto}

@@ -1,6 +1,6 @@
 services:
   glm52:
-    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714}
+    image: ${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm05f50ae-b12x1377d5f-fi801d57a-cu132-20260715}
     entrypoint: ["/usr/local/bin/serve-fathomless-firmament.sh"]
     network_mode: host
     ipc: host

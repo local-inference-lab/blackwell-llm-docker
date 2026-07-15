@@ -3,12 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:fathomless-firmament-v17-vllm05f50ae-b12x1377d5f-fi801d57a-cu132-20260715}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
-export VLLM_REF="${VLLM_REF:-codex/fathomless-firmament-v17-dcp-prefill-opt-20260714}"
-export VLLM_COMMIT="${VLLM_COMMIT:-6ccc3ebbd17edb05ce11b095a5b14f25839774dd}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm6ccc3eb.b12x1377d5f.fi801d57a.cu132.20260714}"
+export VLLM_REF="${VLLM_REF:-build/fathomless-firmament-v17-tp6-mtp-fix-20260715}"
+export VLLM_COMMIT="${VLLM_COMMIT:-05f50ae79c48835275f22f76e8dfb10b0024dec6}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+fathomless.firmament.v17.vllm05f50ae.b12x1377d5f.fi801d57a.cu132.20260715}"
 
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/fathomless-firmament-v17-nf3-nvfp4kv-20260714}"
@@ -20,6 +20,22 @@ requested_push="${PUSH_IMAGE:-0}"
 export PUSH_IMAGE=0
 
 ./build-fathomless-firmament-v16-cu132.sh "$@"
+
+docker run --rm --entrypoint /opt/venv/bin/python "${IMAGE}" -c \
+  'import inspect; from vllm.config.speculative import SpeculativeConfig; assert hasattr(SpeculativeConfig, "_maybe_apply_virtual_tp_to_draft"); assert "self._maybe_apply_virtual_tp_to_draft()" in inspect.getsource(SpeculativeConfig._verify_args)'
+
+docker run --rm --entrypoint /usr/local/bin/serve-glm52-v16.sh \
+  -e DRY_RUN=1 \
+  -e MODEL=lukealonso/GLM-5.2-NVFP4 \
+  -e GPUS=0,1,2,3,4,5 \
+  -e TP=6 \
+  -e DCP=6 \
+  -e MTP=3 \
+  "${IMAGE}" | tee /tmp/fathomless-firmament-v17-tp6-dcp6-mtp3-dry-run.txt
+
+grep -q -- '--tensor-parallel-size 6' /tmp/fathomless-firmament-v17-tp6-dcp6-mtp3-dry-run.txt
+grep -q -- '--decode-context-parallel-size 6' /tmp/fathomless-firmament-v17-tp6-dcp6-mtp3-dry-run.txt
+grep -q -- 'num_speculative_tokens.*3' /tmp/fathomless-firmament-v17-tp6-dcp6-mtp3-dry-run.txt
 
 docker run --rm --entrypoint /usr/local/bin/serve-glm52-hybrid-v17.sh \
   -e DRY_RUN=1 \

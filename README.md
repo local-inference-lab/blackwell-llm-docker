@@ -102,8 +102,8 @@ DS4 helper through `MODEL_FAMILY`. Start either model with a minimal
 environment-only Compose file and override only the serving choices you need:
 
 ```text
-voipmonitor/vllm:fathomless-firmament-v17-vllm6ccc3eb-b12x1377d5f-fi801d57a-cu132-20260714
-sha256:a1ec6a43cbe4192abd5597123d9270cf16c6241ebfe74066dd7c2383bb41bb27
+voipmonitor/vllm:fathomless-firmament-v17-vllm05f50ae-b12x1377d5f-fi801d57a-cu132-20260715
+sha256:9b6f1ab6db4d3a7b7b786481eb32abe82e86d185648d62c3ac1cfa6d72a55e47
 ```
 
 ```bash
