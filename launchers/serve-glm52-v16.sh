@@ -30,6 +30,7 @@ ONLINE_MXFP8="${ONLINE_MXFP8:-0}"
 ONLINE_FP8="${ONLINE_FP8:-0}"
 ONLINE_FP8_MXFP4="${ONLINE_FP8_MXFP4:-0}"
 ONLINE_QUANT="${ONLINE_QUANT:-}"
+NF3_GRID188="${NF3_GRID188:-1}"
 F8_DMA="${F8_DMA:-0}"
 B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}"
 LOAD_FORMAT="${LOAD_FORMAT:-instanttensor}"
@@ -95,6 +96,7 @@ esac
 [[ "${ONLINE_MXFP8}" =~ ^(0|1)$ ]] || die "ONLINE_MXFP8 must be 0 or 1"
 [[ "${ONLINE_FP8}" =~ ^(0|1)$ ]] || die "ONLINE_FP8 must be 0 or 1"
 [[ "${ONLINE_FP8_MXFP4}" =~ ^(0|1)$ ]] || die "ONLINE_FP8_MXFP4 must be 0 or 1"
+[[ "${NF3_GRID188}" =~ ^(0|1)$ ]] || die "NF3_GRID188 must be 0 or 1"
 [[ "${MTP}" =~ ^[0-9]+$ ]] || die "MTP must be an integer token count"
 [[ "${DCP_A2A_MAX_TOKENS}" =~ ^[0-9]+$ ]] || die "DCP_A2A_MAX_TOKENS must be an integer token count"
 [[ "${MAX_NUM_SEQS}" =~ ^[0-9]+$ ]] || die "MAX_NUM_SEQS must be an integer"
@@ -140,6 +142,15 @@ case "${ONLINE_QUANT}" in
       QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"mxfp8"},"ignore":["re:.*kv_b_proj"]}'
     fi
     ;;
+  nf3-mxfp8)
+    # Exact dense/shared-expert overlay used by the published hybrid
+    # checkpoint: 390 attention linears, 152 shared-expert projections, and
+    # four dense-MLP projections. Layer 0, indexers/routers, eh_proj, and
+    # lm_head remain in their checkpoint dtype (546 MXFP8 modules total).
+    if [[ -z "${QUANTIZATION_CONFIG_JSON}" ]]; then
+      QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:^model\\.layers\\.0\\.","re:.*\\.self_attn\\.indexer\\.","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}'
+    fi
+    ;;
   fp8|fp8_block|fp8-block|fp8-mxfp4)
     ONLINE_QUANT=fp8
     if [[ -z "${QUANTIZATION_CONFIG_JSON}" ]]; then
@@ -150,7 +161,7 @@ case "${ONLINE_QUANT}" in
     [[ -n "${QUANTIZATION_CONFIG_JSON}" ]] || die "ONLINE_QUANT=custom requires QUANTIZATION_CONFIG_JSON"
     ;;
   *)
-    die "ONLINE_QUANT must be none, mxfp8, fp8, or custom"
+    die "ONLINE_QUANT must be none, mxfp8, nf3-mxfp8, fp8, or custom"
     ;;
 esac
 
@@ -201,6 +212,7 @@ export VLLM_PCIE_DMA_FP8="${F8_DMA}"
 export B12X_PCIE_DMA_FP8="${F8_DMA}"
 export VLLM_DCP_GLOBAL_TOPK=1
 export VLLM_DCP_SHARD_DRAFT=1
+export VLLM_NF3_GRID188_DECODE="${NF3_GRID188}"
 export B12X_MLA_SM120_UNIFIED=1
 export B12X_DENSE_SPLITK_TURBO=1
 export B12X_W4A16_TC_DECODE=1
@@ -310,6 +322,9 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'INSTANTTENSOR_BACKEND=%q\n' "${INSTANTTENSOR_BACKEND}"
   printf 'KV_CACHE_DTYPE=%q\n' "${KV_CACHE_DTYPE}"
   printf 'QUANTIZATION=%q\n' "${QUANTIZATION}"
+  printf 'ONLINE_QUANT=%q\n' "${ONLINE_QUANT}"
+  printf 'QUANTIZATION_CONFIG_JSON=%q\n' "${QUANTIZATION_CONFIG_JSON}"
+  printf 'VLLM_NF3_GRID188_DECODE=%q\n' "${VLLM_NF3_GRID188_DECODE}"
   printf 'Command:'
   printf ' %q' "${cmd[@]}"
   printf '\n'
