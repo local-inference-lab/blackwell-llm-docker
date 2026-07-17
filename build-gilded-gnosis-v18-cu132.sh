@@ -5,12 +5,12 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from dev/gilded-gnosis plus the
 # explicitly pinned DSpark, SM120 PCIe, DCP-prefill, and NF3 decode stacks.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllm6c89ef5-b12x66dff47-fi801d57a-cu132-20260717}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllmce5dee9-b12x66dff47-fi801d57a-cu132-20260717}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v18-final-20260717}"
-export VLLM_COMMIT="${VLLM_COMMIT:-6c89ef5b80a40d398c9a97e236814cae71b167f0}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v18.vllm6c89ef5.b12x66dff47.fi801d57a.cu132.20260717}"
+export VLLM_COMMIT="${VLLM_COMMIT:-ce5dee91dc90076bf653759ffa54777971a6caab}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v18.vllmce5dee9.b12x66dff47.fi801d57a.cu132.20260717}"
 
 # Temporary source pin for lukealonso/b12x#36. Replace the repository/ref with
 # upstream master after the PR is merged; the immutable commit remains audited.
@@ -93,12 +93,31 @@ docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
   -e MODEL=/model \
   "${IMAGE}" | grep -q '^ONLINE_QUANT=nf3-mxfp8$'
 
-docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
-  -e DRY_RUN=1 \
-  -e MODE=mtp \
-  -e BACKEND=b12x \
-  -e TP_SIZE=2 \
-  "${IMAGE}" >/tmp/gilded-gnosis-v18-ds4-dry-run.txt
+ds4_dry_run() {
+  local mode="$1"
+  local backend="$2"
+  local tp="$3"
+  docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
+    -e DRY_RUN=1 \
+    -e MODE="${mode}" \
+    -e BACKEND="${backend}" \
+    -e TP_SIZE="${tp}" \
+    -e MODEL=/model \
+    "${IMAGE}" 2>&1 | tee "/tmp/gilded-gnosis-v18-ds4-${mode}-${backend}.txt"
+}
+
+ds4_dry_run mtp0 b12x-a16 2
+ds4_dry_run mtp2 b12x-a8 2
+ds4_dry_run mtp3 b12x-a8-dglin 2
+ds4_dry_run dspark lucifer-cutlass 4
+grep -q 'graph=512 load_format=instanttensor instanttensor_backend=BUFFERED' \
+  /tmp/gilded-gnosis-v18-ds4-mtp2-b12x-a8.txt
+grep -q 'graph=384 load_format=instanttensor instanttensor_backend=BUFFERED' \
+  /tmp/gilded-gnosis-v18-ds4-dspark-lucifer-cutlass.txt
+if grep -q -- '--revision' /tmp/gilded-gnosis-v18-ds4-mtp0-b12x-a16.txt; then
+  echo 'ERROR: DS4 helper injected an HF revision for a local model path' >&2
+  exit 1
+fi
 
 if [[ "${requested_push}" == "1" ]]; then
   docker push "${IMAGE}"
