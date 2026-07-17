@@ -5,12 +5,12 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from dev/gilded-gnosis plus the
 # explicitly pinned DSpark, SM120 PCIe, DCP-prefill, and NF3 decode stacks.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllmce5dee9-b12x66dff47-fi801d57a-cu132-20260717}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllme464064-b12x66dff47-fi801d57a-cu132-20260717}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/local-inference-lab/vllm.git}"
 export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v18-final-20260717}"
-export VLLM_COMMIT="${VLLM_COMMIT:-ce5dee91dc90076bf653759ffa54777971a6caab}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v18.vllmce5dee9.b12x66dff47.fi801d57a.cu132.20260717}"
+export VLLM_COMMIT="${VLLM_COMMIT:-e464064d406954f0eb6ff9b9fa25336da2db1495}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v18.vllme464064.b12x66dff47.fi801d57a.cu132.20260717}"
 
 # Temporary source pin for lukealonso/b12x#36. Replace the repository/ref with
 # upstream master after the PR is merged; the immutable commit remains audited.
@@ -31,7 +31,12 @@ jq -e --arg value "${B12X_COMMIT}" '."local-inference.b12x.commit" == $value' <<
 jq -e --arg value "801d57a08958c13d375ddbb6be3be4808f48a708" '."local-inference.flashinfer.commit" == $value' <<<"${labels}" >/dev/null
 
 docker run --rm -i --entrypoint /opt/venv/bin/python "${IMAGE}" - <<'PY'
+from typing import get_args
+
+import torch
+from vllm import _custom_ops  # noqa: F401
 from vllm import envs
+from vllm.config.cache import CacheDType
 from vllm.config.quantization import resolve_quantization_config
 from vllm.v1.attention.backends.mla import b12x_mla_sparse
 from b12x.moe.fused.w4a16.kernel import (
@@ -42,6 +47,8 @@ assert hasattr(envs, "VLLM_DCP_QUERY_SPLIT")
 assert hasattr(envs, "VLLM_B12X_MLA_CKV_GATHER")
 assert hasattr(envs, "VLLM_NF3_GRID188_DECODE")
 assert hasattr(b12x_mla_sparse, "_global_causal_lens_for_ckv_gather")
+assert "nvfp4_ds_mla" in get_args(CacheDType)
+assert hasattr(torch.ops._C_cache_ops, "concat_and_cache_nvfp4_mla")
 assert resolve_quantization_config("nvfp4_nf3_hybrid", {"linear": {"weight": "mxfp8"}})
 proof = w4a16_hybrid_mapped_grid188_mapping_proof()
 assert proof["grid_x"] == 188
