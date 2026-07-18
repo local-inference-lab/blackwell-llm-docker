@@ -18,7 +18,7 @@ export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/nf3-grid188-decode-20260717}"
 export B12X_COMMIT="${B12X_COMMIT:-bc85ef36192cb6e444d42ba7be86e1e125cca98a}"
 
-export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh"
+export VLLM_REQUIRED_LAUNCHERS="${VLLM_REQUIRED_LAUNCHERS:-serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh}"
 
 requested_push="${PUSH_IMAGE:-0}"
 export PUSH_IMAGE=0

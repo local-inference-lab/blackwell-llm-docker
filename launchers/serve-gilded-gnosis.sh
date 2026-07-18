@@ -10,10 +10,10 @@ printf 'Process-group interfaces: GLOO_SOCKET_IFNAME=%s NCCL_SOCKET_IFNAME=%s\n'
 
 case "${MODEL_FAMILY:-}" in
   glm52|glm5.2|glm)
-    exec /usr/local/bin/serve-glm52-v18.sh "$@"
+    exec /usr/local/bin/serve-glm52-v19.sh "$@"
     ;;
   glm52-hybrid|nf3)
-    exec /usr/local/bin/serve-glm52-hybrid-v18.sh "$@"
+    exec /usr/local/bin/serve-glm52-hybrid-v19.sh "$@"
     ;;
   ds4|ds4-flash|dspark)
     exec /usr/local/bin/serve-ds4-flash.sh "$@"
