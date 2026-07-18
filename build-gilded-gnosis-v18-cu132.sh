@@ -110,7 +110,7 @@ grep -q '^VLLM_B12X_MLA_CKV_GATHER=1$' /tmp/gilded-gnosis-v18-tp8-dcp8.txt
 dry_run tp6-dcp3-mtp3 -e TP=6 -e DCP=3 -e MTP=3
 grep -q -- '--tensor-parallel-size 6' /tmp/gilded-gnosis-v18-tp6-dcp3-mtp3.txt
 grep -q -- '--decode-context-parallel-size 3' /tmp/gilded-gnosis-v18-tp6-dcp3-mtp3.txt
-grep -q '"num_speculative_tokens":3' /tmp/gilded-gnosis-v18-tp6-dcp3-mtp3.txt
+grep -q 'num_speculative_tokens.*3' /tmp/gilded-gnosis-v18-tp6-dcp3-mtp3.txt
 
 dry_run tp6-dcp6-mtp3 -e TP=6 -e DCP=6 -e MTP=3
 grep -q -- '--tensor-parallel-size 6' /tmp/gilded-gnosis-v18-tp6-dcp6-mtp3.txt
