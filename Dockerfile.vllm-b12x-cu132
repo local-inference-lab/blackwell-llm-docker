@@ -60,6 +60,9 @@ ARG INSTANTTENSOR_COMMIT=
 ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
 ARG CUTLASS_REF=main
 ARG CUTLASS_COMMIT=982cb9e718bcd4d7ac546b1795702a08326dfe4b
+ARG CUTLASS_DSL_VERSION=4.5.2
+ARG TOKENSPEED_MLA_VERSION=0.1.2
+ARG TVM_FFI_VERSION=0.1.9
 
 ARG TRITON_KERNELS_REPO=https://github.com/triton-lang/triton.git
 ARG TRITON_KERNELS_REF=
@@ -215,6 +218,8 @@ LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 vLLM+B12X syste
 # =============================================================================
 FROM ${VLLM_B12X_CU132_SYSTEM_BASE_IMAGE} AS vllm-b12x-cu132-build-base-build
 
+ARG CUTLASS_DSL_VERSION
+
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
 RUN python -m venv /opt/venv
@@ -232,9 +237,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
  && python -m pip install \
       "cuda-tile>=1.4.0" \
       nvidia-cuda-tileiras==13.2.78 \
-      "nvidia-cutlass-dsl[cu13]==4.5.2" \
+      "nvidia-cutlass-dsl[cu13]==${CUTLASS_DSL_VERSION}" \
  && python -m pip install --force-reinstall --no-deps \
-      nvidia-cutlass-dsl-libs-cu13==4.5.2 \
+      "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
  && python -m pip check
 
 RUN torch_nccl=/opt/venv/lib/python3.12/site-packages/nvidia/nccl/lib/libnccl.so.2 \
@@ -288,7 +293,7 @@ ENV CCACHE_DIR=/root/.ccache \
 
 LABEL org.opencontainers.image.description="Reusable CUDA 13.2.1 vLLM+B12X build base with PyTorch 2.12 cu132 and CUTLASS DSL" \
       local-inference.torch.version="2.12.0+cu132" \
-      local-inference.cutlass_dsl.version="4.5.2"
+      local-inference.cutlass_dsl.version="${CUTLASS_DSL_VERSION}"
 
 # =============================================================================
 # Stage 1c: build settings overlay
@@ -297,11 +302,21 @@ FROM ${VLLM_B12X_CU132_BUILD_BASE_IMAGE} AS base
 
 ARG MAX_JOBS
 ARG NVCC_THREADS
+ARG CUTLASS_DSL_VERSION
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
 ENV MAX_JOBS=${MAX_JOBS} \
     NVCC_THREADS=${NVCC_THREADS}
+
+# The reusable build base remains pinned for old image recipes. Upgrade it in
+# this derived stage when a newer vLLM revision requires a newer CuTe DSL.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade \
+      "nvidia-cutlass-dsl[cu13]==${CUTLASS_DSL_VERSION}" \
+ && python -m pip install --force-reinstall --no-deps \
+      "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
+ && python -m pip check
 
 # CUDA 13.x headers can be laid out under cccl/. Keep both old and new include
 # paths usable for third-party build scripts.
@@ -474,6 +489,7 @@ ARG VLLM_NVCC_THREADS
 ARG TRITON_KERNELS_REPO
 ARG TRITON_KERNELS_REF
 ARG TRITON_KERNELS_COMMIT
+ARG CUTLASS_DSL_VERSION
 
 WORKDIR /build
 COPY patches /tmp/build-patches
@@ -692,7 +708,7 @@ chmod 0755 /usr/local/bin/verify-vllm-b12x-cu132
 /usr/local/bin/verify-vllm-b12x-cu132 /opt/vllm
 SH
 
-RUN python -m pip install --force-reinstall --no-deps nvidia-cutlass-dsl-libs-cu13==4.5.2 \
+RUN python -m pip install --force-reinstall --no-deps "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
  && python -m pip cache purge || true \
  && rm -rf /tmp/flashinfer-src /tmp/flashinfer-wheels /root/.cache/pip /tmp/pip-* \
  && rm -rf /tmp/vllm-launchers \
@@ -730,6 +746,9 @@ ARG VLLM_RUNTIME_EXTRA_PACKAGES=""
 ARG INSTANTTENSOR_REPO
 ARG INSTANTTENSOR_REF
 ARG INSTANTTENSOR_COMMIT
+ARG CUTLASS_DSL_VERSION
+ARG TOKENSPEED_MLA_VERSION
+ARG TVM_FFI_VERSION
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     printf '%s\n' \
@@ -743,9 +762,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       'nvidia-cuda-tileiras==13.2.78' \
       'nvidia-nvjitlink==13.2.78' \
       'nvidia-nvvm==13.2.78' \
-      'nvidia-cutlass-dsl==4.5.2' \
-      'nvidia-cutlass-dsl-libs-base==4.5.2' \
-      'nvidia-cutlass-dsl-libs-cu13==4.5.2' \
+      "nvidia-cutlass-dsl==${CUTLASS_DSL_VERSION}" \
+      "nvidia-cutlass-dsl-libs-base==${CUTLASS_DSL_VERSION}" \
+      "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
       > /tmp/torch-cu132-constraints.txt \
  && /opt/venv/bin/python -m pip install --upgrade \
       --index-url https://download.pytorch.org/whl/cu132 \
@@ -760,10 +779,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "nvidia-nvjitlink==13.2.78" \
       "cuda-tile>=1.4.0" \
       "tilelang==0.1.9" \
-      "tokenspeed-mla==0.1.2" \
-      "nvidia-cutlass-dsl[cu13]==4.5.2" \
+      "tokenspeed-mla==${TOKENSPEED_MLA_VERSION}" \
+      "nvidia-cutlass-dsl[cu13]==${CUTLASS_DSL_VERSION}" \
       "transformers>=5.5.1" \
-      "apache-tvm-ffi==0.1.9" \
+      "apache-tvm-ffi==${TVM_FFI_VERSION}" \
       "fastsafetensors>=0.3.2" \
  && if [[ -n "${VLLM_RUNTIME_EXTRA_PACKAGES}" ]]; then \
       /opt/venv/bin/python -m pip install --upgrade \
@@ -916,6 +935,9 @@ ARG VLLM_REQUIRED_LAUNCHERS
 ARG CUBLAS_CUDA13_VERSION
 ARG CUDNN_CUDA13_VERSION
 ARG CUDA_COMPAT_13_2_VERSION
+ARG CUTLASS_DSL_VERSION
+ARG TOKENSPEED_MLA_VERSION
+ARG TVM_FFI_VERSION
 
 LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, DeepGEMM, B12X and selected vLLM branch" \
       local-inference.cuda.version="13.2.1" \
@@ -923,6 +945,9 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.cublas.version="${CUBLAS_CUDA13_VERSION}" \
       local-inference.cudnn.version="${CUDNN_CUDA13_VERSION}" \
       local-inference.torch.version="2.12.0+cu132" \
+      local-inference.cutlass_dsl.version="${CUTLASS_DSL_VERSION}" \
+      local-inference.tokenspeed_mla.version="${TOKENSPEED_MLA_VERSION}" \
+      local-inference.tvm_ffi.version="${TVM_FFI_VERSION}" \
       local-inference.nccl.repo="local-inference-lab/nccl-canonical" \
       local-inference.nccl.branch="canonical/cu132-nccl2304-amd-noxml" \
       local-inference.nccl.version="2.30.4" \

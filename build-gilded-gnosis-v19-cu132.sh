@@ -17,6 +17,14 @@ export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
 export B12X_REF="${B12X_REF:-codex/nf3-grid188-decode-20260717}"
 export B12X_COMMIT="${B12X_COMMIT:-bc85ef36192cb6e444d42ba7be86e1e125cca98a}"
 
+# The rebased upstream vLLM CUDA dependency set. Keep source and Python CuTe
+# DSL pins aligned so FlashInfer, B12X, vLLM, and the final runtime share one API.
+export CUTLASS_REF="${CUTLASS_REF:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
+export CUTLASS_COMMIT="${CUTLASS_COMMIT:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
+export CUTLASS_DSL_VERSION="${CUTLASS_DSL_VERSION:-4.6.0}"
+export TOKENSPEED_MLA_VERSION="${TOKENSPEED_MLA_VERSION:-0.1.8}"
+export TVM_FFI_VERSION="${TVM_FFI_VERSION:-0.1.10}"
+
 export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-ds4-flash.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-v19.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh serve-glm52-hybrid-v19.sh"
 
 requested_push="${PUSH_IMAGE:-0}"
@@ -32,12 +40,18 @@ jq -e --arg value "${B12X_COMMIT}" '."local-inference.b12x.commit" == $value' <<
 jq -e --arg value "801d57a08958c13d375ddbb6be3be4808f48a708" '."local-inference.flashinfer.commit" == $value' <<<"${labels}" >/dev/null
 
 docker run --rm --entrypoint /opt/venv/bin/python "${IMAGE}" - <<'PY'
+import importlib.metadata as md
+
 from vllm import envs
 from vllm.distributed.device_communicators import symm_mem_pcie_barrier
 from vllm.model_executor.layers import fp8_draft_head
 from vllm.v1.worker.gpu.spec_decode import capacity
 from vllm.v1.worker.gpu.spec_decode.dspark import online_sts
 
+assert md.version("nvidia-cutlass-dsl") == "4.6.0"
+assert md.version("nvidia-cutlass-dsl-libs-cu13") == "4.6.0"
+assert md.version("tokenspeed-mla") == "0.1.8"
+assert md.version("apache-tvm-ffi") == "0.1.10"
 assert hasattr(envs, "VLLM_ALLOW_CUSTOM_ALLREDUCE_PCIE")
 assert hasattr(envs, "VLLM_SYMM_MEM_PCIE_SAFE_BARRIER")
 assert hasattr(envs, "VLLM_DSPARK_FP8_DRAFT_HEAD")
