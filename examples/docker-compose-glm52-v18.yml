@@ -1,0 +1,38 @@
+services:
+  glm52:
+    image: ${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllm264bce1-b12xbc85ef3-fi801d57a-cu132-20260718}
+    entrypoint: ["/usr/local/bin/serve-gilded-gnosis.sh"]
+    network_mode: host
+    ipc: host
+    privileged: true
+    init: true
+    shm_size: 32gb
+    gpus: all
+    ulimits:
+      memlock: -1
+      stack: 67108864
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    environment:
+      MODEL_FAMILY: ${MODEL_FAMILY:-glm52}
+      GPUS: ${GPUS:-0,1,2,3,4,5,6,7}
+      PORT: ${PORT:-8000}
+      MODEL: ${MODEL:-lukealonso/GLM-5.2-NVFP4}
+      TP: ${TP:-8}
+      DCP: ${DCP:-1}
+      MTP: ${MTP:-0}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-131072}
+      MAX_BATCHED_TOKENS: ${MAX_BATCHED_TOKENS:-8192}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.90}
+      MOE_MODE: ${MOE_MODE:-a4}
+      QUANTIZATION: ${QUANTIZATION:-modelopt_fp4}
+      ONLINE_QUANT: ${ONLINE_QUANT:-none}
+      F8_DMA: ${F8_DMA:-0}
+    volumes:
+      - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ${MODEL_ROOT:-/root/models}:/root/models:ro
+      - ${JIT_CACHE:-./cache/glm52-v18}:/cache
+      - ${CONTAINER_TMP:-./cache/glm52-v18/tmp}:/container-tmp
+

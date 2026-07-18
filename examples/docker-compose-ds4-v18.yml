@@ -1,0 +1,34 @@
+services:
+  ds4:
+    image: ${IMAGE:-voipmonitor/vllm:gilded-gnosis-v18-vllm264bce1-b12xbc85ef3-fi801d57a-cu132-20260718}
+    entrypoint: ["/usr/local/bin/serve-gilded-gnosis.sh"]
+    network_mode: host
+    ipc: host
+    shm_size: 32gb
+    gpus: all
+    environment:
+      MODEL_FAMILY: ds4
+      CUDA_VISIBLE_DEVICES: ${GPUS:-0,1}
+      PORT: ${PORT:-8000}
+      STANDARD_MODEL: ${STANDARD_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
+      DSPARK_MODEL: ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
+      MODE: ${MODE:-mtp2}
+      BACKEND: ${BACKEND:-b12x-a8}
+      TP_SIZE: ${TP_SIZE:-2}
+      DCP_SIZE: ${DCP_SIZE:-1}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-262144}
+      MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-8192}
+      ALLREDUCE_MODE: ${ALLREDUCE_MODE:-b12x}
+      INDEXER_BACKEND: ${INDEXER_BACKEND:-auto}
+      B12X_PCIE_DMA: ${B12X_PCIE_DMA:-0}
+      DSPARK_TOKENS: ${DSPARK_TOKENS:-5}
+      DSPARK_CAPACITY: ${DSPARK_CAPACITY:-0}
+      DSPARK_DYNAMIC_DRAFT_DEPTH: ${DSPARK_DYNAMIC_DRAFT_DEPTH:-0}
+      DSPARK_ONLINE_STS: ${DSPARK_ONLINE_STS:-1}
+      DSPARK_FP8_DRAFT_HEAD: ${DSPARK_FP8_DRAFT_HEAD:-0}
+    volumes:
+      - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ${MODEL_ROOT:-/root/models}:/root/models:ro
+      - ${JIT_CACHE:-./cache/ds4-v18}:/cache
+      - ${CONTAINER_TMP:-./cache/ds4-v18/tmp}:/container-tmp
