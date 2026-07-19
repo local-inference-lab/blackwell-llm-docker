@@ -62,6 +62,7 @@ from vllm.v1.worker.workspace import WorkspaceManager, use_workspace_lane
 assert md.version("nvidia-cutlass-dsl") == "4.5.3"
 assert md.version("nvidia-cutlass-dsl-libs-base") == "4.5.3"
 assert md.version("nvidia-cutlass-dsl-libs-cu13") == "4.5.3"
+assert "nvidia-cutlass-dsl[cu13]==4.5.3" in (md.requires("vllm") or [])
 assert hasattr(cute.nvgpu.warp, "MmaMXF8Op")
 mma = Path(cute.__file__).parent / "nvgpu" / "warp" / "mma.py"
 assert hashlib.sha256(mma.read_bytes()).hexdigest() == (

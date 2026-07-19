@@ -510,7 +510,8 @@ RUN git clone --recursive --filter=blob:none "${VLLM_REPO}" /opt/vllm \
       git apply --verbose /tmp/vllm-extra.patch; \
       git diff --check; \
     fi \
- && python - <<'PY'
+ && CUTLASS_DSL_VERSION="${CUTLASS_DSL_VERSION}" python - <<'PY'
+import os
 import re
 from importlib.metadata import PackageNotFoundError, version
 
@@ -540,8 +541,19 @@ for package, package_version in versions.items():
     if count != 1:
         raise SystemExit(
             f"expected exactly one {package} pin in {path}, found {count}")
+cutlass_dsl_version = os.environ["CUTLASS_DSL_VERSION"]
+text, count = re.subn(
+    r"^nvidia-cutlass-dsl\[cu13\]==.*$",
+    f"nvidia-cutlass-dsl[cu13]=={cutlass_dsl_version}",
+    text,
+    flags=re.MULTILINE,
+)
+if count != 1:
+    raise SystemExit(
+        f"expected exactly one nvidia-cutlass-dsl pin in {path}, found {count}")
 open(path, "w", encoding="utf-8").write(text)
 print("vLLM FlashInfer requirements:", versions)
+print("vLLM CUTLASS DSL requirement:", cutlass_dsl_version)
 PY
 
 RUN cd /opt/vllm \
