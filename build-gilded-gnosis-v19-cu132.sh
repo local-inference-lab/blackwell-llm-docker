@@ -5,17 +5,17 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
 # the independently reviewable SM120 CUTLASS DSL pin.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm7ea567a-b12x4cfa530-fi801d57a-cu132-20260718}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm7ea567a-b12xc7dc733-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
 export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final-20260718}"
 export VLLM_COMMIT="${VLLM_COMMIT:-7ea567a2458a4800a6a0e3e0a6ba41fcbd00d146}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm7ea567a.b12x4cfa530.fi801d57a.cu132.20260718}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm7ea567a.b12xc7dc733.fi801d57a.cu132.20260719}"
 
-# Current B12X master plus stable CuTe cache-key PR #41.
+# Canonical B12X master including the merged stable CuTe cache-key fix.
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
-export B12X_REF="${B12X_REF:-build/gilded-gnosis-v19-final-b12x-20260718}"
-export B12X_COMMIT="${B12X_COMMIT:-4cfa5307e7579f34d52759f7ed2a897295026dd3}"
+export B12X_REF="${B12X_REF:-build/gilded-gnosis-v19-final-b12x-canonical-20260719}"
+export B12X_COMMIT="${B12X_COMMIT:-c7dc73322cc50609f843fa2bbcc53283a90003b3}"
 
 # Keep the rebased upstream CUTLASS C++ source pin used to build FlashInfer.
 # CuTe DSL 4.6.0 regresses the B12X W4A16 prefill kernel on SM120 through
@@ -95,10 +95,19 @@ dry_run() {
     "${IMAGE}" | tee "/tmp/gilded-gnosis-v19-${name}.txt"
 }
 
-dry_run tp8-dcp4 -e TP=8 -e DCP=4
-grep -q '^VLLM_DCP_QUERY_SPLIT=1$' /tmp/gilded-gnosis-v19-tp8-dcp4.txt
-grep -q '^VLLM_B12X_MLA_CKV_GATHER=1$' /tmp/gilded-gnosis-v19-tp8-dcp4.txt
+for profile in tp4-dcp2 tp4-dcp4 tp8-dcp2 tp8-dcp4 tp8-dcp8; do
+  tp="${profile#tp}"
+  tp="${tp%%-*}"
+  dcp="${profile##*-dcp}"
+  dry_run "${profile}" -e TP="${tp}" -e DCP="${dcp}"
+  grep -q '^VLLM_DCP_QUERY_SPLIT=1$' "/tmp/gilded-gnosis-v19-${profile}.txt"
+  grep -q '^VLLM_B12X_MLA_CKV_GATHER=1$' "/tmp/gilded-gnosis-v19-${profile}.txt"
+done
 grep -q -- '--load-format instanttensor' /tmp/gilded-gnosis-v19-tp8-dcp4.txt
+
+dry_run tp6-dcp3 -e TP=6 -e DCP=3
+grep -q '^VLLM_DCP_QUERY_SPLIT=0$' /tmp/gilded-gnosis-v19-tp6-dcp3.txt
+grep -q '^VLLM_B12X_MLA_CKV_GATHER=0$' /tmp/gilded-gnosis-v19-tp6-dcp3.txt
 
 dry_run tp6-dcp6-mtp3 -e TP=6 -e DCP=6 -e MTP=3
 grep -q -- '--tensor-parallel-size 6' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt

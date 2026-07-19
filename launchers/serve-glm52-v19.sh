@@ -21,8 +21,12 @@ case "${DCP_CKV_GATHER}" in
   *) die "DCP_CKV_GATHER must be auto, 0, or 1" ;;
 esac
 
+# The full-CKV/query-split stack is faster when each rank has a naturally
+# 8-head-aligned local shard. TP4 and TP8 meet that contract. Virtual TP6 has
+# 11 local heads; measured 64k prefill regressed by 27% with full-CKV and 32%
+# with query split, so its faster borrowed-workspace path remains the default.
 case "${TP}:${DCP}" in
-  8:4|8:8)
+  4:2|4:4|8:2|8:4|8:8)
     [[ "${DCP_QUERY_SPLIT}" == "auto" ]] && DCP_QUERY_SPLIT=1
     [[ "${DCP_CKV_GATHER}" == "auto" ]] && DCP_CKV_GATHER=1
     ;;
