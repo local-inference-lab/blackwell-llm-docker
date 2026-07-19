@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
-# the independently reviewable SM120 CUTLASS DSL pin.
+# the independently reviewable SM120 CUTLASS DSL pin and DCP A2A prewarm fix.
 export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm6b74780-b12xc7dc733-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
