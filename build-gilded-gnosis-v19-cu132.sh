@@ -5,14 +5,14 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
 # the independently reviewable SM120 CUTLASS DSL pin, DCP A2A prewarm fix,
-# MRV2 CUDA-graph/sparse-attention memory accounting fix, and isolated B12X
-# nested-capture channels for concurrent target/draft graph replay.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm04fa7cf-b12x00695ee-fi801d57a-cu132-20260719}"
+# MRV2 CUDA-graph/sparse-attention memory accounting fix, isolated B12X
+# nested-capture channels, and independent target/draft workspace lanes.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm6b57c14-b12x00695ee-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final4-20260719}"
-export VLLM_COMMIT="${VLLM_COMMIT:-04fa7cfbd86a4cb0de74e99069d4a408a281cd91}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm04fa7cf.b12x00695ee.fi801d57a.cu132.20260719}"
+export VLLM_REF="${VLLM_REF:-fix/gg-pcie-capture-channel-isolation-20260719}"
+export VLLM_COMMIT="${VLLM_COMMIT:-6b57c148d41c50b100deaa2f23520f38a9c3fce4}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm6b57c14.b12x00695ee.fi801d57a.cu132.20260719}"
 
 # Canonical B12X master including the merged nested-capture channel fix.
 export B12X_REPO="${B12X_REPO:-https://github.com/lukealonso/b12x.git}"
@@ -57,6 +57,7 @@ from vllm.model_executor.layers import fp8_draft_head
 from vllm.v1.attention.ops.dcp_alltoall import capture_b12x_dcp_a2a
 from vllm.v1.worker.gpu.spec_decode import capacity
 from vllm.v1.worker.gpu.spec_decode.dspark import online_sts
+from vllm.v1.worker.workspace import WorkspaceManager, use_workspace_lane
 
 assert md.version("nvidia-cutlass-dsl") == "4.5.3"
 assert md.version("nvidia-cutlass-dsl-libs-base") == "4.5.3"
@@ -83,6 +84,8 @@ assert hasattr(fp8_draft_head, "Fp8DraftHead")
 assert hasattr(capacity, "DSparkDynamicDraftDepthController")
 assert hasattr(capacity, "CapacityBasedVerificationManager")
 assert hasattr(online_sts, "DSparkOnlineSTS")
+assert callable(use_workspace_lane)
+assert WorkspaceManager.__init__.__annotations__.get("num_lanes") == int
 assert hasattr(w4a16_kernel, "compile_w4a16_fused_moe_hybrid")
 assert hasattr(w4a16_kernel, "run_w4a16_moe_hybrid")
 assert not hasattr(w4a16_kernel, "w4a16_hybrid_mapped_grid188_mapping_proof")
