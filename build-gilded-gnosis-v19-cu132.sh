@@ -5,12 +5,12 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
 # the independently reviewable SM120 CUTLASS DSL pin.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm7ea567a-b12xc7dc733-fi801d57a-cu132-20260719}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm6b74780-b12xc7dc733-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final-20260718}"
-export VLLM_COMMIT="${VLLM_COMMIT:-7ea567a2458a4800a6a0e3e0a6ba41fcbd00d146}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm7ea567a.b12xc7dc733.fi801d57a.cu132.20260719}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final2-20260719}"
+export VLLM_COMMIT="${VLLM_COMMIT:-6b74780750013b52d82cb767578445c8fa96f8ed}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm6b74780.b12xc7dc733.fi801d57a.cu132.20260719}"
 
 # Canonical B12X master including the merged stable CuTe cache-key fix.
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
