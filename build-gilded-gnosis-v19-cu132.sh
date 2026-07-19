@@ -41,6 +41,13 @@ labels="$(docker image inspect "${IMAGE}" --format '{{json .Config.Labels}}')"
 jq -e --arg value "${VLLM_COMMIT}" '."local-inference.vllm.commit" == $value' <<<"${labels}" >/dev/null
 jq -e --arg value "${B12X_COMMIT}" '."local-inference.b12x.commit" == $value' <<<"${labels}" >/dev/null
 jq -e --arg value "801d57a08958c13d375ddbb6be3be4808f48a708" '."local-inference.flashinfer.commit" == $value' <<<"${labels}" >/dev/null
+cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
+[[ "${cache_fingerprint}" =~ ^vllm6b57c148d4-b12x00695ee872-[0-9a-f]{16}$ ]]
+
+image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+grep -Fxq "XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}" <<<"${image_env}"
+grep -Fxq "VLLM_CACHE_ROOT=/cache/jit/${cache_fingerprint}/vllm" <<<"${image_env}"
+grep -Fxq "B12X_CUTE_COMPILE_CACHE_DIR=/cache/jit/${cache_fingerprint}/b12x-cute" <<<"${image_env}"
 
 docker run --rm --entrypoint /opt/venv/bin/python "${IMAGE}" - <<'PY'
 import importlib.metadata as md
@@ -130,6 +137,10 @@ grep -q 'num_speculative_tokens.*3' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt
 dry_run native-allocator \
   -e PYTORCH_CUDA_ALLOC_CONF=backend:native
 grep -q '^PYTORCH_CUDA_ALLOC_CONF=backend:native$' \
+  /tmp/gilded-gnosis-v19-native-allocator.txt
+grep -q "^LOCAL_INFERENCE_CACHE_FINGERPRINT=${cache_fingerprint}$" \
+  /tmp/gilded-gnosis-v19-native-allocator.txt
+grep -q "^XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}$" \
   /tmp/gilded-gnosis-v19-native-allocator.txt
 
 docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \

@@ -96,6 +96,76 @@ else
   INSTANTTENSOR_COMMIT="${INSTANTTENSOR_COMMIT:-}"
 fi
 
+local_patch_sha=""
+if [[ -n "${VLLM_PATCH_FILE}" ]]; then
+  [[ -f "${VLLM_PATCH_FILE}" ]] || {
+    echo "VLLM_PATCH_FILE does not exist: ${VLLM_PATCH_FILE}" >&2
+    exit 1
+  }
+  local_patch_sha="$(sha256sum "${VLLM_PATCH_FILE}" | awk '{print $1}')"
+  if [[ -n "${VLLM_PATCH_SHA256}" && "${local_patch_sha}" != "${VLLM_PATCH_SHA256}" ]]; then
+    echo "VLLM_PATCH_FILE SHA256 mismatch: got ${local_patch_sha}, expected ${VLLM_PATCH_SHA256}" >&2
+    exit 1
+  fi
+fi
+
+runtime_files_sha="$({
+  sha256sum Dockerfile.vllm-b12x-cu132
+  find launchers -type f -print0 | sort -z | xargs -0 sha256sum
+} | sha256sum | awk '{print $1}')"
+
+cache_hash="$(printf '%s\n' \
+  "SYSTEM_BASE_IMAGE=${SYSTEM_BASE_IMAGE}" \
+  "BUILD_BASE_IMAGE_TAG=${BUILD_BASE_IMAGE_TAG}" \
+  "NCCL_REPO=${NCCL_REPO}" \
+  "NCCL_REF=${NCCL_REF}" \
+  "NCCL_COMMIT=${NCCL_COMMIT}" \
+  "FLASHINFER_REPO=${FLASHINFER_REPO}" \
+  "FLASHINFER_REF=${FLASHINFER_REF}" \
+  "FLASHINFER_COMMIT=${FLASHINFER_COMMIT}" \
+  "FLASHINFER_BUILD_CUBIN=${FLASHINFER_BUILD_CUBIN}" \
+  "DEEPGEMM_REPO=${DEEPGEMM_REPO}" \
+  "DEEPGEMM_REF=${DEEPGEMM_REF}" \
+  "DEEPGEMM_COMMIT=${DEEPGEMM_COMMIT}" \
+  "B12X_REPO=${B12X_REPO}" \
+  "B12X_REF=${B12X_REF}" \
+  "B12X_COMMIT=${B12X_COMMIT}" \
+  "VLLM_REPO=${VLLM_REPO}" \
+  "VLLM_REF=${VLLM_REF}" \
+  "VLLM_COMMIT=${VLLM_COMMIT}" \
+  "VLLM_PATCH_URL=${VLLM_PATCH_URL}" \
+  "VLLM_PATCH_SHA256=${VLLM_PATCH_SHA256}" \
+  "VLLM_PATCH_FILE_SHA256=${local_patch_sha}" \
+  "VLLM_BUILD_VERSION=${VLLM_BUILD_VERSION}" \
+  "LAUNCHER_REPO=${LAUNCHER_REPO}" \
+  "LAUNCHER_REF=${LAUNCHER_REF}" \
+  "LAUNCHER_COMMIT=${LAUNCHER_COMMIT}" \
+  "CUTLASS_REPO=${CUTLASS_REPO}" \
+  "CUTLASS_REF=${CUTLASS_REF}" \
+  "CUTLASS_COMMIT=${CUTLASS_COMMIT}" \
+  "CUTLASS_DSL_VERSION=${CUTLASS_DSL_VERSION}" \
+  "TOKENSPEED_MLA_VERSION=${TOKENSPEED_MLA_VERSION}" \
+  "TVM_FFI_VERSION=${TVM_FFI_VERSION}" \
+  "TRITON_KERNELS_REPO=${TRITON_KERNELS_REPO}" \
+  "TRITON_KERNELS_REF=${TRITON_KERNELS_REF}" \
+  "TRITON_KERNELS_COMMIT=${TRITON_KERNELS_COMMIT}" \
+  "INSTANTTENSOR_REPO=${INSTANTTENSOR_REPO}" \
+  "INSTANTTENSOR_REF=${INSTANTTENSOR_REF}" \
+  "INSTANTTENSOR_COMMIT=${INSTANTTENSOR_COMMIT}" \
+  "HUMMING_KERNELS_SPEC=${HUMMING_KERNELS_SPEC}" \
+  "VLLM_RUNTIME_EXTRA_PACKAGES=${VLLM_RUNTIME_EXTRA_PACKAGES}" \
+  "RUNTIME_FILES_SHA256=${runtime_files_sha}" \
+  | sha256sum | awk '{print substr($1, 1, 16)}')"
+vllm_cache_id="${VLLM_COMMIT:0:10}"
+b12x_cache_id="${B12X_COMMIT:0:10}"
+vllm_cache_id="${vllm_cache_id:-unpinned}"
+b12x_cache_id="${b12x_cache_id:-unpinned}"
+CACHE_FINGERPRINT="${CACHE_FINGERPRINT:-vllm${vllm_cache_id}-b12x${b12x_cache_id}-${cache_hash}}"
+if [[ ! "${CACHE_FINGERPRINT}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ || "${CACHE_FINGERPRINT}" == *..* ]]; then
+  echo "Invalid CACHE_FINGERPRINT: ${CACHE_FINGERPRINT}" >&2
+  exit 1
+fi
+
 echo "Building ${IMAGE}"
 echo "  SYSTEM_BASE_IMAGE=${SYSTEM_BASE_IMAGE}"
 echo "  BUILD_BASE_IMAGE_TAG=${BUILD_BASE_IMAGE_TAG}"
@@ -124,6 +194,7 @@ echo "  INSTANTTENSOR_REF=${INSTANTTENSOR_REF} ${INSTANTTENSOR_COMMIT}"
 echo "  NCCL_REF=${NCCL_REF} ${NCCL_COMMIT}"
 echo "  HUMMING_KERNELS_SPEC=${HUMMING_KERNELS_SPEC}"
 echo "  VLLM_RUNTIME_EXTRA_PACKAGES=${VLLM_RUNTIME_EXTRA_PACKAGES}"
+echo "  CACHE_FINGERPRINT=${CACHE_FINGERPRINT}"
 
 if [[ "${BUILD_BASE_IMAGE}" == "1" ]]; then
   DOCKER_BUILDKIT=1 docker build \
@@ -198,8 +269,31 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg INSTANTTENSOR_COMMIT="${INSTANTTENSOR_COMMIT}" \
   --build-arg HUMMING_KERNELS_SPEC="${HUMMING_KERNELS_SPEC}" \
   --build-arg VLLM_RUNTIME_EXTRA_PACKAGES="${VLLM_RUNTIME_EXTRA_PACKAGES}" \
+  --build-arg CACHE_FINGERPRINT="${CACHE_FINGERPRINT}" \
   --progress=plain \
   -f Dockerfile.vllm-b12x-cu132 \
   -t "${IMAGE}" \
   "$@" \
   .
+
+image_cache_fingerprint="$(docker image inspect "${IMAGE}" --format '{{index .Config.Labels "local-inference.cache.fingerprint"}}')"
+[[ "${image_cache_fingerprint}" == "${CACHE_FINGERPRINT}" ]] || {
+  echo "Image cache fingerprint mismatch: got ${image_cache_fingerprint}, expected ${CACHE_FINGERPRINT}" >&2
+  exit 1
+}
+
+image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+cache_root="/cache/jit/${CACHE_FINGERPRINT}"
+for expected in \
+  "LOCAL_INFERENCE_CACHE_FINGERPRINT=${CACHE_FINGERPRINT}" \
+  "XDG_CACHE_HOME=${cache_root}" \
+  "VLLM_CACHE_ROOT=${cache_root}/vllm" \
+  "TRITON_CACHE_DIR=${cache_root}/triton" \
+  "TORCHINDUCTOR_CACHE_DIR=${cache_root}/torchinductor" \
+  "B12X_CUTE_COMPILE_CACHE_DIR=${cache_root}/b12x-cute" \
+  "MM_SPARSE_ATTN_AOT_CACHE=${cache_root}/minfer/mm_sparse_attn"; do
+  grep -Fxq "${expected}" <<<"${image_env}" || {
+    echo "Image is missing cache environment: ${expected}" >&2
+    exit 1
+  }
+done

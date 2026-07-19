@@ -902,6 +902,8 @@ RUN cublas="$(readlink -f /usr/lib/x86_64-linux-gnu/libcublas/13/libcublas.so.13
     done \
  && ldconfig
 
+ARG CACHE_FINGERPRINT=unversioned
+
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}" \
     CUDA_DEVICE_ORDER=PCI_BUS_ID \
@@ -910,12 +912,27 @@ ENV VIRTUAL_ENV=/opt/venv \
     FLASHINFER_LOCAL_VERSION=cu132 \
     FLASHINFER_DISABLE_VERSION_CHECK=1 \
     HF_HOME=/root/.cache/huggingface \
-    TRITON_CACHE_DIR=/cache/jit/triton \
-    TORCH_EXTENSIONS_DIR=/cache/jit/torch_extensions \
-    VLLM_CACHE_DIR=/cache/jit/vllm \
-    FLASHINFER_WORKSPACE_BASE=/cache/jit/flashinfer \
-    TVM_FFI_CACHE_DIR=/cache/jit/tvm-ffi \
-    XDG_CACHE_HOME=/cache/jit \
+    LOCAL_INFERENCE_CACHE_FINGERPRINT=${CACHE_FINGERPRINT} \
+    XDG_CACHE_HOME=/cache/jit/${CACHE_FINGERPRINT} \
+    VLLM_CACHE_ROOT=/cache/jit/${CACHE_FINGERPRINT}/vllm \
+    VLLM_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/vllm \
+    TRITON_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/triton \
+    TORCHINDUCTOR_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/torchinductor \
+    TORCH_EXTENSIONS_DIR=/cache/jit/${CACHE_FINGERPRINT}/torch_extensions \
+    FLASHINFER_WORKSPACE_BASE=/cache/jit/${CACHE_FINGERPRINT}/flashinfer \
+    VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/flashinfer-autotune \
+    TVM_FFI_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tvm-ffi \
+    TVM_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tvm \
+    TILELANG_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tilelang \
+    TILELANG_TMP_DIR=/cache/jit/${CACHE_FINGERPRINT}/tilelang/tmp \
+    CUTE_DSL_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/cute-dsl \
+    B12X_CUTE_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/b12x-cute \
+    DG_JIT_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/deep-gemm \
+    MM_SPARSE_ATTN_AOT_CACHE=/cache/jit/${CACHE_FINGERPRINT}/minfer/mm_sparse_attn \
+    MINFER_FMHA_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/minfer/fmha_sm100 \
+    CUDA_CACHE_PATH=/cache/jit/${CACHE_FINGERPRINT}/cuda \
+    CUPY_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/cupy \
+    NUMBA_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/numba \
     NCCL_LOCAL_INFERENCE_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     NCCL_PR2127_PATH=/opt/libnccl-local-inference.so.2.30.4 \
     VLLM_NCCL_SO_PATH=/opt/libnccl-local-inference.so.2.30.4 \
@@ -934,7 +951,26 @@ ENV VIRTUAL_ENV=/opt/venv \
     VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
     VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
 
-RUN mkdir -p /cache/jit/triton /cache/jit/torch_extensions /cache/jit/vllm /cache/jit/flashinfer \
+RUN mkdir -p \
+      "${XDG_CACHE_HOME}" \
+      "${VLLM_CACHE_ROOT}" \
+      "${TRITON_CACHE_DIR}" \
+      "${TORCHINDUCTOR_CACHE_DIR}" \
+      "${TORCH_EXTENSIONS_DIR}" \
+      "${FLASHINFER_WORKSPACE_BASE}" \
+      "${VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR}" \
+      "${TVM_FFI_CACHE_DIR}" \
+      "${TVM_CACHE_DIR}" \
+      "${TILELANG_CACHE_DIR}" \
+      "${TILELANG_TMP_DIR}" \
+      "${CUTE_DSL_CACHE_DIR}" \
+      "${B12X_CUTE_COMPILE_CACHE_DIR}" \
+      "${DG_JIT_CACHE_DIR}" \
+      "${MM_SPARSE_ATTN_AOT_CACHE}" \
+      "${MINFER_FMHA_CACHE_DIR}" \
+      "${CUDA_CACHE_PATH}" \
+      "${CUPY_CACHE_DIR}" \
+      "${NUMBA_CACHE_DIR}" \
  && strings /opt/libnccl-local-inference.so.2.30.4 | grep -F "NCCL version 2.30.4 compiled with CUDA 13.2" \
  && /usr/local/bin/verify-vllm-b12x-cu132 /opt/vllm \
  && python - <<'PY'
@@ -986,6 +1022,7 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.cutlass_dsl.version="${CUTLASS_DSL_VERSION}" \
       local-inference.tokenspeed_mla.version="${TOKENSPEED_MLA_VERSION}" \
       local-inference.tvm_ffi.version="${TVM_FFI_VERSION}" \
+      local-inference.cache.fingerprint="${CACHE_FINGERPRINT}" \
       local-inference.nccl.repo="local-inference-lab/nccl-canonical" \
       local-inference.nccl.branch="canonical/cu132-nccl2304-amd-noxml" \
       local-inference.nccl.version="2.30.4" \
