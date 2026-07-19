@@ -5,18 +5,19 @@ cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
 # the independently reviewable SM120 CUTLASS DSL pin, DCP A2A prewarm fix,
-# and MRV2 CUDA-graph/sparse-attention memory accounting fix.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllmf879d86-b12xc7dc733-fi801d57a-cu132-20260719}"
+# MRV2 CUDA-graph/sparse-attention memory accounting fix, and isolated B12X
+# nested-capture channels for concurrent target/draft graph replay.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm04fa7cf-b12x00695ee-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final3-20260719}"
-export VLLM_COMMIT="${VLLM_COMMIT:-f879d8633e872703bb7aae409d06e34269364625}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllmf879d86.b12xc7dc733.fi801d57a.cu132.20260719}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final4-20260719}"
+export VLLM_COMMIT="${VLLM_COMMIT:-04fa7cfbd86a4cb0de74e99069d4a408a281cd91}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm04fa7cf.b12x00695ee.fi801d57a.cu132.20260719}"
 
-# Canonical B12X master including the merged stable CuTe cache-key fix.
-export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
-export B12X_REF="${B12X_REF:-build/gilded-gnosis-v19-final-b12x-canonical-20260719}"
-export B12X_COMMIT="${B12X_COMMIT:-c7dc73322cc50609f843fa2bbcc53283a90003b3}"
+# Canonical B12X master including the merged nested-capture channel fix.
+export B12X_REPO="${B12X_REPO:-https://github.com/lukealonso/b12x.git}"
+export B12X_REF="${B12X_REF:-master}"
+export B12X_COMMIT="${B12X_COMMIT:-00695ee872e8f85f9c4309f7859fdc4c242bfb1d}"
 
 # Keep the rebased upstream CUTLASS C++ source pin used to build FlashInfer.
 # CuTe DSL 4.6.0 regresses the B12X W4A16 prefill kernel on SM120 through
@@ -47,11 +48,13 @@ import hashlib
 from pathlib import Path
 
 import cutlass.cute as cute
+from b12x.distributed import PCIeDCPA2APool, PCIeOneshotAllReducePool
 from b12x.moe.fused.w4a16 import kernel as w4a16_kernel
 
 from vllm import envs
 from vllm.distributed.device_communicators import symm_mem_pcie_barrier
 from vllm.model_executor.layers import fp8_draft_head
+from vllm.v1.attention.ops.dcp_alltoall import capture_b12x_dcp_a2a
 from vllm.v1.worker.gpu.spec_decode import capacity
 from vllm.v1.worker.gpu.spec_decode.dspark import online_sts
 
@@ -71,7 +74,11 @@ assert hasattr(envs, "VLLM_DSPARK_FP8_DRAFT_HEAD")
 assert hasattr(envs, "VLLM_DSPARK_DYNAMIC_DRAFT_DEPTH")
 assert hasattr(envs, "VLLM_DSPARK_CAPACITY_ACTIVATION_BATCH_SIZE")
 assert hasattr(envs, "VLLM_MEMORY_PROFILE_INCLUDE_ATTN")
+assert envs.VLLM_PCIE_ONESHOT_SINGLE_CHANNEL is False
 assert hasattr(symm_mem_pcie_barrier, "install_pcie_safe_barrier")
+assert hasattr(PCIeOneshotAllReducePool, "capture")
+assert hasattr(PCIeDCPA2APool, "capture")
+assert callable(capture_b12x_dcp_a2a)
 assert hasattr(fp8_draft_head, "Fp8DraftHead")
 assert hasattr(capacity, "DSparkDynamicDraftDepthController")
 assert hasattr(capacity, "CapacityBasedVerificationManager")
