@@ -4,13 +4,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
-# the independently reviewable SM120 CUTLASS DSL pin and DCP A2A prewarm fix.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm6b74780-b12xc7dc733-fi801d57a-cu132-20260719}"
+# the independently reviewable SM120 CUTLASS DSL pin, DCP A2A prewarm fix,
+# and MRV2 CUDA-graph/sparse-attention memory accounting fix.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllmf879d86-b12xc7dc733-fi801d57a-cu132-20260719}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final2-20260719}"
-export VLLM_COMMIT="${VLLM_COMMIT:-6b74780750013b52d82cb767578445c8fa96f8ed}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm6b74780.b12xc7dc733.fi801d57a.cu132.20260719}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final3-20260719}"
+export VLLM_COMMIT="${VLLM_COMMIT:-f879d8633e872703bb7aae409d06e34269364625}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllmf879d86.b12xc7dc733.fi801d57a.cu132.20260719}"
 
 # Canonical B12X master including the merged stable CuTe cache-key fix.
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
@@ -69,6 +70,7 @@ assert hasattr(envs, "VLLM_SYMM_MEM_PCIE_SAFE_BARRIER")
 assert hasattr(envs, "VLLM_DSPARK_FP8_DRAFT_HEAD")
 assert hasattr(envs, "VLLM_DSPARK_DYNAMIC_DRAFT_DEPTH")
 assert hasattr(envs, "VLLM_DSPARK_CAPACITY_ACTIVATION_BATCH_SIZE")
+assert hasattr(envs, "VLLM_MEMORY_PROFILE_INCLUDE_ATTN")
 assert hasattr(symm_mem_pcie_barrier, "install_pcie_safe_barrier")
 assert hasattr(fp8_draft_head, "Fp8DraftHead")
 assert hasattr(capacity, "DSparkDynamicDraftDepthController")
