@@ -3,25 +3,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Unified GLM 5.2 and DS4/DSpark image built from the rebased Gilded Gnosis
-# branch plus the independently reviewable gg-rebased PR stack.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm2152d08-b12xbc85ef3-fi801d57a-cu132-20260718}"
+# Unified GLM 5.2 and DS4/DSpark image built from canonical Gilded Gnosis plus
+# the independently reviewable SM120 CUTLASS DSL pin.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v19-vllm7ea567a-b12x4cfa530-fi801d57a-cu132-20260718}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-20260718}"
-export VLLM_COMMIT="${VLLM_COMMIT:-2152d08149d097c077d59fb3c9fde2ad7af525fb}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm2152d08.b12xbc85ef3.fi801d57a.cu132.20260718}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v19-final-20260718}"
+export VLLM_COMMIT="${VLLM_COMMIT:-7ea567a2458a4800a6a0e3e0a6ba41fcbd00d146}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v19.vllm7ea567a.b12x4cfa530.fi801d57a.cu132.20260718}"
 
-# Current lukealonso/b12x master plus ready-for-review Grid188 PR #36.
+# Current B12X master plus stable CuTe cache-key PR #41.
 export B12X_REPO="${B12X_REPO:-https://github.com/voipmonitor/b12x.git}"
-export B12X_REF="${B12X_REF:-codex/nf3-grid188-decode-20260717}"
-export B12X_COMMIT="${B12X_COMMIT:-bc85ef36192cb6e444d42ba7be86e1e125cca98a}"
+export B12X_REF="${B12X_REF:-build/gilded-gnosis-v19-final-b12x-20260718}"
+export B12X_COMMIT="${B12X_COMMIT:-4cfa5307e7579f34d52759f7ed2a897295026dd3}"
 
-# The rebased upstream vLLM CUDA dependency set. Keep source and Python CuTe
-# DSL pins aligned so FlashInfer, B12X, vLLM, and the final runtime share one API.
+# Keep the rebased upstream CUTLASS C++ source pin used to build FlashInfer.
+# CuTe DSL 4.6.0 regresses the B12X W4A16 prefill kernel on SM120 through
+# register spilling, so the runtime compiler is deliberately pinned to 4.5.3.
 export CUTLASS_REF="${CUTLASS_REF:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
 export CUTLASS_COMMIT="${CUTLASS_COMMIT:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
-export CUTLASS_DSL_VERSION="${CUTLASS_DSL_VERSION:-4.6.0}"
+export CUTLASS_DSL_VERSION="${CUTLASS_DSL_VERSION:-4.5.3}"
 export TOKENSPEED_MLA_VERSION="${TOKENSPEED_MLA_VERSION:-0.1.8}"
 export TVM_FFI_VERSION="${TVM_FFI_VERSION:-0.1.10}"
 
@@ -41,6 +42,11 @@ jq -e --arg value "801d57a08958c13d375ddbb6be3be4808f48a708" '."local-inference.
 
 docker run --rm --entrypoint /opt/venv/bin/python "${IMAGE}" - <<'PY'
 import importlib.metadata as md
+import hashlib
+from pathlib import Path
+
+import cutlass.cute as cute
+from b12x.moe.fused.w4a16 import kernel as w4a16_kernel
 
 from vllm import envs
 from vllm.distributed.device_communicators import symm_mem_pcie_barrier
@@ -48,8 +54,14 @@ from vllm.model_executor.layers import fp8_draft_head
 from vllm.v1.worker.gpu.spec_decode import capacity
 from vllm.v1.worker.gpu.spec_decode.dspark import online_sts
 
-assert md.version("nvidia-cutlass-dsl") == "4.6.0"
-assert md.version("nvidia-cutlass-dsl-libs-cu13") == "4.6.0"
+assert md.version("nvidia-cutlass-dsl") == "4.5.3"
+assert md.version("nvidia-cutlass-dsl-libs-base") == "4.5.3"
+assert md.version("nvidia-cutlass-dsl-libs-cu13") == "4.5.3"
+assert hasattr(cute.nvgpu.warp, "MmaMXF8Op")
+mma = Path(cute.__file__).parent / "nvgpu" / "warp" / "mma.py"
+assert hashlib.sha256(mma.read_bytes()).hexdigest() == (
+    "cccf48864bae9554acdf708fd66a7b2fe729948ca3768205df3e251c8dc71fd2"
+)
 assert md.version("tokenspeed-mla") == "0.1.8"
 assert md.version("apache-tvm-ffi") == "0.1.10"
 assert hasattr(envs, "VLLM_ALLOW_CUSTOM_ALLREDUCE_PCIE")
@@ -62,6 +74,13 @@ assert hasattr(fp8_draft_head, "Fp8DraftHead")
 assert hasattr(capacity, "DSparkDynamicDraftDepthController")
 assert hasattr(capacity, "CapacityBasedVerificationManager")
 assert hasattr(online_sts, "DSparkOnlineSTS")
+assert hasattr(w4a16_kernel, "compile_w4a16_fused_moe_hybrid")
+assert hasattr(w4a16_kernel, "run_w4a16_moe_hybrid")
+assert not hasattr(w4a16_kernel, "w4a16_hybrid_mapped_grid188_mapping_proof")
+tier_map = w4a16_kernel.build_w4a16_tier_local_map(
+    [1, 3], [0, 2], map_slots=4
+)
+assert tier_map.tolist() == [256, 0, 257, 1]
 print("v19 rebased runtime symbols: PASS")
 PY
 

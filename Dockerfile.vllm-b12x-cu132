@@ -60,7 +60,7 @@ ARG INSTANTTENSOR_COMMIT=
 ARG CUTLASS_REPO=https://github.com/NVIDIA/cutlass.git
 ARG CUTLASS_REF=main
 ARG CUTLASS_COMMIT=982cb9e718bcd4d7ac546b1795702a08326dfe4b
-ARG CUTLASS_DSL_VERSION=4.5.2
+ARG CUTLASS_DSL_VERSION=4.5.3
 ARG TOKENSPEED_MLA_VERSION=0.1.2
 ARG TVM_FFI_VERSION=0.1.9
 
@@ -813,6 +813,32 @@ import importlib.metadata as md
 import instanttensor
 
 print("instanttensor", md.version("instanttensor"), instanttensor.__file__)
+PY
+
+# The base and CUDA-specific CuTe DSL wheels currently contain overlapping
+# Python paths. Reinstall the CUDA 13 wheel last and verify its SM120 MMA API so
+# a later dependency transaction cannot silently replace it with base files.
+RUN /opt/venv/bin/python -m pip install --force-reinstall --no-deps \
+      "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
+ && CUTLASS_DSL_VERSION="${CUTLASS_DSL_VERSION}" /opt/venv/bin/python - <<'PY'
+import hashlib
+import importlib.metadata as md
+import os
+from pathlib import Path
+
+import cutlass.cute as cute
+
+version = os.environ["CUTLASS_DSL_VERSION"]
+mma = Path(cute.__file__).parent / "nvgpu" / "warp" / "mma.py"
+assert md.version("nvidia-cutlass-dsl") == version
+assert md.version("nvidia-cutlass-dsl-libs-base") == version
+assert md.version("nvidia-cutlass-dsl-libs-cu13") == version
+assert hasattr(cute.nvgpu.warp, "MmaMXF8Op")
+if version == "4.5.3":
+    assert hashlib.sha256(mma.read_bytes()).hexdigest() == (
+        "cccf48864bae9554acdf708fd66a7b2fe729948ca3768205df3e251c8dc71fd2"
+    )
+print("CUTLASS DSL CUDA 13 overlay: PASS", mma)
 PY
 
 RUN torch_nccl=/opt/venv/lib/python3.12/site-packages/nvidia/nccl/lib/libnccl.so.2 \

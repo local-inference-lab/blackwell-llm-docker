@@ -41,9 +41,7 @@ from vllm.config.quantization import resolve_quantization_config
 from vllm.config.speculative import SpeculativeConfig
 from vllm.v1.attention.backends.mla import b12x_mla_sparse
 from vllm.v1.attention.ops import dcp_alltoall
-from b12x.moe.fused.w4a16.kernel import (
-    w4a16_hybrid_mapped_grid188_mapping_proof,
-)
+from b12x.moe.fused.w4a16 import kernel as w4a16_kernel
 
 assert hasattr(envs, "VLLM_DCP_QUERY_SPLIT")
 assert hasattr(envs, "VLLM_B12X_MLA_CKV_GATHER")
@@ -54,10 +52,18 @@ assert hasattr(dcp_alltoall, "_DCP_A2A_GRAPH_BUFFERS")
 assert "nvfp4_ds_mla" in get_args(CacheDType)
 assert hasattr(torch.ops._C_cache_ops, "concat_and_cache_nvfp4_mla")
 assert resolve_quantization_config("nvfp4_nf3_hybrid", {"linear": {"weight": "mxfp8"}})
-proof = w4a16_hybrid_mapped_grid188_mapping_proof()
-assert proof["grid_x"] == 188
-assert len(proof["fc1_tasks"]) == 128
-assert len(proof["fc2_tasks"]) == 768
+if hasattr(w4a16_kernel, "w4a16_hybrid_mapped_grid188_mapping_proof"):
+    proof = w4a16_kernel.w4a16_hybrid_mapped_grid188_mapping_proof()
+    assert proof["grid_x"] == 188
+    assert len(proof["fc1_tasks"]) == 128
+    assert len(proof["fc2_tasks"]) == 768
+else:
+    assert hasattr(w4a16_kernel, "compile_w4a16_fused_moe_hybrid")
+    assert hasattr(w4a16_kernel, "run_w4a16_moe_hybrid")
+    tier_map = w4a16_kernel.build_w4a16_tier_local_map(
+        [1, 3], [0, 2], map_slots=4
+    )
+    assert tier_map.tolist() == [256, 0, 257, 1]
 
 # Exercise the SM100+ writer, not just its Python/C++ registration.  The
 # stable-libtorch extension is loaded lazily and requires a CUDA driver.
