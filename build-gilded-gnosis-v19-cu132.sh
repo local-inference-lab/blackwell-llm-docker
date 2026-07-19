@@ -123,6 +123,11 @@ grep -q -- '--tensor-parallel-size 6' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt
 grep -q -- '--decode-context-parallel-size 6' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt
 grep -q 'num_speculative_tokens.*3' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt
 
+dry_run native-allocator \
+  -e PYTORCH_CUDA_ALLOC_CONF=backend:native
+grep -q '^PYTORCH_CUDA_ALLOC_CONF=backend:native$' \
+  /tmp/gilded-gnosis-v19-native-allocator.txt
+
 docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
   -e MODEL_FAMILY=glm52-hybrid \
   -e DRY_RUN=1 \
