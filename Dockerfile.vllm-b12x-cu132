@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# Clean vLLM+B12X image for Blackwell on CUDA 13.2.
+# Clean vLLM+SparkInfer (formerly B12X) image for Blackwell on CUDA 13.2.
 #
 # Source stack:
 #   NVIDIA CUDA 13.2.1 cuDNN devel base
@@ -8,7 +8,7 @@
 #   PyTorch 2.12.0+cu132 from the official PyTorch wheel index
 #   Patched NCCL 2.30.4 from local-inference-lab/nccl-canonical
 #   FlashInfer from pinned upstream git
-#   B12X from pinned git
+#   SparkInfer from pinned git
 #   vLLM from pinned git
 #
 # Build:
@@ -710,7 +710,8 @@ print("torch nccl", torch.cuda.nccl.version())
 print("flashinfer", getattr(flashinfer, "__version__", "unknown"))
 print("deep_gemm", getattr(deep_gemm, "__version__", md.version("deep_gemm")))
 print("vllm", getattr(vllm, "__version__", "unknown"))
-print("b12x", md.version("b12x"))
+kernel_package = "sparkinfer" if importlib.util.find_spec("sparkinfer") else "b12x"
+print(kernel_package, md.version(kernel_package))
 spec = importlib.util.find_spec("vllm._rust_tool_parser")
 assert spec is not None, "vllm._rust_tool_parser missing"
 print("rust_tool_parser", spec.origin)
@@ -927,6 +928,7 @@ ENV VIRTUAL_ENV=/opt/venv \
     TILELANG_TMP_DIR=/cache/jit/${CACHE_FINGERPRINT}/tilelang/tmp \
     CUTE_DSL_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/cute-dsl \
     B12X_CUTE_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/b12x-cute \
+    SPARKINFER_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/sparkinfer/compile \
     DG_JIT_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/deep-gemm \
     MM_SPARSE_ATTN_AOT_CACHE=/cache/jit/${CACHE_FINGERPRINT}/minfer/mm_sparse_attn \
     MINFER_FMHA_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/minfer/fmha_sm100 \
@@ -965,6 +967,7 @@ RUN mkdir -p \
       "${TILELANG_TMP_DIR}" \
       "${CUTE_DSL_CACHE_DIR}" \
       "${B12X_CUTE_COMPILE_CACHE_DIR}" \
+      "${SPARKINFER_COMPILE_CACHE_DIR}" \
       "${DG_JIT_CACHE_DIR}" \
       "${MM_SPARSE_ATTN_AOT_CACHE}" \
       "${MINFER_FMHA_CACHE_DIR}" \
@@ -1013,7 +1016,7 @@ ARG CUTLASS_DSL_VERSION
 ARG TOKENSPEED_MLA_VERSION
 ARG TVM_FFI_VERSION
 
-LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, DeepGEMM, B12X and selected vLLM branch" \
+LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+SparkInfer image with PyTorch 2.12 cu132, patched NCCL 2.30.4, FlashInfer git, DeepGEMM, SparkInfer and selected vLLM branch" \
       local-inference.cuda.version="13.2.1" \
       local-inference.cuda.compat.version="${CUDA_COMPAT_13_2_VERSION}" \
       local-inference.cublas.version="${CUBLAS_CUDA13_VERSION}" \
@@ -1035,6 +1038,9 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+B12X image wi
       local-inference.b12x.branch="${B12X_REF}" \
       local-inference.b12x.commit="${B12X_COMMIT}" \
       local-inference.b12x.runtime_version="source" \
+      local-inference.sparkinfer.branch="${B12X_REF}" \
+      local-inference.sparkinfer.commit="${B12X_COMMIT}" \
+      local-inference.sparkinfer.runtime_version="source" \
       local-inference.flashinfer.branch="${FLASHINFER_REF}" \
       local-inference.flashinfer.commit="${FLASHINFER_COMMIT}" \
       local-inference.deepgemm.branch="${DEEPGEMM_REF}" \
