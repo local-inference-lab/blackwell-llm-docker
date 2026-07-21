@@ -333,6 +333,10 @@ cmd=(vllm serve "${MODEL}" \
   --hf-overrides "${hf_overrides}" \
   "${spec_arg[@]}")
 
+# Keep the preset reproducible while allowing explicit vLLM diagnostics and
+# newly added upstream flags without requiring a second copy of this launcher.
+cmd+=("$@")
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'CUDA_VISIBLE_DEVICES=%q\n' "${CUDA_VISIBLE_DEVICES}"
   printf 'B12X_MOE_FORCE_A8=%q\n' "${B12X_MOE_FORCE_A8}"
