@@ -4,9 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # GG v20 release candidate. The vLLM integration source is exactly the current
-# dev/gilded-gnosis plus unmerged PRs #145, #164, and #166. SparkInfer is the
-# current master plus PR #71 and the complete INT8/MXFP8 transport PR #72.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllmaba3ad8-si5dc1bce-fi801d57a-cu132-20260722}"
+# dev/gilded-gnosis plus unmerged PRs #145, #164, #166, and #167. SparkInfer
+# is the current master plus PR #71 and the complete INT8/MXFP8 transport PR #72.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllmf45b42c-si5dc1bce-fi801d57a-cu132-20260722}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -31,9 +31,9 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-166-i8-mxfp8-20260722}"
-export VLLM_COMMIT="${VLLM_COMMIT:-aba3ad8ffc915090165a6575781f7b54ef33eb09}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmaba3ad8.si5dc1bce.fi801d57a.cu132.20260722}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-166-dcp-pitch-i8-mxfp8-20260722}"
+export VLLM_COMMIT="${VLLM_COMMIT:-f45b42c2350e72d8afc0d38b44afc4ea2c6cd069}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmf45b42c.si5dc1bce.fi801d57a.cu132.20260722}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
@@ -74,7 +74,7 @@ jq -e --arg value "${CUTLASS_DSL_VERSION}" '."local-inference.cutlass_dsl.versio
 jq -e '."local-inference.vllm.patch_file" == "" and ."local-inference.vllm.patch_url" == ""' <<<"${labels}" >/dev/null
 
 cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
-[[ "${cache_fingerprint}" =~ ^vllmaba3ad8ffc-b12x5dc1bcebc2-[0-9a-f]{16}$ ]]
+[[ "${cache_fingerprint}" =~ ^vllmf45b42c235-b12x5dc1bcebc2-[0-9a-f]{16}$ ]]
 
 image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
 grep -Fxq "XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}" <<<"${image_env}"
