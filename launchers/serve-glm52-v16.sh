@@ -65,8 +65,10 @@ case "${MOE_MODE}" in
 esac
 
 case "${F8_DMA}" in
-  0|ag|ring) ;;
-  *) die "F8_DMA must be 0, ag, or ring" ;;
+  0|ag|ring|a2a|i8|i8_ring|i8_a2a|mx|mx_ring|mx_a2a) ;;
+  *)
+    die "F8_DMA must be 0, ag, ring, a2a, i8, i8_ring, i8_a2a, mx, mx_ring, or mx_a2a"
+    ;;
 esac
 
 case "${B12X_PCIE_DMA}" in
@@ -216,6 +218,7 @@ export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
 export VLLM_USE_B12X_PCIE_DMA="${B12X_PCIE_DMA}"
 export VLLM_PCIE_DMA_FP8="${F8_DMA}"
 export B12X_PCIE_DMA_FP8="${F8_DMA}"
+export SPARKINFER_PCIE_DMA_FP8="${F8_DMA}"
 export VLLM_DCP_GLOBAL_TOPK=1
 export VLLM_DCP_SHARD_DRAFT=1
 export VLLM_NF3_GRID188_DECODE="${NF3_GRID188}"
@@ -347,6 +350,8 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'B12X_MOE_FORCE_A8=%q\n' "${B12X_MOE_FORCE_A8}"
   printf 'B12X_MOE_FORCE_A16=%q\n' "${B12X_MOE_FORCE_A16}"
   printf 'VLLM_USE_B12X_PCIE_DMA=%q\n' "${VLLM_USE_B12X_PCIE_DMA}"
+  printf 'VLLM_PCIE_DMA_FP8=%q\n' "${VLLM_PCIE_DMA_FP8}"
+  printf 'SPARKINFER_PCIE_DMA_FP8=%q\n' "${SPARKINFER_PCIE_DMA_FP8}"
   printf 'VLLM_DCP_PROJECT_BEFORE_MERGE=%q\n' "${VLLM_DCP_PROJECT_BEFORE_MERGE}"
   printf 'VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS=%q\n' "${VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS}"
   printf 'VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=%q\n' "${VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE}"
