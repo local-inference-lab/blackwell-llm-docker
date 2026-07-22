@@ -124,10 +124,16 @@ for profile in tp4-dcp2 tp4-dcp4 tp8-dcp2 tp8-dcp4 tp8-dcp8; do
   grep -q '^VLLM_B12X_MLA_CKV_GATHER=1$' "/tmp/gilded-gnosis-v19-${profile}.txt"
 done
 grep -q -- '--load-format instanttensor' /tmp/gilded-gnosis-v19-tp8-dcp4.txt
+grep -q -- '--max-model-len 262144' /tmp/gilded-gnosis-v19-tp8-dcp4.txt
+grep -q -- '--gpu-memory-utilization 0.96' \
+  /tmp/gilded-gnosis-v19-tp8-dcp4.txt
 
 dry_run tp6-dcp3 -e TP=6 -e DCP=3
 grep -q '^VLLM_DCP_QUERY_SPLIT=0$' /tmp/gilded-gnosis-v19-tp6-dcp3.txt
 grep -q '^VLLM_B12X_MLA_CKV_GATHER=0$' /tmp/gilded-gnosis-v19-tp6-dcp3.txt
+grep -q -- '--max-model-len 128000' /tmp/gilded-gnosis-v19-tp6-dcp3.txt
+grep -q -- '--gpu-memory-utilization 0.95' \
+  /tmp/gilded-gnosis-v19-tp6-dcp3.txt
 
 dry_run tp6-dcp6-mtp3 -e TP=6 -e DCP=6 -e MTP=3
 grep -q -- '--tensor-parallel-size 6' /tmp/gilded-gnosis-v19-tp6-dcp6-mtp3.txt
