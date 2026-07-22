@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# GG v20 PCIe-codec test candidate. The vLLM integration source is exactly the
-# current dev/gilded-gnosis plus unmerged PRs #145 and #164. SparkInfer is the
-# current master plus separate block-INT8 and standard-MXFP8 transport commits.
-export IMAGE="${IMAGE:-local/vllm:gilded-gnosis-v20-pcie-codecs-vllmc203064-si2609189-fi801d57a-cu132-20260722}"
+# GG v20 release candidate. The vLLM integration source is exactly the current
+# dev/gilded-gnosis plus unmerged PRs #145, #164, and #166. SparkInfer is the
+# current master plus PR #71 and the complete INT8/MXFP8 transport PR #72.
+export IMAGE="${IMAGE:-local/vllm:gilded-gnosis-v20-i8-mxfp8-vllmaba3ad8-si5dc1bce-fi801d57a-cu132-20260722}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -31,20 +31,20 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-i8-mxfp8-20260722}"
-export VLLM_COMMIT="${VLLM_COMMIT:-c203064e45fd3ed3064f4034e4952bf572e1ae98}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmc203064.si2609189.fi801d57a.cu132.20260722}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-166-i8-mxfp8-20260722}"
+export VLLM_COMMIT="${VLLM_COMMIT:-aba3ad8ffc915090165a6575781f7b54ef33eb09}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmaba3ad8.si5dc1bce.fi801d57a.cu132.20260722}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
 
 export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/voipmonitor/b12x.git}"
-export SPARKINFER_REF="${SPARKINFER_REF:-codex/sparkinfer-pcie-mxfp8-current-20260722}"
-export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-26091893bfedab256b45b25a29a2a3760d6e55c6}"
+export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-pr71-i8-mxfp8-20260722}"
+export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-5dc1bcebc26a41a1b8d8126122d5e2347ca3ef27}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
 export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-i8-mxfp8-launchers-20260722}"
-export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-ee1c1ef3d49e7e520d8645fc40dc3f5fb0aca441}"
+export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-65642f50d407acf72ac6dee2acb92c66ebd388ff}"
 export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-v19.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh serve-glm52-hybrid-v19.sh"
 
 export CUTLASS_REF="${CUTLASS_REF:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
@@ -74,7 +74,7 @@ jq -e --arg value "${CUTLASS_DSL_VERSION}" '."local-inference.cutlass_dsl.versio
 jq -e '."local-inference.vllm.patch_file" == "" and ."local-inference.vllm.patch_url" == ""' <<<"${labels}" >/dev/null
 
 cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
-[[ "${cache_fingerprint}" =~ ^vllmc203064e45-b12x26091893bf-[0-9a-f]{16}$ ]]
+[[ "${cache_fingerprint}" =~ ^vllmaba3ad8ffc-b12x5dc1bcebc2-[0-9a-f]{16}$ ]]
 
 image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
 grep -Fxq "XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}" <<<"${image_env}"
@@ -197,6 +197,18 @@ for dma_mode in i8_ring mx_ring; do
   grep -Fxq "VLLM_PCIE_DMA_FP8=${dma_mode}" "${dma_dry_run_file}"
   grep -Fxq "SPARKINFER_PCIE_DMA_FP8=${dma_mode}" "${dma_dry_run_file}"
 done
+
+grep -Fxq 'VLLM_B12X_ABSORB_BMM=1' "${mxfp8_dry_run_file}"
+
+absorb_disabled_dry_run_file="/tmp/gilded-gnosis-v20-final-absorb-disabled.txt"
+docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
+  -e DRY_RUN=1 \
+  -e MODEL_FAMILY=glm52 \
+  -e MODEL=/model \
+  -e VLLM_B12X_ABSORB_BMM=0 \
+  "${IMAGE}" | tee "${absorb_disabled_dry_run_file}"
+
+grep -Fxq 'VLLM_B12X_ABSORB_BMM=0' "${absorb_disabled_dry_run_file}"
 
 if [[ "${requested_push}" == "1" ]]; then
   docker push "${IMAGE}"
