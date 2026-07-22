@@ -998,6 +998,9 @@ ARG VLLM_COMMIT
 ARG VLLM_PATCH_URL
 ARG VLLM_PATCH_SHA256
 ARG VLLM_PATCH_FILE
+ARG LAUNCHER_REPO
+ARG LAUNCHER_REF
+ARG LAUNCHER_COMMIT
 ARG B12X_REF
 ARG B12X_COMMIT
 ARG FLASHINFER_REF
@@ -1035,6 +1038,9 @@ LABEL org.opencontainers.image.description="Clean CUDA 13.2.1 vLLM+SparkInfer im
       local-inference.vllm.patch_url="${VLLM_PATCH_URL}" \
       local-inference.vllm.patch_sha256="${VLLM_PATCH_SHA256}" \
       local-inference.vllm.patch_file="${VLLM_PATCH_FILE}" \
+      local-inference.launcher.repo="${LAUNCHER_REPO}" \
+      local-inference.launcher.branch="${LAUNCHER_REF}" \
+      local-inference.launcher.commit="${LAUNCHER_COMMIT}" \
       local-inference.b12x.branch="${B12X_REF}" \
       local-inference.b12x.commit="${B12X_COMMIT}" \
       local-inference.b12x.runtime_version="source" \

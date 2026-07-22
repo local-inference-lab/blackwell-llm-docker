@@ -70,8 +70,18 @@ labels="$(docker image inspect "${IMAGE}" --format '{{json .Config.Labels}}')"
 jq -e --arg value "${VLLM_COMMIT}" '."local-inference.vllm.commit" == $value' <<<"${labels}" >/dev/null
 jq -e --arg value "${SPARKINFER_COMMIT}" '."local-inference.sparkinfer.commit" == $value' <<<"${labels}" >/dev/null
 jq -e --arg value "${FLASHINFER_COMMIT}" '."local-inference.flashinfer.commit" == $value' <<<"${labels}" >/dev/null
+jq -e --arg value "${LAUNCHER_COMMIT}" '."local-inference.launcher.commit" == $value' <<<"${labels}" >/dev/null
 jq -e --arg value "${CUTLASS_DSL_VERSION}" '."local-inference.cutlass_dsl.version" == $value' <<<"${labels}" >/dev/null
 jq -e '."local-inference.vllm.patch_file" == "" and ."local-inference.vllm.patch_url" == ""' <<<"${labels}" >/dev/null
+
+for launcher in ${VLLM_REQUIRED_LAUNCHERS}; do
+  expected_launcher_sha="$(git show "${LAUNCHER_COMMIT}:launchers/${launcher}" | sha256sum | cut -d' ' -f1)"
+  actual_launcher_sha="$(docker run --rm --entrypoint sha256sum "${IMAGE}" "/usr/local/bin/${launcher}" | cut -d' ' -f1)"
+  if [[ "${actual_launcher_sha}" != "${expected_launcher_sha}" ]]; then
+    printf 'Launcher %s does not match pinned commit %s\n' "${launcher}" "${LAUNCHER_COMMIT}" >&2
+    exit 1
+  fi
+done
 
 cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
 [[ "${cache_fingerprint}" =~ ^vllmf45b42c235-b12x5dc1bcebc2-[0-9a-f]{16}$ ]]
