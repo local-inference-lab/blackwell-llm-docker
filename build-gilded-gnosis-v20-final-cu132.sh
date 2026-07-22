@@ -44,7 +44,7 @@ export SPARKINFER_REF="${SPARKINFER_REF:-master}"
 export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-1a88b389a8d14f26dbe4c157965938cfd8f1bf51}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
-export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-canonical-release-20260722}"
+export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-launchers-20260722}"
 export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-cf9a0f1e04ad9f029bccd3c46caa1ed3f49528ec}"
 export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-v19.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh serve-glm52-hybrid-v19.sh"
 
