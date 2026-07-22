@@ -3,11 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# GG v20 canonical-head release candidate. The vLLM integration source is
-# exactly dev/gilded-gnosis plus unmerged PRs #145 and #164. SparkInfer is the
-# canonical master containing the reviewed v20 fixes, including #48; closed
-# overlap experiments #60/#150 and sparse-CKV/QBMM experiments are excluded.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllm3e731bc-si1a88b38-fi801d57a-cu132-20260722}"
+# GG v20 PCIe-codec test candidate. The vLLM integration source is exactly the
+# current dev/gilded-gnosis plus unmerged PRs #145 and #164. SparkInfer is the
+# current master plus separate block-INT8 and standard-MXFP8 transport commits.
+export IMAGE="${IMAGE:-local/vllm:gilded-gnosis-v20-pcie-codecs-vllmc203064-si2609189-fi801d57a-cu132-20260722}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -32,20 +31,20 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-canonical-145-164-20260722}"
-export VLLM_COMMIT="${VLLM_COMMIT:-3e731bc043d23ec21277fb76d3e15fe6da91b23b}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllm3e731bc.si1a88b38.fi801d57a.cu132.20260722}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-i8-mxfp8-20260722}"
+export VLLM_COMMIT="${VLLM_COMMIT:-c203064e45fd3ed3064f4034e4952bf572e1ae98}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmc203064.si2609189.fi801d57a.cu132.20260722}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
 
-export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/local-inference-lab/sparkinfer.git}"
-export SPARKINFER_REF="${SPARKINFER_REF:-master}"
-export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-1a88b389a8d14f26dbe4c157965938cfd8f1bf51}"
+export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/voipmonitor/b12x.git}"
+export SPARKINFER_REF="${SPARKINFER_REF:-codex/sparkinfer-pcie-mxfp8-current-20260722}"
+export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-26091893bfedab256b45b25a29a2a3760d6e55c6}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
-export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-launchers-20260722}"
-export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-cf9a0f1e04ad9f029bccd3c46caa1ed3f49528ec}"
+export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-i8-mxfp8-launchers-20260722}"
+export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-ee1c1ef3d49e7e520d8645fc40dc3f5fb0aca441}"
 export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-v19.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh serve-glm52-hybrid-v19.sh"
 
 export CUTLASS_REF="${CUTLASS_REF:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
@@ -75,7 +74,7 @@ jq -e --arg value "${CUTLASS_DSL_VERSION}" '."local-inference.cutlass_dsl.versio
 jq -e '."local-inference.vllm.patch_file" == "" and ."local-inference.vllm.patch_url" == ""' <<<"${labels}" >/dev/null
 
 cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
-[[ "${cache_fingerprint}" =~ ^vllm3e731bc043-b12x1a88b389a8-[0-9a-f]{16}$ ]]
+[[ "${cache_fingerprint}" =~ ^vllmc203064e45-b12x26091893bf-[0-9a-f]{16}$ ]]
 
 image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
 grep -Fxq "XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}" <<<"${image_env}"
@@ -89,6 +88,7 @@ import inspect
 import torch
 from sparkinfer.attention.sparse_mla._scratch import SPARKINFERSparseMLAScratchCaps
 from sparkinfer.comm.pcie import DcpAllToAllPool
+from sparkinfer.comm.pcie.pcie_dma import _normalize_fp8_mode
 from sparkinfer.gemm import bmm, can_implement_bmm, prewarm_bmm
 from sparkinfer.moe.fused_moe import _impl as fused_moe_impl
 from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
@@ -102,6 +102,8 @@ assert md.version("nvidia-cutlass-dsl") == "4.6.0"
 assert torch.__version__.startswith("2.12.0+cu132")
 assert torch.version.cuda == "13.2"
 assert fused_moe_impl._dynamic_kernel_intermediate_size(352, "w4a8_mx") == 384
+assert _normalize_fp8_mode("i8-ring") == "i8_ring"
+assert _normalize_fp8_mode("mxfp8-ring") == "mx_ring"
 assert callable(bmm) and callable(can_implement_bmm) and callable(prewarm_bmm)
 assert "head_major_output" in inspect.signature(cp_lse_ag_out_rs).parameters
 assert hasattr(CudaCommunicator, "reduce_scatter_head_major")
@@ -183,6 +185,18 @@ docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
 
 grep -Fq 're:.\*\[.\]q_a_proj\$' "${mxfp8_ignore_dry_run_file}"
 grep -Fq 're:.\*\[.\]kv_a_proj_with_mqa\$' "${mxfp8_ignore_dry_run_file}"
+
+for dma_mode in i8_ring mx_ring; do
+  dma_dry_run_file="/tmp/gilded-gnosis-v20-final-${dma_mode}.txt"
+  docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
+    -e DRY_RUN=1 \
+    -e MODEL_FAMILY=glm52 \
+    -e MODEL=/model \
+    -e F8_DMA="${dma_mode}" \
+    "${IMAGE}" | tee "${dma_dry_run_file}"
+  grep -Fxq "VLLM_PCIE_DMA_FP8=${dma_mode}" "${dma_dry_run_file}"
+  grep -Fxq "SPARKINFER_PCIE_DMA_FP8=${dma_mode}" "${dma_dry_run_file}"
+done
 
 if [[ "${requested_push}" == "1" ]]; then
   docker push "${IMAGE}"
