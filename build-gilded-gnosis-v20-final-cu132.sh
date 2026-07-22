@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 # GG v20 release candidate. The vLLM integration source is exactly the current
 # dev/gilded-gnosis plus unmerged PRs #145, #164, and #166. SparkInfer is the
 # current master plus PR #71 and the complete INT8/MXFP8 transport PR #72.
-export IMAGE="${IMAGE:-local/vllm:gilded-gnosis-v20-i8-mxfp8-vllmaba3ad8-si5dc1bce-fi801d57a-cu132-20260722}"
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllmaba3ad8-si5dc1bce-fi801d57a-cu132-20260722}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
