@@ -142,6 +142,41 @@ grep -q -- '--max-num-seqs 1' "${dry_run_file}"
 grep -q -- '--max-cudagraph-capture-size 6' "${dry_run_file}"
 grep -q -- '--load-format instanttensor' "${dry_run_file}"
 
+mxfp8_dry_run_file="/tmp/gilded-gnosis-v20-final-mxfp8.txt"
+docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
+  -e DRY_RUN=1 \
+  -e MODEL_FAMILY=glm52 \
+  -e MODEL=/model \
+  -e TP=8 \
+  -e DCP=1 \
+  -e MTP=0 \
+  -e MOE_MODE=a16 \
+  -e ONLINE_QUANT=mxfp8 \
+  "${IMAGE}" | tee "${mxfp8_dry_run_file}"
+
+grep -Fq 'QUANTIZATION_CONFIG_JSON=\{\"linear\":\{\"weight\":\"mxfp8\"\}\}' "${mxfp8_dry_run_file}"
+if grep -q 'kv_b_proj' "${mxfp8_dry_run_file}"; then
+  printf 'Unexpected kv_b_proj ignore in the default MXFP8 preset\n' >&2
+  exit 1
+fi
+
+mxfp8_ignore_json='{"linear":{"weight":"mxfp8"},"ignore":["re:.*[.]q_a_proj$","re:.*[.]kv_a_proj_with_mqa$"]}'
+mxfp8_ignore_dry_run_file="/tmp/gilded-gnosis-v20-final-mxfp8-ignore.txt"
+docker run --rm --entrypoint /usr/local/bin/serve-gilded-gnosis.sh \
+  -e DRY_RUN=1 \
+  -e MODEL_FAMILY=glm52 \
+  -e MODEL=/model \
+  -e TP=8 \
+  -e DCP=1 \
+  -e MTP=0 \
+  -e MOE_MODE=a16 \
+  -e ONLINE_QUANT=mxfp8 \
+  -e QUANTIZATION_CONFIG_JSON="${mxfp8_ignore_json}" \
+  "${IMAGE}" | tee "${mxfp8_ignore_dry_run_file}"
+
+grep -Fq 're:.\*\[.\]q_a_proj\$' "${mxfp8_ignore_dry_run_file}"
+grep -Fq 're:.\*\[.\]kv_a_proj_with_mqa\$' "${mxfp8_ignore_dry_run_file}"
+
 if [[ "${requested_push}" == "1" ]]; then
   docker push "${IMAGE}"
 fi

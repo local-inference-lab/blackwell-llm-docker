@@ -137,10 +137,10 @@ case "${ONLINE_QUANT}" in
     ONLINE_QUANT=none
     ;;
   mxfp8)
-    # kv_b_proj is dequantized at load for MLA absorb, so converting it adds
-    # rounding noise without changing the serving kernel.
+    # Quantize every eligible linear by default. Precision-sensitive layers
+    # can be retained explicitly through QUANTIZATION_CONFIG_JSON.
     if [[ -z "${QUANTIZATION_CONFIG_JSON}" ]]; then
-      QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"mxfp8"},"ignore":["re:.*kv_b_proj"]}'
+      QUANTIZATION_CONFIG_JSON='{"linear":{"weight":"mxfp8"}}'
     fi
     ;;
   nf3-mxfp8)
