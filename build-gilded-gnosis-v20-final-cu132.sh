@@ -5,9 +5,8 @@ cd "$(dirname "$0")"
 
 # GG v20 release candidate. The vLLM integration source is exactly the current
 # dev/gilded-gnosis plus unmerged PRs #145, #164, #166, #167, #169, #172,
-# and #173. SparkInfer is current master plus test-only PR #71, INT8/MXFP8
-# transport PR #72, and W4A16 cooperative-grid PR #73.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllmaf9d01c-siffa922b-fi801d57a-cu132-20260723}"
+# #173, and #174. SparkInfer is current master plus PRs #75 and #76.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllm7e3bee1-si6234185-fi801d57a-cu132-20260723}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -32,20 +31,20 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-final-candidate-20260723}"
-export VLLM_COMMIT="${VLLM_COMMIT:-af9d01cf1094c1220efabc984986034e9453eecf}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmaf9d01c.siffa922b.fi801d57a.cu132.20260723}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-release-candidate2-20260723}"
+export VLLM_COMMIT="${VLLM_COMMIT:-7e3bee1ed4bc87efbdc36060647a3475cfaa1f1e}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllm7e3bee1.si6234185.fi801d57a.cu132.20260723}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
 
-export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/voipmonitor/b12x.git}"
-export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-final-candidate-20260723}"
-export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-ffa922b0c06e5c45ed1344bdc5260cc9c7e85c9a}"
+export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/local-inference-lab/sparkinfer.git}"
+export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-release-crashgate-v2-20260723}"
+export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-62341856cc5497d0c8ba33012dab6118925a6cfb}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
-export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-i8-mxfp8-launchers-20260722}"
-export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-65642f50d407acf72ac6dee2acb92c66ebd388ff}"
+export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-final2-20260723}"
+export LAUNCHER_COMMIT="${LAUNCHER_COMMIT:-573a39d5185e53556871f5f79cc86a39fa966c22}"
 export VLLM_REQUIRED_LAUNCHERS="serve-gilded-gnosis.sh serve-fathomless-firmament.sh serve-glm52-v16.sh serve-glm52-v18.sh serve-glm52-v19.sh serve-glm52-hybrid-v17.sh serve-glm52-hybrid-v18.sh serve-glm52-hybrid-v19.sh"
 
 export CUTLASS_REF="${CUTLASS_REF:-e6233cbac5d7c7a865c19c91cd684ceece19513c}"
@@ -102,7 +101,11 @@ import torch
 import vllm._C_stable_libtorch  # noqa: F401
 from sparkinfer.attention.sparse_mla._scratch import SPARKINFERSparseMLAScratchCaps
 from sparkinfer.comm.pcie import DcpAllToAllPool
-from sparkinfer.comm.pcie.pcie_dma import _normalize_fp8_mode
+from sparkinfer.comm.pcie.pcie_dma import (
+    OUTPUT_TAIL_PADDING,
+    PCIeDmaAllReduce,
+    _normalize_fp8_mode,
+)
 from sparkinfer.gemm import bmm, can_implement_bmm, prewarm_bmm
 from sparkinfer.moe.fused_moe import _impl as fused_moe_impl
 from sparkinfer.moe._shared.kernels.w4a16 import kernel as w4a16_kernel
@@ -121,6 +124,8 @@ assert fused_moe_impl._dynamic_kernel_intermediate_size(352, "w4a8_mx") == 384
 assert inspect.getsource(w4a16_kernel).count("cooperative=True") >= 2
 assert _normalize_fp8_mode("i8-ring") == "i8_ring"
 assert _normalize_fp8_mode("mxfp8-ring") == "mx_ring"
+assert OUTPUT_TAIL_PADDING == 64 << 10
+assert "_ensure_output_storage" in inspect.getsource(PCIeDmaAllReduce)
 assert callable(bmm) and callable(can_implement_bmm) and callable(prewarm_bmm)
 assert "head_major_output" in inspect.signature(cp_lse_ag_out_rs).parameters
 assert hasattr(CudaCommunicator, "reduce_scatter_head_major")
