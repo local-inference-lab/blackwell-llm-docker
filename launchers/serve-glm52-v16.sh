@@ -42,6 +42,8 @@ VLLM_B12X_ABSORB_BMM="${VLLM_B12X_ABSORB_BMM:-1}"
 LOAD_FORMAT="${LOAD_FORMAT:-instanttensor}"
 INSTANTTENSOR_BACKEND="${INSTANTTENSOR_BACKEND:-BUFFERED}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF-expandable_segments:True}"
+P2P_PREFLIGHT="${P2P_PREFLIGHT:-warn}"
+NVIDIA_PARAMS_PATH="${NVIDIA_PARAMS_PATH:-/proc/driver/nvidia/params}"
 QUANTIZATION="${QUANTIZATION:-modelopt_fp4}"
 QUANTIZATION_CONFIG_JSON="${QUANTIZATION_CONFIG_JSON:-}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
@@ -82,6 +84,11 @@ case "${VLLM_B12X_ABSORB_BMM}" in
   *) die "VLLM_B12X_ABSORB_BMM must be 0 or 1" ;;
 esac
 
+case "${P2P_PREFLIGHT}" in
+  off|warn|strict) ;;
+  *) die "P2P_PREFLIGHT must be off, warn, or strict" ;;
+esac
+
 case "${KV_CACHE_DTYPE}" in
   fp8|fp8_ds_mla|nvfp4_ds_mla) ;;
   *) die "KV_CACHE_DTYPE must be fp8, fp8_ds_mla, or nvfp4_ds_mla" ;;
@@ -116,6 +123,41 @@ esac
 [[ "${MAX_NUM_SEQS}" =~ ^[0-9]+$ ]] || die "MAX_NUM_SEQS must be an integer"
 [[ "${GRAPH}" =~ ^[0-9]+$ ]] || die "GRAPH must be an integer"
 [[ "${#GLM52_INDEX_TOPK_PATTERN}" -eq 78 ]] || die "GLM52_INDEX_TOPK_PATTERN must be exactly 78 characters, got ${#GLM52_INDEX_TOPK_PATTERN}"
+
+check_p2p_driver_config() {
+  [[ "${P2P_PREFLIGHT}" == "off" ]] && return
+
+  local missing=()
+  local required
+  if [[ ! -r "${NVIDIA_PARAMS_PATH}" ]]; then
+    missing+=("unreadable:${NVIDIA_PARAMS_PATH}")
+  else
+    for required in \
+      'ForceP2P=0x11' \
+      'RMForceP2PType=1' \
+      'RMPcieP2PType=2' \
+      'GrdmaPciTopoCheckOverride=1' \
+      'EnableResizableBar=1' \
+      'DmaRemapPeerMmio: 1'; do
+      grep -Fq "${required}" "${NVIDIA_PARAMS_PATH}" || missing+=("${required}")
+    done
+  fi
+
+  if ((${#missing[@]} == 0)); then
+    [[ "${DRY_RUN:-0}" == "1" ]] && printf 'P2P_DRIVER_PREFLIGHT=pass\n'
+    return
+  fi
+
+  local message
+  message="validated PCIe P2P driver settings are missing: ${missing[*]}"
+  if [[ "${P2P_PREFLIGHT}" == "strict" ]]; then
+    die "${message}"
+  fi
+  printf 'WARNING: %s; long-context P2P collectives may be unreliable\n' \
+    "${message}" >&2
+}
+
+check_p2p_driver_config
 
 if [[ "${DCP_PREFILL_WORKSPACE}" == "auto" ]]; then
   case "${TP}:${DCP}" in
