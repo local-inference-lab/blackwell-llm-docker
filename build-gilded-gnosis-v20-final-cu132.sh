@@ -4,10 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # GG v20 release candidate. The vLLM integration source is exactly the current
-# dev/gilded-gnosis plus unmerged PRs #145, #164, #166, #167, #169, #170,
-# and #172. SparkInfer is current master plus test-only PR #71 and the complete
-# INT8/MXFP8 transport PR #72.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllm8cea4a2-si055f839-fi801d57a-cu132-20260723}"
+# dev/gilded-gnosis plus unmerged PRs #145, #164, #166, #167, #169, #172,
+# and #173. SparkInfer is current master plus test-only PR #71, INT8/MXFP8
+# transport PR #72, and W4A16 cooperative-grid PR #73.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllmaf9d01c-siffa922b-fi801d57a-cu132-20260723}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -32,16 +32,16 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-final2-20260723}"
-export VLLM_COMMIT="${VLLM_COMMIT:-8cea4a230967db241f82843097c2a1ee25da9ff3}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllm8cea4a2.si055f839.fi801d57a.cu132.20260723}"
+export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-final-candidate-20260723}"
+export VLLM_COMMIT="${VLLM_COMMIT:-af9d01cf1094c1220efabc984986034e9453eecf}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllmaf9d01c.siffa922b.fi801d57a.cu132.20260723}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
 
 export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/voipmonitor/b12x.git}"
-export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-final2-20260723}"
-export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-055f839e6996c3c4e4f8debdc4c3c46c5a74bae0}"
+export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-final-candidate-20260723}"
+export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-ffa922b0c06e5c45ed1344bdc5260cc9c7e85c9a}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
 export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-i8-mxfp8-launchers-20260722}"
@@ -85,7 +85,9 @@ for launcher in ${VLLM_REQUIRED_LAUNCHERS}; do
 done
 
 cache_fingerprint="$(jq -r '."local-inference.cache.fingerprint"' <<<"${labels}")"
-[[ "${cache_fingerprint}" =~ ^vllm8cea4a2309-b12x055f839e69-[0-9a-f]{16}$ ]]
+vllm_cache_prefix="${VLLM_COMMIT:0:10}"
+sparkinfer_cache_prefix="${SPARKINFER_COMMIT:0:10}"
+[[ "${cache_fingerprint}" =~ ^vllm${vllm_cache_prefix}-b12x${sparkinfer_cache_prefix}-[0-9a-f]{16}$ ]]
 
 image_env="$(docker image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"
 grep -Fxq "XDG_CACHE_HOME=/cache/jit/${cache_fingerprint}" <<<"${image_env}"
@@ -97,11 +99,13 @@ import importlib.metadata as md
 import inspect
 
 import torch
+import vllm._C_stable_libtorch  # noqa: F401
 from sparkinfer.attention.sparse_mla._scratch import SPARKINFERSparseMLAScratchCaps
 from sparkinfer.comm.pcie import DcpAllToAllPool
 from sparkinfer.comm.pcie.pcie_dma import _normalize_fp8_mode
 from sparkinfer.gemm import bmm, can_implement_bmm, prewarm_bmm
 from sparkinfer.moe.fused_moe import _impl as fused_moe_impl
+from sparkinfer.moe._shared.kernels.w4a16 import kernel as w4a16_kernel
 from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
 from vllm.model_executor.layers.attention import mla_attention
 from vllm.model_executor.layers.attention.mla_attention import MLAAttention
@@ -114,6 +118,7 @@ assert md.version("nvidia-cutlass-dsl") == "4.6.0"
 assert torch.__version__.startswith("2.12.0+cu132")
 assert torch.version.cuda == "13.2"
 assert fused_moe_impl._dynamic_kernel_intermediate_size(352, "w4a8_mx") == 384
+assert inspect.getsource(w4a16_kernel).count("cooperative=True") >= 2
 assert _normalize_fp8_mode("i8-ring") == "i8_ring"
 assert _normalize_fp8_mode("mxfp8-ring") == "mx_ring"
 assert callable(bmm) and callable(can_implement_bmm) and callable(prewarm_bmm)
@@ -121,13 +126,14 @@ assert "head_major_output" in inspect.signature(cp_lse_ag_out_rs).parameters
 assert hasattr(CudaCommunicator, "reduce_scatter_head_major")
 assert "head_major_output=True" in inspect.getsource(MLAAttention.forward_impl)
 assert "ensure_cublas_tail_padding" not in inspect.getsource(MLAAttention._v_up_proj)
+assert hasattr(torch.ops._C, "safe_mla_query_bmm")
 assert "out" in inspect.signature(DcpAllToAllPool.lse_reduce_scatter).parameters
 assert hasattr(mla_attention, "_preallocate_absorbed_mla_weights")
 assert not hasattr(mla_attention, "_release_b12x_mxfp8_kv_b_proj")
 spec_source = inspect.getsource(B12xMLASparseImpl)
 assert 'os.getenv("VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE", "auto")' in spec_source
 assert "attn_metadata.is_spec_decode" in spec_source
-assert "force_contiguous_mla_bmm_input = True" in spec_source
+assert "use_safe_mla_query_bmm = True" in spec_source
 assert hasattr(B12xMLASparseImpl, "reset_kv_cache_binding_state")
 assert hasattr(Worker, "_profile_model_with_kernel_warmup")
 assert hasattr(Worker, "_warmup_kernels_once")
