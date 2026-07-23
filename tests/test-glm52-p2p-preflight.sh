@@ -17,7 +17,7 @@ EnableResizableBar: 1
 EOF
 
 run_launcher() {
-  DRY_RUN=1 \
+  DRY_RUN="${3:-1}" \
   XDG_CACHE_HOME="${tmp_root}/cache" \
   TMPDIR="${tmp_root}/tmp" \
   MODEL=/tmp/model \
@@ -27,8 +27,23 @@ run_launcher() {
   bash "${repo_root}/launchers/serve-glm52-v16.sh"
 }
 
+mkdir -p "${tmp_root}/bin"
+cat >"${tmp_root}/bin/vllm" <<'EOF'
+#!/usr/bin/env bash
+printf 'FAKE_VLLM_REACHED\n'
+EOF
+chmod +x "${tmp_root}/bin/vllm"
+
 good_output="$(run_launcher "${tmp_root}/params-good" strict 2>&1)"
 grep -Fxq 'P2P_DRIVER_PREFLIGHT=pass' <<<"${good_output}"
+
+# Exercise the real launcher path outside command substitution. Bash suppresses
+# errexit in some substitution contexts, which previously hid a false `[[ ]]`
+# result inside the preflight function.
+PATH="${tmp_root}/bin:${PATH}" \
+  run_launcher "${tmp_root}/params-good" strict 0 \
+  >"${tmp_root}/non-dry.log" 2>&1
+grep -Fxq 'FAKE_VLLM_REACHED' "${tmp_root}/non-dry.log"
 
 if bad_output="$(run_launcher "${tmp_root}/params-bad" strict 2>&1)"; then
   echo "strict P2P preflight unexpectedly accepted an incomplete config" >&2

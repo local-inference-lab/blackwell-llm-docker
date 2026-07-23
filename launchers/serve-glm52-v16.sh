@@ -125,7 +125,9 @@ esac
 [[ "${#GLM52_INDEX_TOPK_PATTERN}" -eq 78 ]] || die "GLM52_INDEX_TOPK_PATTERN must be exactly 78 characters, got ${#GLM52_INDEX_TOPK_PATTERN}"
 
 check_p2p_driver_config() {
-  [[ "${P2P_PREFLIGHT}" == "off" ]] && return
+  if [[ "${P2P_PREFLIGHT}" == "off" ]]; then
+    return 0
+  fi
 
   local missing=()
   local required
@@ -144,8 +146,10 @@ check_p2p_driver_config() {
   fi
 
   if ((${#missing[@]} == 0)); then
-    [[ "${DRY_RUN:-0}" == "1" ]] && printf 'P2P_DRIVER_PREFLIGHT=pass\n'
-    return
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      printf 'P2P_DRIVER_PREFLIGHT=pass\n'
+    fi
+    return 0
   fi
 
   local message
