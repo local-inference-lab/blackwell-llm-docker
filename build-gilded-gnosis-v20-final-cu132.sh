@@ -5,8 +5,8 @@ cd "$(dirname "$0")"
 
 # GG v20 release candidate. The vLLM integration source is exactly the current
 # dev/gilded-gnosis plus unmerged PRs #145, #164, #166, #167, #169, #172,
-# #173, and #174. SparkInfer is current master plus PRs #75 and #76.
-export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllm7e3bee1-si6234185-fi801d57a-cu132-20260723}"
+# #173, and #174. SparkInfer is current master plus PRs #75, #76, and #77.
+export IMAGE="${IMAGE:-voipmonitor/vllm:gilded-gnosis-v20-vllm992b874-sia93df67-fi801d57a-cu132-20260724}"
 export SYSTEM_BASE_IMAGE="${SYSTEM_BASE_IMAGE:-voipmonitor/vllm:glm-kimi-cu132-system-base-20260626}"
 export BUILD_BASE_IMAGE_TAG="${BUILD_BASE_IMAGE_TAG:-voipmonitor/vllm:glm-kimi-cu132-build-base-20260626}"
 export BUILD_BASE_IMAGE="${BUILD_BASE_IMAGE:-0}"
@@ -31,16 +31,16 @@ export DEEPGEMM_REF="${DEEPGEMM_REF:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 export DEEPGEMM_COMMIT="${DEEPGEMM_COMMIT:-a6b593d2826719dcf4892609af7b84ee23aaf32a}"
 
 export VLLM_REPO="${VLLM_REPO:-https://github.com/voipmonitor/vllm.git}"
-export VLLM_REF="${VLLM_REF:-build/gilded-gnosis-v20-release-candidate2-20260723}"
-export VLLM_COMMIT="${VLLM_COMMIT:-7e3bee1ed4bc87efbdc36060647a3475cfaa1f1e}"
-export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllm7e3bee1.si6234185.fi801d57a.cu132.20260723}"
+export VLLM_REF="${VLLM_REF:-perf/v20-safe-query-fast-20260724}"
+export VLLM_COMMIT="${VLLM_COMMIT:-992b874cf7ae504616bbb1d2d4f7a7355be6972b}"
+export VLLM_BUILD_VERSION="${VLLM_BUILD_VERSION:-0.11.2.dev280+gilded.gnosis.v20.vllm992b874.sia93df67.fi801d57a.cu132.20260724}"
 export VLLM_PATCH_URL=
 export VLLM_PATCH_SHA256=
 export VLLM_PATCH_FILE=
 
 export SPARKINFER_REPO="${SPARKINFER_REPO:-https://github.com/local-inference-lab/sparkinfer.git}"
-export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-release-crashgate-v2-20260723}"
-export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-62341856cc5497d0c8ba33012dab6118925a6cfb}"
+export SPARKINFER_REF="${SPARKINFER_REF:-build/sparkinfer-v20-topk-final-20260724}"
+export SPARKINFER_COMMIT="${SPARKINFER_COMMIT:-a93df671cc7b33734f499b57228e542c3d3c3697}"
 
 export LAUNCHER_REPO="${LAUNCHER_REPO:-https://github.com/local-inference-lab/blackwell-llm-docker.git}"
 export LAUNCHER_REF="${LAUNCHER_REF:-build/gilded-gnosis-v20-final2-20260723}"
@@ -100,6 +100,7 @@ import inspect
 import torch
 import vllm._C_stable_libtorch  # noqa: F401
 from sparkinfer.attention.sparse_mla._scratch import SPARKINFERSparseMLAScratchCaps
+from sparkinfer.attention.nsa_indexer import tiled_topk
 from sparkinfer.comm.pcie import DcpAllToAllPool
 from sparkinfer.comm.pcie.pcie_dma import (
     OUTPUT_TAIL_PADDING,
@@ -121,6 +122,8 @@ assert md.version("nvidia-cutlass-dsl") == "4.6.0"
 assert torch.__version__.startswith("2.12.0+cu132")
 assert torch.version.cuda == "13.2"
 assert fused_moe_impl._dynamic_kernel_intermediate_size(352, "w4a8_mx") == 384
+assert tiled_topk._COARSE_RADIX_BITS == 10
+assert tiled_topk._SMEM_CANDS == 8192
 assert inspect.getsource(w4a16_kernel).count("cooperative=True") >= 2
 assert _normalize_fp8_mode("i8-ring") == "i8_ring"
 assert _normalize_fp8_mode("mxfp8-ring") == "mx_ring"
