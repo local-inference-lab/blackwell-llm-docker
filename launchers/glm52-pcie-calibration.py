@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Cache a lossless SparkInfer PCIe calibration before vLLM starts."""
+"""Cache a lossless SparkInfer PCIe calibration before vLLM starts.
+
+r10 changes (from the venice.kpchosting field failure, 2026-07-29):
+- Preflight: every selected GPU must have MIN_FREE_MIB free before the
+  probe launches; otherwise exit 3 with one clean status line naming the
+  busy GPUs and the processes holding them. No traceback, no torchrun.
+- Operational failures never print a Python traceback or an elastic
+  error wall. The complete untruncated probe output is written to
+  `<cache-dir>/<digest>.failure.log` and a single summary line points
+  at it. Exit codes: 0 measured/cache-hit, 2 usage error, 3 skipped by
+  preflight, 4 probe failed (details in file).
+"""
 
 from __future__ import annotations
 
@@ -21,12 +32,28 @@ from typing import Any, Sequence
 
 
 SCHEMA_VERSION = 1
+MIN_FREE_MIB = 4096
+EXIT_SKIPPED_PREFLIGHT = 3
+EXIT_PROBE_FAILED = 4
 COLLECTIVE_ENV_PREFIXES = (
     "NCCL_",
     "SPARKINFER_PCIE_",
     "B12X_PCIE_",
     "VLLM_PCIE_",
 )
+
+
+class CalibrationSkip(Exception):
+    """Calibration cannot run right now; this is a clean, expected skip."""
+
+
+class CalibrationFailure(Exception):
+    """The probe ran and failed; `detail` holds its complete output."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
 
 
 def _comma_ints(value: str) -> tuple[int, ...]:
@@ -65,7 +92,12 @@ def _file_identity(path: str | None) -> dict[str, Any]:
 
 
 def _probe_source_digest() -> str:
-    spec = importlib.util.find_spec("sparkinfer.comm.pcie.overlap_probe")
+    try:
+        spec = importlib.util.find_spec("sparkinfer.comm.pcie.overlap_probe")
+    except ImportError:
+        # find_spec raises (rather than returning None) when the parent
+        # package itself is absent; treat both cases as unavailable.
+        spec = None
     if spec is None or spec.origin is None:
         return "unavailable"
     try:
@@ -114,22 +146,36 @@ def _collective_environment() -> dict[str, str]:
     }
 
 
+def _run_nvidia_smi(arguments: list[str]) -> str:
+    command = ["nvidia-smi"] + arguments
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30.0,
+        )
+    except FileNotFoundError as exc:
+        raise CalibrationSkip("nvidia-smi is not available") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise CalibrationSkip("nvidia-smi timed out") from exc
+    except subprocess.CalledProcessError as exc:
+        raise CalibrationSkip(
+            f"nvidia-smi failed with exit {exc.returncode}"
+        ) from exc
+    return completed.stdout
+
+
 def _gpu_inventory(selected: Sequence[int]) -> list[dict[str, Any]]:
-    command = [
-        "nvidia-smi",
+    stdout = _run_nvidia_smi([
         "--query-gpu=index,uuid,pci.bus_id,pcie.link.gen.current,"
         "pcie.link.width.current,driver_version",
         "--format=csv,noheader,nounits",
-    ]
-    completed = subprocess.run(
-        command,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    ])
     inventory: dict[int, dict[str, Any]] = {}
-    for line in completed.stdout.splitlines():
+    for line in stdout.splitlines():
         fields = [field.strip() for field in line.split(",")]
         if len(fields) != 6:
             continue
@@ -144,8 +190,53 @@ def _gpu_inventory(selected: Sequence[int]) -> list[dict[str, Any]]:
         }
     missing = [index for index in selected if index not in inventory]
     if missing:
-        raise RuntimeError(f"selected GPUs missing from nvidia-smi: {missing}")
+        raise CalibrationSkip(f"selected GPUs missing from nvidia-smi: {missing}")
     return [inventory[index] for index in selected]
+
+
+def _preflight_free_memory(selected: Sequence[int]) -> None:
+    """Refuse to launch the probe when GPUs lack free memory.
+
+    The probe needs roughly 3 GiB per GPU. Launching it against occupied
+    GPUs (a still-running previous server instance, another tenant)
+    produces an eight-rank CUDA OOM cascade; this check turns that into
+    one clean skip line instead."""
+    stdout = _run_nvidia_smi([
+        "--query-gpu=index,memory.free", "--format=csv,noheader,nounits",
+    ])
+    free_by_index: dict[int, int] = {}
+    for line in stdout.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) != 2:
+            continue
+        try:
+            free_by_index[int(fields[0])] = int(fields[1])
+        except ValueError:
+            continue
+    busy = [
+        (index, free_by_index[index])
+        for index in selected
+        if index in free_by_index and free_by_index[index] < MIN_FREE_MIB
+    ]
+    if not busy:
+        return
+    busy_text = ", ".join(f"GPU{index}:{free}MiB" for index, free in busy)
+    holders = "unavailable"
+    try:
+        holders_output = _run_nvidia_smi([
+            "--query-compute-apps=pid,process_name,used_memory",
+            "--format=csv,noheader",
+        ]).strip()
+        if holders_output:
+            holders = "; ".join(
+                line.strip() for line in holders_output.splitlines()[:4]
+            )
+    except CalibrationSkip:
+        pass
+    raise CalibrationSkip(
+        f"gpu-memory-busy: {busy_text} free, need {MIN_FREE_MIB}MiB "
+        f"(holders: {holders})"
+    )
 
 
 def build_fingerprint_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -302,7 +393,7 @@ def _run_probe(args: argparse.Namespace, output: Path) -> dict[str, Any]:
             start_new_session=True,
         )
     except OSError as exc:
-        raise RuntimeError(f"failed to launch PCIe calibration: {exc}") from exc
+        raise CalibrationFailure(f"failed to launch torchrun: {exc}", "") from exc
     try:
         stdout, _ = process.communicate(timeout=args.timeout)
     except subprocess.TimeoutExpired as exc:
@@ -310,30 +401,44 @@ def _run_probe(args: argparse.Namespace, output: Path) -> dict[str, Any]:
         terminated_output = _terminate_process_group(process)
         if terminated_output:
             captured = terminated_output
-        tail = "\n".join(captured.splitlines()[-40:]) or "<no probe output>"
-        raise RuntimeError(
-            f"PCIe calibration timed out after {args.timeout:g}s:\n{tail}"
-        ) from exc
+        raise CalibrationFailure(
+            f"probe timed out after {args.timeout:g}s", captured) from exc
     except BaseException:
         _terminate_process_group(process)
         raise
     stdout = _output_text(stdout)
     if process.returncode != 0:
-        tail = "\n".join(stdout.splitlines()[-40:])
-        raise RuntimeError(
-            f"PCIe calibration exited with {process.returncode}:\n{tail}"
-        )
+        raise CalibrationFailure(
+            f"probe exited with {process.returncode}", stdout)
     print(stdout, file=sys.stderr, end="")
     try:
         result = json.loads(output.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        tail = "\n".join(stdout.splitlines()[-40:]) or "<no probe output>"
-        raise RuntimeError(
-            f"PCIe calibration produced no valid result at {output}: {exc}\n"
-            f"Probe output:\n{tail}"
+        raise CalibrationFailure(
+            f"probe produced no valid result at {output}: {exc}", stdout
         ) from exc
-    validate_probe_result(result)
+    try:
+        validate_probe_result(result)
+    except ValueError as exc:
+        raise CalibrationFailure(f"probe result rejected: {exc}", stdout) from exc
     return result
+
+
+def _write_failure_log(cache_dir: Path, digest: str, reason: str,
+                       detail: str) -> Path:
+    failure_path = cache_dir / f"{digest}.failure.log"
+    try:
+        body = (
+            f"# PCIe calibration failure\n"
+            f"# time: {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n"
+            f"# reason: {reason}\n"
+            f"# complete probe output follows (nothing truncated)\n\n"
+        )
+        failure_path.write_text(body + (detail or "(no output)\n"),
+                                encoding="utf-8")
+    except OSError:
+        return Path("(failure log could not be written)")
+    return failure_path
 
 
 def calibrate(args: argparse.Namespace) -> tuple[str, dict[str, Any], Path]:
@@ -350,13 +455,24 @@ def calibrate(args: argparse.Namespace) -> tuple[str, dict[str, Any], Path]:
             if cached is not None:
                 return "cache-hit", cached, cache_path
 
+        # Only a real measurement needs free GPUs; the cache hit above
+        # is served regardless of current GPU occupancy.
+        _preflight_free_memory(args.gpus[: args.tp_size])
+
         fd, temporary_name = tempfile.mkstemp(
             prefix=f"{digest}.", suffix=".probe.json", dir=args.cache_dir
         )
         os.close(fd)
         temporary = Path(temporary_name)
         try:
-            probe_result = _run_probe(args, temporary)
+            try:
+                probe_result = _run_probe(args, temporary)
+            except CalibrationFailure as exc:
+                failure_path = _write_failure_log(
+                    args.cache_dir, digest, exc.reason, exc.detail)
+                raise CalibrationFailure(
+                    f"{exc.reason}; complete output: {failure_path}", ""
+                ) from exc
             record = {
                 "schema": SCHEMA_VERSION,
                 "fingerprint": digest,
@@ -414,7 +530,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.timeout <= 0:
         raise SystemExit("timeout must be positive")
 
-    status, record, cache_path = calibrate(args)
+    try:
+        status, record, cache_path = calibrate(args)
+    except CalibrationSkip as exc:
+        print(f"PCIe calibration preflight: skipped ({exc})", file=sys.stderr)
+        return EXIT_SKIPPED_PREFLIGHT
+    except CalibrationFailure as exc:
+        print(f"PCIe calibration: {exc.reason}", file=sys.stderr)
+        return EXIT_PROBE_FAILED
     values = validate_probe_result(record["probe"])
     print(
         "\t".join(

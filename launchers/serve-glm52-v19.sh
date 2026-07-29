@@ -151,8 +151,14 @@ else
   force_arg=()
   [[ "${PCIE_CALIBRATION}" == "force" ]] && force_arg=(--force)
 
+  # Calibrator exit contract: 0 measured/cache-hit; 3 clean preflight skip
+  # (busy GPUs, nvidia-smi unavailable); 4 probe failure with the complete
+  # untruncated output parked in <cache-dir>/<digest>.failure.log. For 3
+  # and 4 the calibrator prints exactly one stderr line; no traceback or
+  # torchrun error wall ever reaches the boot log.
   calibration_line=""
-  if calibration_line="$(
+  calibration_exit=0
+  calibration_line="$(
     "${PCIE_CALIBRATOR}" \
       --tp-size "${TP}" \
       --dcp-size "${DCP}" \
@@ -161,7 +167,8 @@ else
       --cache-dir "${PCIE_CALIBRATION_CACHE_DIR}" \
       --timeout "${PCIE_CALIBRATION_TIMEOUT}" \
       "${force_arg[@]}"
-  )"; then
+  )" || calibration_exit=$?
+  if [[ "${calibration_exit}" -eq 0 ]]; then
     calibration_line="$(awk 'NF { line=$0 } END { print line }' \
       <<<"${calibration_line}")"
     IFS=$'\t' read -r \
@@ -200,9 +207,15 @@ else
     if [[ "${PCIE_DMA_MIN_BYTES}" == "auto" ]]; then
       PCIE_DMA_MIN_BYTES="${calibration_dma_min_bytes}"
     fi
+  elif [[ "${calibration_exit}" -eq 3 ]]; then
+    # Expected condition (for example GPUs still hold memory from a
+    # previous instance); the calibrator already printed its one-line
+    # reason. The conservative topology policy applies.
+    calibration_status="skipped:preflight"
   else
     calibration_status="failed:fallback-to-topology"
-    printf 'WARNING: PCIe calibration failed; using conservative topology policy.\n' >&2
+    printf 'NOTICE: PCIe calibration unavailable (calibrator exit %s); using conservative topology policy.\n' \
+      "${calibration_exit}" >&2
   fi
 fi
 
