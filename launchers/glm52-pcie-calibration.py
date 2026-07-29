@@ -147,7 +147,7 @@ def _collective_environment() -> dict[str, str]:
 
 
 def _run_nvidia_smi(arguments: list[str]) -> str:
-    command = ["nvidia-smi"] + arguments
+    command = ["nvidia-smi", *arguments]
     try:
         completed = subprocess.run(
             command,
@@ -162,18 +162,18 @@ def _run_nvidia_smi(arguments: list[str]) -> str:
     except subprocess.TimeoutExpired as exc:
         raise CalibrationSkip("nvidia-smi timed out") from exc
     except subprocess.CalledProcessError as exc:
-        raise CalibrationSkip(
-            f"nvidia-smi failed with exit {exc.returncode}"
-        ) from exc
+        raise CalibrationSkip(f"nvidia-smi failed with exit {exc.returncode}") from exc
     return completed.stdout
 
 
 def _gpu_inventory(selected: Sequence[int]) -> list[dict[str, Any]]:
-    stdout = _run_nvidia_smi([
-        "--query-gpu=index,uuid,pci.bus_id,pcie.link.gen.current,"
-        "pcie.link.width.current,driver_version",
-        "--format=csv,noheader,nounits",
-    ])
+    stdout = _run_nvidia_smi(
+        [
+            "--query-gpu=index,uuid,pci.bus_id,pcie.link.gen.current,"
+            "pcie.link.width.current,driver_version",
+            "--format=csv,noheader,nounits",
+        ]
+    )
     inventory: dict[int, dict[str, Any]] = {}
     for line in stdout.splitlines():
         fields = [field.strip() for field in line.split(",")]
@@ -201,9 +201,12 @@ def _preflight_free_memory(selected: Sequence[int]) -> None:
     GPUs (a still-running previous server instance, another tenant)
     produces an eight-rank CUDA OOM cascade; this check turns that into
     one clean skip line instead."""
-    stdout = _run_nvidia_smi([
-        "--query-gpu=index,memory.free", "--format=csv,noheader,nounits",
-    ])
+    stdout = _run_nvidia_smi(
+        [
+            "--query-gpu=index,memory.free",
+            "--format=csv,noheader,nounits",
+        ]
+    )
     free_by_index: dict[int, int] = {}
     for line in stdout.splitlines():
         fields = [field.strip() for field in line.split(",")]
@@ -223,10 +226,12 @@ def _preflight_free_memory(selected: Sequence[int]) -> None:
     busy_text = ", ".join(f"GPU{index}:{free}MiB" for index, free in busy)
     holders = "unavailable"
     try:
-        holders_output = _run_nvidia_smi([
-            "--query-compute-apps=pid,process_name,used_memory",
-            "--format=csv,noheader",
-        ]).strip()
+        holders_output = _run_nvidia_smi(
+            [
+                "--query-compute-apps=pid,process_name,used_memory",
+                "--format=csv,noheader",
+            ]
+        ).strip()
         if holders_output:
             holders = "; ".join(
                 line.strip() for line in holders_output.splitlines()[:4]
@@ -402,14 +407,14 @@ def _run_probe(args: argparse.Namespace, output: Path) -> dict[str, Any]:
         if terminated_output:
             captured = terminated_output
         raise CalibrationFailure(
-            f"probe timed out after {args.timeout:g}s", captured) from exc
+            f"probe timed out after {args.timeout:g}s", captured
+        ) from exc
     except BaseException:
         _terminate_process_group(process)
         raise
     stdout = _output_text(stdout)
     if process.returncode != 0:
-        raise CalibrationFailure(
-            f"probe exited with {process.returncode}", stdout)
+        raise CalibrationFailure(f"probe exited with {process.returncode}", stdout)
     print(stdout, file=sys.stderr, end="")
     try:
         result = json.loads(output.read_text(encoding="utf-8"))
@@ -424,8 +429,7 @@ def _run_probe(args: argparse.Namespace, output: Path) -> dict[str, Any]:
     return result
 
 
-def _write_failure_log(cache_dir: Path, digest: str, reason: str,
-                       detail: str) -> Path:
+def _write_failure_log(cache_dir: Path, digest: str, reason: str, detail: str) -> Path:
     failure_path = cache_dir / f"{digest}.failure.log"
     try:
         body = (
@@ -434,8 +438,7 @@ def _write_failure_log(cache_dir: Path, digest: str, reason: str,
             f"# reason: {reason}\n"
             f"# complete probe output follows (nothing truncated)\n\n"
         )
-        failure_path.write_text(body + (detail or "(no output)\n"),
-                                encoding="utf-8")
+        failure_path.write_text(body + (detail or "(no output)\n"), encoding="utf-8")
     except OSError:
         return Path("(failure log could not be written)")
     return failure_path
@@ -469,7 +472,8 @@ def calibrate(args: argparse.Namespace) -> tuple[str, dict[str, Any], Path]:
                 probe_result = _run_probe(args, temporary)
             except CalibrationFailure as exc:
                 failure_path = _write_failure_log(
-                    args.cache_dir, digest, exc.reason, exc.detail)
+                    args.cache_dir, digest, exc.reason, exc.detail
+                )
                 raise CalibrationFailure(
                     f"{exc.reason}; complete output: {failure_path}", ""
                 ) from exc
@@ -518,17 +522,21 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.tp_size < 2 or args.dcp_size < 1 or args.tp_size % args.dcp_size:
-        raise SystemExit(
-            "tp-size must be at least 2 and divisible by positive dcp-size"
+        print(
+            "tp-size must be at least 2 and divisible by positive dcp-size",
+            file=sys.stderr,
         )
+        raise SystemExit(2)
     if (
         args.indexer_shards < 1
         or args.dcp_size % args.indexer_shards
         or args.tp_size % args.indexer_shards
     ):
-        raise SystemExit("indexer-shards must divide TP and DCP")
+        print("indexer-shards must divide TP and DCP", file=sys.stderr)
+        raise SystemExit(2)
     if args.timeout <= 0:
-        raise SystemExit("timeout must be positive")
+        print("timeout must be positive", file=sys.stderr)
+        raise SystemExit(2)
 
     try:
         status, record, cache_path = calibrate(args)

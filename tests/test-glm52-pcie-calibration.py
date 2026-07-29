@@ -112,9 +112,7 @@ def test_run_probe_reports_timeout_with_captured_output(
         def communicate(self, timeout: float | None = None) -> tuple[str, None]:
             self.communicate_calls += 1
             if self.communicate_calls == 1:
-                raise subprocess.TimeoutExpired(
-                    "probe", 5.0, output="probe stalled"
-                )
+                raise subprocess.TimeoutExpired("probe", 5.0, output="probe stalled")
             return "probe stalled\nworkers stopped\n", None
 
     process = TimeoutProcess()
@@ -130,8 +128,10 @@ def test_run_probe_reports_timeout_with_captured_output(
         calibration.os, "killpg", lambda pid, sig: signals.append((pid, sig))
     )
 
-    with pytest.raises(RuntimeError, match=r"(?s)timed out.*probe stalled"):
+    with pytest.raises(calibration.CalibrationFailure) as failure:
         calibration._run_probe(_probe_args(tmp_path), tmp_path / "result.json")
+    assert failure.value.reason == "probe timed out after 5s"
+    assert failure.value.detail == "probe stalled\nworkers stopped\n"
     assert signals == [(process.pid, signal.SIGTERM)]
     assert process.communicate_calls == 2
     assert popen_kwargs["start_new_session"] is True
@@ -155,8 +155,48 @@ def test_run_probe_reports_invalid_result_with_probe_output(
     output = tmp_path / "result.json"
     output.write_text("not JSON", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match=r"(?s)no valid result.*probe complete"):
+    with pytest.raises(calibration.CalibrationFailure) as failure:
         calibration._run_probe(_probe_args(tmp_path), output)
+    assert failure.value.reason.startswith("probe produced no valid result")
+    assert failure.value.detail == "probe complete\n"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            ["--tp-size", "1", "--dcp-size", "1", "--indexer-shards", "1"],
+            "tp-size must be at least 2 and divisible by positive dcp-size",
+        ),
+        (
+            ["--tp-size", "8", "--dcp-size", "4", "--indexer-shards", "3"],
+            "indexer-shards must divide TP and DCP",
+        ),
+        (
+            [
+                "--tp-size",
+                "8",
+                "--dcp-size",
+                "4",
+                "--indexer-shards",
+                "2",
+                "--timeout",
+                "0",
+            ],
+            "timeout must be positive",
+        ),
+    ],
+)
+def test_manual_validation_uses_usage_exit_contract(
+    arguments: list[str], message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        calibration.main([*arguments, "--gpus", "0,1,2,3,4,5,6,7"])
+
+    assert exit_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"{message}\n"
 
 
 def test_fingerprint_is_order_sensitive() -> None:
