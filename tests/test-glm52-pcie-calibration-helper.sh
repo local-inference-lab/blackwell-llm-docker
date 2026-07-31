@@ -146,17 +146,36 @@ if run_helper DCP_CKV_GATHER_MAX_TOKENS=not-a-number >/dev/null; then
 fi
 
 runtime_env_script="${repo_root}/launchers/glm52-pcie-runtime-env.sh"
-preload_output="$(
+run_runtime_env_preload() {
+  local preload_state="$1"
+  local initial_preload="${2:-}"
+
   RUNTIME_ENV_SCRIPT="${runtime_env_script}" \
-  TEST_NCCL_PATH="${calibrator}" \
-  bash -c '
+    TEST_NCCL_PATH="${calibrator}" \
+    bash -c '
+    case "$1" in
+      unset) unset LD_PRELOAD ;;
+      empty) export LD_PRELOAD= ;;
+      set) export LD_PRELOAD="$2" ;;
+      *) exit 64 ;;
+    esac
+    set -u
     source "${RUNTIME_ENV_SCRIPT}"
     export NCCL_LOCAL_INFERENCE_PATH="${TEST_NCCL_PATH}"
-    export LD_PRELOAD=/tmp/existing-preload.so
     configure_glm52_pcie_runtime_env 1 0
     configure_glm52_pcie_runtime_env 1 0
     printf "%s\n" "${LD_PRELOAD}"
-  '
+  ' _ "${preload_state}" "${initial_preload}"
+}
+
+unset_preload_output="$(run_runtime_env_preload unset)"
+assert_contains "${unset_preload_output}" "${calibrator}"
+
+empty_preload_output="$(run_runtime_env_preload empty)"
+assert_contains "${empty_preload_output}" "${calibrator}"
+
+preload_output="$(
+  run_runtime_env_preload set /tmp/existing-preload.so
 )"
 assert_contains "${preload_output}" "${calibrator}:/tmp/existing-preload.so"
 
