@@ -157,6 +157,7 @@ run_runtime_env_preload() {
       unset) unset LD_PRELOAD ;;
       empty) export LD_PRELOAD= ;;
       set) export LD_PRELOAD="$2" ;;
+      unexported) LD_PRELOAD="$2" ;;
       *) exit 64 ;;
     esac
     set -u
@@ -164,6 +165,11 @@ run_runtime_env_preload() {
     export NCCL_LOCAL_INFERENCE_PATH="${TEST_NCCL_PATH}"
     configure_glm52_pcie_runtime_env 1 0
     configure_glm52_pcie_runtime_env 1 0
+    [[ "$(declare -p LD_PRELOAD)" == "declare -x "* ]] || {
+      printf "LD_PRELOAD was not exported: %s\n" \
+        "$(declare -p LD_PRELOAD)" >&2
+      exit 65
+    }
     printf "%s\n" "${LD_PRELOAD}"
   ' _ "${preload_state}" "${initial_preload}"
 }
@@ -178,5 +184,10 @@ preload_output="$(
   run_runtime_env_preload set /tmp/existing-preload.so
 )"
 assert_contains "${preload_output}" "${calibrator}:/tmp/existing-preload.so"
+
+unexported_preload_output="$(
+  run_runtime_env_preload unexported "${calibrator}"
+)"
+assert_contains "${unexported_preload_output}" "${calibrator}"
 
 echo "GLM-5.2 PCIe calibration helper: PASS"

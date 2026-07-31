@@ -25,8 +25,9 @@ configure_glm52_pcie_runtime_env() {
     preload_entries=" ${current_preload//:/ } "
     case "${preload_entries}" in
       *" ${nccl_path} "*) ;;
-      *) export LD_PRELOAD="${nccl_path}${current_preload:+:${current_preload}}" ;;
+      *) current_preload="${nccl_path}${current_preload:+:${current_preload}}" ;;
     esac
+    export LD_PRELOAD="${current_preload}"
     export VLLM_NCCL_SO_PATH="${nccl_path}"
   fi
 }
