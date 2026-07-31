@@ -157,7 +157,9 @@ run_runtime_env_preload() {
       unset) unset LD_PRELOAD ;;
       empty) export LD_PRELOAD= ;;
       set) export LD_PRELOAD="$2" ;;
-      unexported) LD_PRELOAD="$2" ;;
+      unexported)
+        unset LD_PRELOAD
+        LD_PRELOAD="$2" ;;
       *) exit 64 ;;
     esac
     set -u
