@@ -190,4 +190,18 @@ unexported_preload_output="$(
 )"
 assert_contains "${unexported_preload_output}" "${calibrator}"
 
+unexported_other_output="$(
+  run_runtime_env_preload unexported /tmp/unexported-preload.so
+)"
+assert_contains \
+  "${unexported_other_output}" \
+  "${calibrator}:/tmp/unexported-preload.so"
+
+space_separated_output="$(
+  run_runtime_env_preload set "/tmp/first-preload.so /tmp/second-preload.so"
+)"
+assert_contains \
+  "${space_separated_output}" \
+  "${calibrator}:/tmp/first-preload.so /tmp/second-preload.so"
+
 echo "GLM-5.2 PCIe calibration helper: PASS"
