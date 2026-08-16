@@ -1,3 +1,4 @@
+# GB10-II-R15-PATCHED: arm64 + sm_121a + DS4-invocation + BUILD_MAX_JOBS
 # syntax=docker/dockerfile:1.7
 
 ARG BASE_IMAGE=voipmonitor/vllm:kimi-k3-cu133-torch213-nccl2312-20260811-r2
@@ -41,6 +42,7 @@ ARG DEEPGEMM_COMMIT=a6b593d2826719dcf4892609af7b84ee23aaf32a
 ARG EXLLAMAV3_REPO=https://github.com/brandonmmusic-max/exllamav3.git
 ARG EXLLAMAV3_COMMIT=704aefd743b390af4bd0fb429d1906f9b964c7d8
 ARG CUTLASS_DSL_VERSION=4.6.2
+ARG BUILD_MAX_JOBS=16
 ARG VLLM_PACKAGE_VERSION
 ARG CACHE_FINGERPRINT
 
@@ -51,8 +53,8 @@ ENV VIRTUAL_ENV=/opt/venv \
     PYTHONPATH=/opt/exllamav3:/opt/infernal-invocation/vllm:/opt/infernal-invocation/b12x \
     SPARKINFER_DIR=/opt/infernal-invocation/b12x \
     CUTLASS_DSL_VERSION=${CUTLASS_DSL_VERSION} \
-    TORCH_CUDA_ARCH_LIST=12.0a \
-    CMAKE_CUDA_ARCHITECTURES=120a \
+    TORCH_CUDA_ARCH_LIST=12.1a \
+    CMAKE_CUDA_ARCHITECTURES=121a \
     FLASHINFER_CUDA_ARCH_LIST=12.0f \
     FLASHINFER_LOCAL_VERSION=cu133 \
     FLASHINFER_DISABLE_VERSION_CHECK=1 \
@@ -101,6 +103,7 @@ ENV LOCAL_INFERENCE_CACHE_FINGERPRINT=${CACHE_FINGERPRINT} \
     HF_HOME=/root/.cache/huggingface
 
 COPY patches /tmp/release-patches
+COPY pip-check-gb10 /usr/local/bin/pip-check-gb10
 
 # Every source directory is reconstructed from a release lock. The resulting
 # Git tree is the runtime identity; a branch name alone is not sufficient.
@@ -167,7 +170,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       'tokenspeed-mla==0.1.8' \
  && python -m pip install --force-reinstall --no-deps \
       "nvidia-cutlass-dsl-libs-cu13==${CUTLASS_DSL_VERSION}" \
- && python -m pip check
+ && pip-check-gb10 python
 
 # FlashInfer provides sampling and the optional DeepSeek attention backend.
 # The source revision contains the qualified PCIe IPC collective integration.
@@ -180,8 +183,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
  && python -m pip uninstall --yes flashinfer-python flashinfer-cubin flashinfer-jit-cache \
  && cd /tmp/flashinfer-src \
  && FLASHINFER_ENABLE_SM90=0 BUILD_NVEP=0 BUILD_NCCL_EP=0 BUILD_NIXL_EP=0 \
-      MAX_JOBS=48 python -m pip install --no-build-isolation --no-deps --force-reinstall . \
- && MAX_JOBS=48 python -m pip wheel --no-build-isolation --no-deps \
+      MAX_JOBS=${BUILD_MAX_JOBS} python -m pip install --no-build-isolation --no-deps --force-reinstall . \
+ && MAX_JOBS=${BUILD_MAX_JOBS} python -m pip wheel --no-build-isolation --no-deps \
       -w /tmp/flashinfer-wheels ./flashinfer-jit-cache \
  && python -m pip install --no-deps --force-reinstall \
       /tmp/flashinfer-wheels/flashinfer_jit_cache-*.whl \
@@ -216,7 +219,7 @@ RUN --mount=type=cache,id=deepseek-infernal-cu133-vllm-extensions,target=/tmp/vl
       -DVLLM_TARGET_DEVICE=cuda \
       -DVLLM_PYTHON_EXECUTABLE=/opt/venv/bin/python \
       -DNVCC_THREADS=4; \
-    cmake --build /tmp/vllm-extensions --parallel 48; \
+    cmake --build /tmp/vllm-extensions --parallel ${BUILD_MAX_JOBS}; \
     cmake --install /tmp/vllm-extensions \
       --prefix /tmp/vllm-flash-attn-python \
       --component _vllm_fa4_cutedsl_C; \
@@ -270,7 +273,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 # LMCache is built against the same PyTorch ABI and includes only RAM and
 # buffered filesystem dependencies in the serving runtime.
-RUN BUILD_WITH_CUDA=1 TORCH_CUDA_ARCH_LIST=12.0 MAX_JOBS=48 \
+RUN BUILD_WITH_CUDA=1 TORCH_CUDA_ARCH_LIST=12.1 MAX_JOBS=${BUILD_MAX_JOBS} \
       SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LMCACHE="${LMCACHE_BUILD_VERSION}" \
       python -m pip wheel --no-build-isolation --no-deps \
       -w /tmp/lmcache-wheels /opt/infernal-invocation/lmcache \
@@ -287,7 +290,7 @@ RUN git clone --filter=blob:none --no-checkout \
  && git -C /tmp/exllamav3-src checkout --detach "${EXLLAMAV3_COMMIT}" \
  && test "$(git -C /tmp/exllamav3-src rev-parse HEAD)" = "${EXLLAMAV3_COMMIT}" \
  && cd /tmp/exllamav3-src \
- && TORCH_CUDA_ARCH_LIST=12.0a MAX_JOBS=48 python setup.py build_ext --inplace \
+ && TORCH_CUDA_ARCH_LIST=12.1a MAX_JOBS=${BUILD_MAX_JOBS} python setup.py build_ext --inplace \
  && mapfile -t extensions < <(find . -maxdepth 1 -type f \
       -name 'exllamav3_ext*.so' -print) \
  && test "${#extensions[@]}" -eq 1 \

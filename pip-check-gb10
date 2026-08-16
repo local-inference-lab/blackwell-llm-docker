@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python_bin=${1:-python}
+if output=$("${python_bin}" -m pip check 2>&1); then
+  printf '%s\n' "${output}"
+  exit 0
+fi
+
+printf '%s\n' "${output}"
+unexpected=$(printf '%s\n' "${output}" | \
+  grep -Fvx 'nvidia-cusparselt-cu13 0.8.1 is not supported on this platform' || true)
+[[ -z "${unexpected}" ]] || exit 1
+printf '%s\n' 'WARN: bekende arm64 cusparselt-metadatafout genegeerd' >&2

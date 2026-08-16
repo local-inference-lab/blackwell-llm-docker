@@ -80,6 +80,9 @@ if ! docker image inspect "${base_image}" >/dev/null 2>&1; then
     exit 1
   }
 fi
+build_max_jobs=${BUILD_MAX_JOBS:-16}
+case "${build_max_jobs}" in *[!0-9]*|'') printf 'BUILD_MAX_JOBS must be an integer; got %s\n' "${build_max_jobs}" >&2; exit 2 ;; esac
+[[ ${build_max_jobs} -ge 1 && ${build_max_jobs} -le 16 ]] || { printf 'BUILD_MAX_JOBS must be 1-16; got %s\n' "${build_max_jobs}" >&2; exit 2; }
 base_image_id="$(docker image inspect "${base_image}" --format '{{.Id}}')"
 docker_commit="$(git rev-parse HEAD)"
 
@@ -138,6 +141,7 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg "RELEASE_DATE=${release_date}" \
   --build-arg "DOCKER_COMMIT=${docker_commit}" \
   --build-arg "CACHE_FINGERPRINT=${cache_fingerprint}" \
+  --build-arg "BUILD_MAX_JOBS=${BUILD_MAX_JOBS:-16}" \
   --file Dockerfile.deepseek-infernal-invocation-cu133-torch213 \
   --tag "${image}" \
   .

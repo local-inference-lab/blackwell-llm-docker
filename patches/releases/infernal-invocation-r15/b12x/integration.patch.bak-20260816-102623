@@ -1,5 +1,5 @@
 diff --git a/b12x/_lib/intrinsics.py b/b12x/_lib/intrinsics.py
-index d4ca937..ff473e7 100644
+index d4ca937e8bfd14f72e38ee830be49fddd0fd81ac..ff473e72d48ecb9ce9ebb6ec9de506f7a17f6c88 100644
 --- a/b12x/_lib/intrinsics.py
 +++ b/b12x/_lib/intrinsics.py
 @@ -6262,6 +6262,7 @@ def packed_decode_sqg_xor_cheb_t12_to_e4m3x8(
@@ -181,7 +181,7 @@ index d4ca937..ff473e7 100644
      asm = (
          """
 diff --git a/b12x/_lib/quant/sqg_e4m3.py b/b12x/_lib/quant/sqg_e4m3.py
-index ddee76a..8b61d05 100644
+index ddee76acdcb9b600166bf2a1a4b51c0ef0b66d61..8b61d05c82cd795616bd1e0a42d41cf89fd69784 100644
 --- a/b12x/_lib/quant/sqg_e4m3.py
 +++ b/b12x/_lib/quant/sqg_e4m3.py
 @@ -30,10 +30,9 @@ import torch
@@ -275,176 +275,8 @@ index ddee76a..8b61d05 100644
      "SQG_E4M3_EXEC_LUT_ENTRIES",
      "SQG_E4M3_EXEC_LUT_K3_DIRECT_OFF",
      "SQG_E4M3_RANK_LUT_ENTRIES",
-diff --git a/b12x/attention/paged/traits.py b/b12x/attention/paged/traits.py
-index 7d7cc0a..2ffb2a0 100644
---- a/b12x/attention/paged/traits.py
-+++ b/b12x/attention/paged/traits.py
-@@ -13,6 +13,19 @@ from .planner import PagedPlan
- _FP8_KV_DTYPE = torch.float8_e4m3fn
- 
- 
-+def _matches_sm120_family(device_capability: tuple[int, int]) -> bool:
-+    # The "Laguna" family recipes below are exact-capability gates that were
-+    # validated on SM120 hardware.  On consumers equipped with SM120a-family
-+    # PTX (e.g. the 48-SM GB10 spur, which reports (12, 1)) they would fall
-+    # back to the generic candidate sweep.  B12X_PAGED_SM121_TRAITS=1 treats
-+    # (12, 1) like (12, 0) so the same MMA/shared-memory recipes are selected;
-+    # default off keeps the (12, 1) path byte-for-byte unchanged.
-+    return device_capability == (12, 0) or (
-+        device_capability == (12, 1)
-+        and os.environ.get("B12X_PAGED_SM121_TRAITS", "0") == "1"
-+    )
-+
-+
- def _align_up(value: int, alignment: int) -> int:
-     return ((value + alignment - 1) // alignment) * alignment
- 
-@@ -376,7 +389,7 @@ def select_paged_forward_traits_from_plan(
-     compact_sync_rows = 0
-     if (
-         plan.mode == "extend"
--        and device_capability == (12, 0)
-+        and _matches_sm120_family(device_capability)
-         and plan.enable_cuda_graph
-         and not plan.msa_block_sparse
-         and not plan.split_kv
-@@ -404,7 +417,7 @@ def select_paged_forward_traits_from_plan(
-         )
-     elif (
-         plan.mode == "extend"
--        and device_capability == (12, 0)
-+        and _matches_sm120_family(device_capability)
-         and plan.enable_cuda_graph
-         and not plan.msa_block_sparse
-         and not plan.split_kv
-@@ -432,7 +445,7 @@ def select_paged_forward_traits_from_plan(
-         )
-     elif (
-         plan.mode == "decode"
--        and device_capability == (12, 0)
-+        and _matches_sm120_family(device_capability)
-         and plan.enable_cuda_graph
-         and plan.split_kv
-         and not plan.msa_block_sparse
-@@ -453,7 +466,7 @@ def select_paged_forward_traits_from_plan(
-         compact_sync_rows = plan.gqa_group_size
-     elif (
-         plan.mode == "decode"
--        and device_capability == (12, 0)
-+        and _matches_sm120_family(device_capability)
-         and plan.enable_cuda_graph
-         and plan.split_kv
-         and not plan.msa_block_sparse
-@@ -471,7 +484,7 @@ def select_paged_forward_traits_from_plan(
-         exact_num_mma_kv = 2
-     elif (
-         plan.mode == "verify"
--        and device_capability == (12, 0)
-+        and _matches_sm120_family(device_capability)
-         and plan.enable_cuda_graph
-         and plan.split_kv
-         and not plan.msa_block_sparse
-diff --git a/b12x/comm/pcie/pcie_dcp_a2a.py b/b12x/comm/pcie/pcie_dcp_a2a.py
-index 7806c18..265c3f5 100644
---- a/b12x/comm/pcie/pcie_dcp_a2a.py
-+++ b/b12x/comm/pcie/pcie_dcp_a2a.py
-@@ -41,6 +41,24 @@ SUPPORTED_DTYPES = (torch.float16, torch.bfloat16)
- SUPPORTED_GATHER_DTYPES = (*SUPPORTED_DTYPES, torch.float8_e4m3fn)
- SUPPORTED_PAIR_DTYPES = (*SUPPORTED_GATHER_DTYPES, torch.float32)
- DCP_A2A_REQUIRED_SMS = 64
-+
-+
-+def _dcp_a2a_required_sms(device) -> int:
-+    """Residency requirement; met B12X_PCIE_SMS_ADAPTIVE=1 device-afgeleid.
-+
-+    gb10-opt P4 (B1): op 48-SM-GB10 sluit de vaste 64-drempel het PCIe-DCP-A2A-
-+    pad uit (stille NCCL-fallback). De vlag verlaagt de drempel naar het
-+    device-SM-aantal; alleen gebruiken na residentie-validatie van de
-+    peer-waiting grids op de doelhardware.
-+    """
-+    if os.environ.get("B12X_PCIE_SMS_ADAPTIVE", "0") == "1":
-+        try:
-+            return int(
-+                torch.cuda.get_device_properties(device).multi_processor_count
-+            )
-+        except Exception:
-+            return DCP_A2A_REQUIRED_SMS
-+    return DCP_A2A_REQUIRED_SMS
- _MAX_BLOCKS = 64
- _MAX_RANKS = 16
- _FLAG_STRIDE = 32
-@@ -343,7 +361,7 @@ class PCIeDCPA2A:
-         if self.device.type == "cuda":
-             _require_full_grid_residency(
-                 owner="PCIe DCP A2A direct constructor",
--                required_sms=DCP_A2A_REQUIRED_SMS,
-+                required_sms=_dcp_a2a_required_sms(self.device),
-                 device=self.device,
-                 exchange_group=self.exchange_group,
-             )
-@@ -537,7 +555,7 @@ class PCIeDCPA2A:
- 
-         _require_full_grid_residency(
-             owner="PCIe DCP A2A",
--            required_sms=DCP_A2A_REQUIRED_SMS,
-+            required_sms=_dcp_a2a_required_sms(device_obj),
-             device=device_obj,
-             exchange_group=exchange_group,
-         )
-@@ -1606,7 +1624,7 @@ class PCIeDCPA2APool:
-             )
-             _require_full_grid_residency(
-                 owner="PCIe DCP A2A pool",
--                required_sms=(DCP_A2A_REQUIRED_SMS * self.max_concurrent_channels),
-+                required_sms=(_dcp_a2a_required_sms(self.device) * self.max_concurrent_channels),
-                 device=self.device,
-                 exchange_group=self.exchange_group,
-             )
-diff --git a/b12x/comm/pcie/pcie_twoshot.py b/b12x/comm/pcie/pcie_twoshot.py
-index f4294ba..beeb612 100644
---- a/b12x/comm/pcie/pcie_twoshot.py
-+++ b/b12x/comm/pcie/pcie_twoshot.py
-@@ -10,6 +10,7 @@ a runtime instance must not be shared concurrently across CUDA streams.
- 
- from __future__ import annotations
- 
-+import os
- from contextlib import contextmanager
- from dataclasses import dataclass
- from typing import Optional, Sequence
-@@ -41,6 +42,21 @@ from .pcie_oneshot import (
- SUPPORTED_WORLD_SIZES = (2, 4, 8)
- FP8_MAX = 448.0
- TWOSHOT_REQUIRED_SMS = 64
-+
-+
-+def _twoshot_required_sms(device) -> int:
-+    """Residency requirement; met B12X_PCIE_SMS_ADAPTIVE=1 device-afgeleid.
-+
-+    gb10-opt P4 (C1): zelfde constructie als _dcp_a2a_required_sms.
-+    """
-+    if os.environ.get("B12X_PCIE_SMS_ADAPTIVE", "0") == "1":
-+        try:
-+            return int(
-+                torch.cuda.get_device_properties(device).multi_processor_count
-+            )
-+        except Exception:
-+            return TWOSHOT_REQUIRED_SMS
-+    return TWOSHOT_REQUIRED_SMS
- _MAX_BLOCKS = 64
- _MAX_RANKS = 16
- _FLAG_STRIDE = 32
-@@ -212,7 +228,7 @@ class PCIeTwoShotSP:
- 
-         _require_full_grid_residency(
-             owner="PCIe twoshot",
--            required_sms=TWOSHOT_REQUIRED_SMS,
-+            required_sms=_twoshot_required_sms(device_obj),
-             device=device_obj,
-             exchange_group=exchange_group,
-         )
 diff --git a/b12x/gemm/trellis_linear/__init__.py b/b12x/gemm/trellis_linear/__init__.py
-index 4091fae..36a281f 100644
+index 4091faed71517e14f760c163b7f901a2c935c6b9..36a281f29d3786c2f1259b848d66663523e0e51a 100644
 --- a/b12x/gemm/trellis_linear/__init__.py
 +++ b/b12x/gemm/trellis_linear/__init__.py
 @@ -23,6 +23,8 @@ META = OpMeta(
@@ -466,7 +298,7 @@ index 4091fae..36a281f 100644
  
  install_lazy_api(globals(), META)
 diff --git a/b12x/gemm/trellis_linear/_small_m.py b/b12x/gemm/trellis_linear/_small_m.py
-index 4b38103..2a2c781 100644
+index 4b3810396acf7ec2fef52620fc65b61058e91922..be8214376f36f2b5cc549338aaf9fc1bac6593c6 100644
 --- a/b12x/gemm/trellis_linear/_small_m.py
 +++ b/b12x/gemm/trellis_linear/_small_m.py
 @@ -1,4 +1,4 @@
@@ -493,15 +325,13 @@ index 4b38103..2a2c781 100644
      (512, 6144): 96,
  }
  
-@@ -70,6 +74,48 @@ def _extension():
+@@ -70,6 +74,46 @@ def _extension():
      )
  
  
 +def _validate_sm120(x: torch.Tensor) -> None:
 +    capability = torch.cuda.get_device_capability(x.device)
-+    if capability != (12, 0) and not (
-+        capability[0] == 12 and os.environ.get("B12X_K6_SM121_ENABLE", "0") == "1"
-+    ):
++    if capability != (12, 0):
 +        raise NotImplementedError(
 +            "Trellis K6 small-M kernel is built for sm_120 only; "
 +            f"device reports sm_{capability[0]}{capability[1]}"
@@ -542,7 +372,7 @@ index 4b38103..2a2c781 100644
  def run_k6_mcg(
      x: torch.Tensor,
      trellis: torch.Tensor,
-@@ -82,21 +128,8 @@ def run_k6_mcg(
+@@ -82,21 +126,8 @@ def run_k6_mcg(
      num_sms: int = 0,
  ) -> None:
      """Launch the capture-safe K6/MCG kernel on Torch's current stream."""
@@ -566,7 +396,7 @@ index 4b38103..2a2c781 100644
      _extension().launch_k6_mcg(
          x,
          trellis,
-@@ -109,4 +142,34 @@ def run_k6_mcg(
+@@ -109,4 +140,34 @@ def run_k6_mcg(
      )
  
  
@@ -603,7 +433,7 @@ index 4b38103..2a2c781 100644
 +
 +__all__ = ["run_k6_mcg", "run_k6_sqg"]
 diff --git a/b12x/gemm/trellis_linear/api.py b/b12x/gemm/trellis_linear/api.py
-index d9f0294..4a556a3 100644
+index d9f0294765e82ba15ba51339bfc093608ce2c854..4a556a3eb38e0efa29449b64deddb4071023278f 100644
 --- a/b12x/gemm/trellis_linear/api.py
 +++ b/b12x/gemm/trellis_linear/api.py
 @@ -11,6 +11,9 @@ from ...moe._shared.kernels.w4a16.kernel import (
@@ -717,7 +547,7 @@ index d9f0294..4a556a3 100644
      """True when the SM120/SM121 Trellis kernel stack is available."""
      return default_is_supported(device, requires=META.requires)
 diff --git a/b12x/gemm/trellis_linear/csrc/trellis_k6_small.cu b/b12x/gemm/trellis_linear/csrc/trellis_k6_small.cu
-index bb92235..c3fb092 100644
+index bb9223521630636a61fdfcc2e8dcf8fe924c38e4..c3fb0929567107bc93a13fb14d3414a0f5e2c7c0 100644
 --- a/b12x/gemm/trellis_linear/csrc/trellis_k6_small.cu
 +++ b/b12x/gemm/trellis_linear/csrc/trellis_k6_small.cu
 @@ -9,7 +9,9 @@
@@ -878,7 +708,7 @@ index bb92235..c3fb092 100644
 +             "B12X K6/SQG small-M dense GEMM");
  }
 diff --git a/b12x/gemm/trellis_linear/csrc/vendor/quant/codebook.cuh b/b12x/gemm/trellis_linear/csrc/vendor/quant/codebook.cuh
-index e3f6bac..3903d51 100644
+index e3f6bac25fd474956d6211cad9cebf4e4a144837..3903d5102f005e30a87faf3868fe3a02ba9c354f 100644
 --- a/b12x/gemm/trellis_linear/csrc/vendor/quant/codebook.cuh
 +++ b/b12x/gemm/trellis_linear/csrc/vendor/quant/codebook.cuh
 @@ -53,6 +53,25 @@ __device__ inline half decode_3inst(uint32_t x)
@@ -920,7 +750,7 @@ index e3f6bac..3903d51 100644
  __device__ inline half2 decode_mcg_product_2(uint32_t x0, uint32_t x1)
 diff --git a/b12x/gemm/trellis_linear/w4a8.py b/b12x/gemm/trellis_linear/w4a8.py
 new file mode 100644
-index 0000000..eac220a
+index 0000000000000000000000000000000000000000..eac220aabba7ecf47db6cb42919cb6e56b7801e4
 --- /dev/null
 +++ b/b12x/gemm/trellis_linear/w4a8.py
 @@ -0,0 +1,793 @@
@@ -1718,7 +1548,7 @@ index 0000000..eac220a
 +    "select_dense_w4a8_m_tile_rows",
 +]
 diff --git a/b12x/moe/__init__.py b/b12x/moe/__init__.py
-index 1ca2cbc..7d168d0 100644
+index 1ca2cbca00c82cae117b1d41b9e75f601a92d596..7d168d09069843ea2aaf3ee8a7e026e34497cba3 100644
 --- a/b12x/moe/__init__.py
 +++ b/b12x/moe/__init__.py
 @@ -6,6 +6,8 @@
@@ -1740,7 +1570,7 @@ index 1ca2cbc..7d168d0 100644
  
  def __getattr__(name: str) -> Any:
 diff --git a/b12x/moe/_shared/kernels/dynamic.py b/b12x/moe/_shared/kernels/dynamic.py
-index 04224d7..7f70456 100644
+index 04224d70b36f145784e31175e2b67fac1e15973f..7f7045601da64c7c9b89657605d16ca39c31c33e 100644
 --- a/b12x/moe/_shared/kernels/dynamic.py
 +++ b/b12x/moe/_shared/kernels/dynamic.py
 @@ -2944,43 +2944,66 @@ class MoEDynamicKernelBackend:
@@ -3157,7 +2987,7 @@ index 04224d7..7f70456 100644
              else:
 diff --git a/b12x/moe/_shared/kernels/glm_trellis_transform.py b/b12x/moe/_shared/kernels/glm_trellis_transform.py
 new file mode 100644
-index 0000000..6af6cda
+index 0000000000000000000000000000000000000000..6af6cda4fe7a3de9eb8789e99d8ab2fd2d2e2ac0
 --- /dev/null
 +++ b/b12x/moe/_shared/kernels/glm_trellis_transform.py
 @@ -0,0 +1,317 @@
@@ -3480,7 +3310,7 @@ index 0000000..6af6cda
 +]
 diff --git a/b12x/moe/_shared/kernels/glm_trellis_w4a8.py b/b12x/moe/_shared/kernels/glm_trellis_w4a8.py
 new file mode 100644
-index 0000000..84140ff
+index 0000000000000000000000000000000000000000..84140ff106cdf77ca755cbff692d27c97bf16225
 --- /dev/null
 +++ b/b12x/moe/_shared/kernels/glm_trellis_w4a8.py
 @@ -0,0 +1,1730 @@
@@ -5215,7 +5045,7 @@ index 0000000..84140ff
 +    "run_glm_route_packed_w4a8_projection",
 +]
 diff --git a/b12x/moe/_shared/kernels/w4a16/host.py b/b12x/moe/_shared/kernels/w4a16/host.py
-index e2eb4d5..c815c3f 100644
+index e2eb4d579aa1d1a87bbace0f94bdd9ae93c3bc80..c815c3f67401862884903aba0d147a4a97b4be35 100644
 --- a/b12x/moe/_shared/kernels/w4a16/host.py
 +++ b/b12x/moe/_shared/kernels/w4a16/host.py
 @@ -190,6 +190,32 @@ def route_pack_token_capacity(tokens: int, topk: int) -> int:
@@ -5293,7 +5123,7 @@ index e2eb4d5..c815c3f 100644
      "unswizzle_block_scale",
      "unswizzle_expert_scales",
 diff --git a/b12x/moe/_shared/kernels/w4a16/kernel.py b/b12x/moe/_shared/kernels/w4a16/kernel.py
-index 96581c5..52d2e56 100644
+index 96581c5b6de2c799dd2145c854af54cf8b221e55..ae6b44af828257b38f88a16e5a17c1b4ff55f39b 100644
 --- a/b12x/moe/_shared/kernels/w4a16/kernel.py
 +++ b/b12x/moe/_shared/kernels/w4a16/kernel.py
 @@ -186,8 +186,8 @@ _FC2_DIRECT_MIN_EXPERT_CAPACITY = 1024
@@ -6085,7 +5915,7 @@ index 96581c5..52d2e56 100644
      )
      sum_kernel = compile_w4a16_topk_sum(
          m=m,
-@@ -12085,6 +12017,40 @@ def _trellis_dense_buffer(
+@@ -12085,6 +12017,30 @@ def _trellis_dense_buffer(
      return buffer
  
  
@@ -6101,19 +5931,9 @@ index 96581c5..52d2e56 100644
 +    explicit_launch_config: bool,
 +) -> bool:
 +    """Select a capture-safe K6 small-M kernel on its compiled target."""
-+    capability = tuple(torch.cuda.get_device_capability(device))
-+    if capability == (12, 0):
-+        k6_capable = True
-+    elif capability[0] == 12 and os.environ.get("B12X_K6_SM121_ENABLE", "0") == "1":
-+        # gb10-opt P3 (A1): de K6/MCG-kernel is alleen op SM120 gevalideerd;
-+        # op sm_121a alleen inschakelbaar met expliciete opt-in. smem-check:
-+        # kDynamicSmem = 24 KiB (trellis_k6_small.cu) << 101376 B (GB10).
-+        k6_capable = True
-+    else:
-+        k6_capable = False
 +    return (
 +        not explicit_launch_config
-+        and k6_capable
++        and tuple(torch.cuda.get_device_capability(device)) == (12, 0)
 +        and m <= 128
 +        and trellis_bits == 6
 +        and trellis_codebook in ("mcg", "sqg_xor_cheb_t12")
@@ -6126,7 +5946,7 @@ index 96581c5..52d2e56 100644
  def _run_trellis256_dense_current_device(
      x: torch.Tensor,
      prepared_dense,
-@@ -12099,7 +12065,7 @@ def _run_trellis256_dense_current_device(
+@@ -12099,7 +12055,7 @@ def _run_trellis256_dense_current_device(
      output_f16: torch.Tensor | None = None,
      hadamard_128=None,
      stream: cuda.CUstream | None = None,
@@ -6135,7 +5955,7 @@ index 96581c5..52d2e56 100644
      _force_tile_config: tuple[int, int] | None = None,
  ) -> torch.Tensor:
      """Run one native EXL3 linear on the already-selected CUDA device.
-@@ -12113,13 +12079,10 @@ def _run_trellis256_dense_current_device(
+@@ -12113,13 +12069,10 @@ def _run_trellis256_dense_current_device(
          raise ValueError("run_trellis256_dense requires prepared trellis3_t256 weights")
      if int(getattr(prepared_dense, "num_experts", 0)) != 1:
          raise ValueError("run_trellis256_dense requires an honest E=1 prepared weight")
@@ -6151,7 +5971,7 @@ index 96581c5..52d2e56 100644
          )
      trellis_bits = int(getattr(prepared_dense, "trellis_bits", 0))
      if trellis_bits not in _TRELLIS256_BITS:
-@@ -12168,6 +12131,80 @@ def _run_trellis256_dense_current_device(
+@@ -12168,6 +12121,80 @@ def _run_trellis256_dense_current_device(
          None if hadamard_128 is None else _resolve_exl3_hadamard_128(hadamard_128)
      )
  
@@ -6232,7 +6052,7 @@ index 96581c5..52d2e56 100644
      gemm_output = _trellis_dense_buffer(
          "gemm_output",
          gemm_output,
-@@ -12220,8 +12257,8 @@ def _run_trellis256_dense_current_device(
+@@ -12220,8 +12247,8 @@ def _run_trellis256_dense_current_device(
      max_shared_mem = int(
          getattr(props, "shared_memory_per_block_optin", _DEFAULT_MAX_SHARED_MEM)
      )
@@ -6243,7 +6063,7 @@ index 96581c5..52d2e56 100644
          moe_block_size, (tile_k, tile_n) = _trellis256_dense_launch_geometry(
              size_m=m,
              size_k=size_k,
-@@ -12362,7 +12399,7 @@ def run_trellis256_dense(
+@@ -12362,7 +12389,7 @@ def run_trellis256_dense(
      output_f16: torch.Tensor | None = None,
      hadamard_128=None,
      stream: cuda.CUstream | None = None,
@@ -6252,7 +6072,7 @@ index 96581c5..52d2e56 100644
      _force_tile_config: tuple[int, int] | None = None,
  ) -> torch.Tensor:
      """Run one native or compact P24/P33 EXL3 linear through the t256 GEMM.
-@@ -12554,14 +12591,11 @@ def run_w4a16_moe(
+@@ -12554,14 +12581,11 @@ def run_w4a16_moe(
              ):
                  raise ValueError("unsupported prepared static trellis pair kind")
              pair_metadata_dtype = (
@@ -6269,7 +6089,7 @@ index 96581c5..52d2e56 100644
                  )
              if dynamic_pairs:
                  for name, modes in (
-@@ -13011,9 +13045,7 @@ def run_w4a16_moe(
+@@ -13011,9 +13035,7 @@ def run_w4a16_moe(
              prepared.w13_scale,
              prepared.w2_scale,
              expert_map=expert_map if use_direct_topk_routes else None,
@@ -6280,7 +6100,7 @@ index 96581c5..52d2e56 100644
              expert_ids_unique=bool(use_direct_topk_routes and m == 1),
              stream=stream,
          )
-@@ -13590,18 +13622,6 @@ def build_w4a16_tier_local_map(
+@@ -13590,18 +13612,6 @@ def build_w4a16_tier_local_map(
      return table.contiguous()
  
  
@@ -6300,7 +6120,7 @@ index 96581c5..52d2e56 100644
      "W4A16ActivationCompileResult",
      "W4A16FusedMoeCompileResult",
 diff --git a/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py b/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
-index a97ee2e..fc3c30c 100644
+index a97ee2e62b57463012fd2aaa64edb59cbdd452ab..fc3c30cf278036c754f4f353106974f6e6d28232 100644
 --- a/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
 +++ b/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
 @@ -2,8 +2,8 @@
@@ -9078,7 +8898,7 @@ index a97ee2e..fc3c30c 100644
 +    "run_mixed_trellis3",
  ]
 diff --git a/b12x/moe/_shared/kernels/w4a16/prepare.py b/b12x/moe/_shared/kernels/w4a16/prepare.py
-index 8bd20ec..3550bdd 100644
+index 8bd20ecf827bf4b450c4ec448b7a9dc5e65c64a4..3550bdd714c513c8e3a2c0b3a2e6cc78485bd109 100644
 --- a/b12x/moe/_shared/kernels/w4a16/prepare.py
 +++ b/b12x/moe/_shared/kernels/w4a16/prepare.py
 @@ -1191,9 +1191,7 @@ def prepare_w4a16_fc2_e8m0_weights(
@@ -9555,7 +9375,7 @@ index 8bd20ec..3550bdd 100644
              (
                  values[..., :16].reshape(num_experts, -1),
 diff --git a/b12x/moe/fused_moe/_impl.py b/b12x/moe/fused_moe/_impl.py
-index ffbce0d..72b29a8 100644
+index ffbce0d1c56c764b3e011532c924c5263dc15e6e..72b29a82a1184ab0b87c08b828f2405379fe8835 100644
 --- a/b12x/moe/fused_moe/_impl.py
 +++ b/b12x/moe/fused_moe/_impl.py
 @@ -92,8 +92,7 @@ from b12x._lib.scratch import (
@@ -9917,7 +9737,7 @@ index ffbce0d..72b29a8 100644
      This is the optimization seam for future fast routing work. The current
 diff --git a/b12x/moe/glm_sqg_w4a8.py b/b12x/moe/glm_sqg_w4a8.py
 new file mode 100644
-index 0000000..13001ac
+index 0000000000000000000000000000000000000000..13001ac103b07631ebc593044546390478727d2d
 --- /dev/null
 +++ b/b12x/moe/glm_sqg_w4a8.py
 @@ -0,0 +1,747 @@
@@ -10669,7 +10489,7 @@ index 0000000..13001ac
 +    "validate_glm_route_packed_w4a8_acceptance_kernel",
 +]
 diff --git a/pyproject.toml b/pyproject.toml
-index ee5b25c..3936e50 100644
+index ee5b25c6c17696e2a4739b7a9a5ed5e6acdcee44..3936e50c39defb40f79a95104819d5238fc6094b 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -10,11 +10,11 @@ license-files = ["LICENSE"]
@@ -10691,7 +10511,7 @@ index ee5b25c..3936e50 100644
    "transformers>=5.3.0",  # CVE-2026-4372: all releases before 5.3.0 are affected
 diff --git a/tests/gemm/test_sqg_k6_w6a16.py b/tests/gemm/test_sqg_k6_w6a16.py
 new file mode 100644
-index 0000000..637c9f1
+index 0000000000000000000000000000000000000000..637c9f1759e4b128df6d2c8a5e8c7574c946a7bb
 --- /dev/null
 +++ b/tests/gemm/test_sqg_k6_w6a16.py
 @@ -0,0 +1,338 @@
@@ -11034,7 +10854,7 @@ index 0000000..637c9f1
 +    torch.cuda.synchronize(device)
 +    assert torch.equal(captured, actual)
 diff --git a/tests/gemm/test_trellis_linear.py b/tests/gemm/test_trellis_linear.py
-index 5147f9e..4a4e1e6 100644
+index 5147f9e26062f675bee3cf414435373c6db2e075..4a4e1e64b0dd9a9964bcb420c455577b6cee68d1 100644
 --- a/tests/gemm/test_trellis_linear.py
 +++ b/tests/gemm/test_trellis_linear.py
 @@ -11,25 +11,16 @@ from b12x.gemm import trellis_linear
@@ -11323,7 +11143,7 @@ index 5147f9e..4a4e1e6 100644
  def test_prepare_pair_weight_rejects_wrong_tp12_payload_length() -> None:
      device = torch.device("cuda", torch.cuda.current_device())
 diff --git a/tests/moe/test_cute_migration_moe_standard_corpus.py b/tests/moe/test_cute_migration_moe_standard_corpus.py
-index 255d7c9..065a5ac 100644
+index 255d7c9ffdbe9538781612237b1c828b0b56c6bc..065a5ac7a3a70543c94b9fdb9b4f6e6d09bcd155 100644
 --- a/tests/moe/test_cute_migration_moe_standard_corpus.py
 +++ b/tests/moe/test_cute_migration_moe_standard_corpus.py
 @@ -202,6 +202,13 @@ def _nvfp4_oracle(
@@ -11408,7 +11228,7 @@ index 255d7c9..065a5ac 100644
      monkeypatch: pytest.MonkeyPatch,
  ) -> None:
 diff --git a/tests/moe/test_dynamic_w4a8_trellis.py b/tests/moe/test_dynamic_w4a8_trellis.py
-index 89f8073..f8a9034 100644
+index 89f8073bdd8e6c749a2b1d1e2c78e2305a5c0adc..f8a90346c13870ba3fd3d0e9adf3bd25f1b40b7d 100644
 --- a/tests/moe/test_dynamic_w4a8_trellis.py
 +++ b/tests/moe/test_dynamic_w4a8_trellis.py
 @@ -66,6 +66,8 @@ def _run_trellis_dynamic(
@@ -11533,7 +11353,7 @@ index 89f8073..f8a9034 100644
  @pytest.mark.parametrize("m", [33, 64])
  def test_dynamic_trellis_split_materialized_matches_scaffold(m: int) -> None:
 diff --git a/tests/moe/test_execution_model.py b/tests/moe/test_execution_model.py
-index 274e94e..7e5cf15 100644
+index 274e94e2477c8ede1756c9a72959c88ee307c4fa..7e5cf15233b35af9d3e5fde0634095b519f3d708 100644
 --- a/tests/moe/test_execution_model.py
 +++ b/tests/moe/test_execution_model.py
 @@ -240,6 +240,49 @@ def test_workspace_plan_uses_weight_plan_source_contract() -> None:
@@ -11588,7 +11408,7 @@ index 274e94e..7e5cf15 100644
  ) -> None:
 diff --git a/tests/moe/test_glm_sqg_w4a8.py b/tests/moe/test_glm_sqg_w4a8.py
 new file mode 100644
-index 0000000..a8ef778
+index 0000000000000000000000000000000000000000..a8ef778665fa472982d25710694a6b9a3277d9df
 --- /dev/null
 +++ b/tests/moe/test_glm_sqg_w4a8.py
 @@ -0,0 +1,207 @@
@@ -11801,7 +11621,7 @@ index 0000000..a8ef778
 +    assert torch.equal(captured, actual)
 diff --git a/tests/moe/test_mixed_trellis_source_contract.py b/tests/moe/test_mixed_trellis_source_contract.py
 new file mode 100644
-index 0000000..b88f37f
+index 0000000000000000000000000000000000000000..b88f37fe73b39e58001d52bf186fa8bff0267fa6
 --- /dev/null
 +++ b/tests/moe/test_mixed_trellis_source_contract.py
 @@ -0,0 +1,163 @@
@@ -11969,7 +11789,7 @@ index 0000000..b88f37f
 +        "2 if cutlass.const_expr(self.trellis_pair_compact_offsets) else 1",
 +    }
 diff --git a/tests/moe/test_tp_moe_scratch_bindings.py b/tests/moe/test_tp_moe_scratch_bindings.py
-index 3c1a7c3..da44612 100644
+index 3c1a7c3fa7888f6aac5b7f781bc1c73839e8ba63..da44612ada067a3a2528ee1bcef7d01041ae52aa 100644
 --- a/tests/moe/test_tp_moe_scratch_bindings.py
 +++ b/tests/moe/test_tp_moe_scratch_bindings.py
 @@ -893,6 +893,8 @@ def test_w4a16_scratch_binding_carries_activation_amax_to_kernel(
@@ -11990,7 +11810,7 @@ index 3c1a7c3..da44612 100644
  
  def test_activation_amax_is_w4a16_only() -> None:
 diff --git a/tests/moe/test_w4a16_mixed_trellis.py b/tests/moe/test_w4a16_mixed_trellis.py
-index d31c34f..1631a0b 100644
+index d31c34f295ac3660de59dd27ba10e2014d4e47a2..1631a0be788c9b294caaee126e942efcac3b7319 100644
 --- a/tests/moe/test_w4a16_mixed_trellis.py
 +++ b/tests/moe/test_w4a16_mixed_trellis.py
 @@ -3,6 +3,7 @@ from __future__ import annotations
@@ -12653,7 +12473,7 @@ index d31c34f..1631a0b 100644
  def test_one_grid_large_blocks_avoid_serial_prefill_drift(
 diff --git a/tests/moe/test_w4a16_route_pack_warmup.py b/tests/moe/test_w4a16_route_pack_warmup.py
 new file mode 100644
-index 0000000..6c7288b
+index 0000000000000000000000000000000000000000..6c7288b314ebc2785418085ce323881960fe192e
 --- /dev/null
 +++ b/tests/moe/test_w4a16_route_pack_warmup.py
 @@ -0,0 +1,54 @@
@@ -12713,7 +12533,7 @@ index 0000000..6c7288b
 +        route_pack_warmup_token_counts(0)
 diff --git a/tests/moe/test_w4a16_tile_selection.py b/tests/moe/test_w4a16_tile_selection.py
 new file mode 100644
-index 0000000..d04469a
+index 0000000000000000000000000000000000000000..d04469ab43962b075208892a78a3a00873235525
 --- /dev/null
 +++ b/tests/moe/test_w4a16_tile_selection.py
 @@ -0,0 +1,41 @@
@@ -12759,7 +12579,7 @@ index 0000000..d04469a
 +    assert not _fits(tile_k=32, tile_n=256, cta_threads=128)
 +    assert not _fits(tile_k=16, tile_n=512, cta_threads=128)
 diff --git a/tests/moe/test_w4a8_dynamic_kernel.py b/tests/moe/test_w4a8_dynamic_kernel.py
-index 39456d5..d174fd5 100644
+index 39456d5e07bd47fc92608f0290bc2fc1c3d48c7b..d174fd5e2905113c212d1da72b4f08b10c5e5b79 100644
 --- a/tests/moe/test_w4a8_dynamic_kernel.py
 +++ b/tests/moe/test_w4a8_dynamic_kernel.py
 @@ -73,6 +73,19 @@ def _fake_f32(shape):
@@ -12928,7 +12748,7 @@ index 39456d5..d174fd5 100644
 +            assert scatter_output.abs().sum().item() > 0, round_idx
 +            assert metrics.cos > 0.999, (round_idx, metrics)
 diff --git a/tests/quantization/test_sqg_e4m3.py b/tests/quantization/test_sqg_e4m3.py
-index dc1fff4..083d1f1 100644
+index dc1fff4e1aacfbf5372f3c618ddb8bfb5b2fb29e..083d1f1d01d3dc527231b8ca9d93695f35134c2b 100644
 --- a/tests/quantization/test_sqg_e4m3.py
 +++ b/tests/quantization/test_sqg_e4m3.py
 @@ -9,6 +9,7 @@ from b12x._lib.quant.sqg_e4m3 import (
@@ -12977,7 +12797,7 @@ index dc1fff4..083d1f1 100644
 -    )
 +    assert torch.equal(torch.sort(profile_k2).values, torch.sort(native_k2).values)
 diff --git a/tests/test_packaging.py b/tests/test_packaging.py
-index 7ba6cb8..0ed648c 100644
+index 7ba6cb860c3229b9d9b80ccdb9633c7f7ba2d76d..0ed648c4c0b4a0876cb7539a419ff68c70bb0900 100644
 --- a/tests/test_packaging.py
 +++ b/tests/test_packaging.py
 @@ -12,6 +12,22 @@ except ModuleNotFoundError:  # Python 3.10
