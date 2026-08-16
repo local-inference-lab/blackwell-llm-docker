@@ -284,11 +284,20 @@ RUN BUILD_WITH_CUDA=1 TORCH_CUDA_ARCH_LIST=12.1 MAX_JOBS=${BUILD_MAX_JOBS} \
 # The EXL3 checkpoint loader uses B12X kernels for rank-sliced inference. The
 # pinned ExLlamaV3 source and extension provide generic checkpoint parity and
 # the deterministic encoder used by the optional online K6 weight cache.
+COPY exllamav3-arm64-avx.patch /tmp/exllamav3-arm64-avx.patch
 RUN git clone --filter=blob:none --no-checkout \
       "${EXLLAMAV3_REPO}" /tmp/exllamav3-src \
  && git -C /tmp/exllamav3-src fetch --depth=1 origin "${EXLLAMAV3_COMMIT}" \
  && git -C /tmp/exllamav3-src checkout --detach "${EXLLAMAV3_COMMIT}" \
  && test "$(git -C /tmp/exllamav3-src rev-parse HEAD)" = "${EXLLAMAV3_COMMIT}" \
+ && if test "$(uname -m)" = aarch64; then \
+      git -C /tmp/exllamav3-src apply --check /tmp/exllamav3-arm64-avx.patch; \
+      git -C /tmp/exllamav3-src apply /tmp/exllamav3-arm64-avx.patch; \
+      mv /tmp/exllamav3-src/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_avx2.cpp \
+        /tmp/exllamav3-src/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_avx2.cpp.x86-disabled; \
+      mv /tmp/exllamav3-src/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_avx512.cpp \
+        /tmp/exllamav3-src/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_avx512.cpp.x86-disabled; \
+    fi \
  && cd /tmp/exllamav3-src \
  && TORCH_CUDA_ARCH_LIST=12.1a MAX_JOBS=${BUILD_MAX_JOBS} python setup.py build_ext --inplace \
  && mapfile -t extensions < <(find . -maxdepth 1 -type f \

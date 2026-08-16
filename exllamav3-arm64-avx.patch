@@ -1,0 +1,62 @@
+diff --git a/exllamav3/exllamav3_ext/avx2_target.cpp b/exllamav3/exllamav3_ext/avx2_target.cpp
+index 217769e..ac312a2 100644
+--- a/exllamav3/exllamav3_ext/avx2_target.cpp
++++ b/exllamav3/exllamav3_ext/avx2_target.cpp
+@@ -4,8 +4,10 @@ bool is_avx2_supported()
+     static bool avx2_check = false;
+     static bool avx2_supported = false;
+     if (avx2_check) return avx2_supported;
+-    #ifdef __linux__
++    #if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+         avx2_supported = __builtin_cpu_supports("avx2");
++    #elif defined(__aarch64__)
++        avx2_supported = false;
+     #else
+         int cpuInfo[4];
+         __cpuidex(cpuInfo, 7, 0);
+diff --git a/exllamav3/exllamav3_ext/avx512_target.cpp b/exllamav3/exllamav3_ext/avx512_target.cpp
+index 1343bf7..c4ee694 100644
+--- a/exllamav3/exllamav3_ext/avx512_target.cpp
++++ b/exllamav3/exllamav3_ext/avx512_target.cpp
+@@ -6,9 +6,11 @@ bool is_avx512_supported()
+     static bool avx512_check = false;
+     static bool avx512_supported = false;
+     if (avx512_check) return avx512_supported;
+ 
+-#ifdef __linux__
++#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
+     // Check for AVX-512F and AVX-512BW support
+     avx512_supported = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw");
++#elif defined(__aarch64__)
++    avx512_supported = false;
+ #else
+     // Windows: use __cpuidex to check for AVX-512 support
+     int cpuInfo[4];
+diff --git a/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_arm64.cpp b/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_arm64.cpp
+new file mode 100644
+index 0000000..253cfe1
+--- /dev/null
++++ b/exllamav3/exllamav3_ext/parallel/all_reduce_cpu_arm64.cpp
+@@ -0,0 +1,22 @@
++#include "all_reduce_cpu_avx2.h"
++#include "../util.h"
++
++// The upstream CPU process-group reducer uses x86 AVX2/AVX-512 intrinsics.
++// Keep the CUDA extension loadable on arm64 and reject this x86-only backend
++// explicitly if a multi-GPU caller selects it.
++void enable_fast_fp()
++{
++}
++
++void perform_cpu_reduce
++(
++    PGContext*,
++    size_t,
++    uint32_t,
++    uint8_t*,
++    size_t
++)
++{
++    TORCH_CHECK(false,
++        "ExLlamaV3 native CPU all-reduce requires x86 AVX2 and is unavailable on arm64");
++}
