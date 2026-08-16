@@ -12083,3 +12083,195 @@ index 7edb54959d..b8bedee8b6 100644
  def is_residual_scattered_for_sp(
      vllm_config: VllmConfig, num_input_tokens: int
  ) -> bool:
+diff --git a/tests/parser/engine/test_deepseek_v4.py b/tests/parser/engine/test_deepseek_v4.py
+index 703b596349..5392efe891 100644
+--- a/tests/parser/engine/test_deepseek_v4.py
++++ b/tests/parser/engine/test_deepseek_v4.py
+@@ -261,6 +261,57 @@ class TestToolEndAbsorption:
+         assert "</think>" not in content
+ 
+ 
++class TestLegacyDirectDsml:
++    """Compatibility for direct ASCII DSML emitted from older tool prompts."""
++
++    @staticmethod
++    def _legacy_invoke(name: str, value: str) -> str:
++        return (
++            f'<|DSML|invoke name="{name}">\n'
++            f'<|DSML|parameter name="command" string="true">{value}'
++            "</|DSML|parameter>\n</|DSML|invoke>"
++        )
++
++    def test_non_streaming_two_direct_invokes_are_tool_calls(
++        self, mock_tokenizer, mock_request
++    ):
++        text = "Preamble.\n" + self._legacy_invoke("exec", "true")
++        text += "\n" + self._legacy_invoke("exec", "false")
++        parser = DeepSeekV4Parser(
++            mock_tokenizer,
++            chat_template_kwargs={"thinking": False},
++        )
++
++        reasoning, content, tool_calls = parser.parse(text, mock_request)
++
++        assert reasoning is None
++        assert content is not None
++        assert content.rstrip() == "Preamble."
++        assert tool_calls is not None
++        assert [call.name for call in tool_calls] == ["exec", "exec"]
++        assert [json.loads(call.arguments) for call in tool_calls] == [
++            {"command": "true"},
++            {"command": "false"},
++        ]
++
++    def test_streaming_split_legacy_markers_do_not_leak(
++        self, mock_tokenizer, mock_request
++    ):
++        text = self._legacy_invoke("exec", "true")
++        parser = DeepSeekV4Parser(
++            mock_tokenizer,
++            chat_template_kwargs={"thinking": False},
++        )
++        # Deliberately split the ASCII marker and tags across deltas.
++        chunks = [text[i : i + 7] for i in range(0, len(text), 7)]
++
++        results = simulate_tool_streaming(parser, mock_request, chunks)
++
++        assert collect_function_name(results) == "exec"
++        assert json.loads(collect_tool_arguments(results)) == {"command": "true"}
++        assert "DSML" not in collect_content(results)
++
++
+ # ── Thinking mode initial state ──────────────────────────────────────
+ 
+ 
+diff --git a/vllm/parser/deepseek_v4.py b/vllm/parser/deepseek_v4.py
+index e167d3d436..c4eb9b4b14 100644
+--- a/vllm/parser/deepseek_v4.py
++++ b/vllm/parser/deepseek_v4.py
+@@ -39,6 +39,7 @@ if TYPE_CHECKING:
+     from vllm.tool_parsers.abstract_tool_parser import Tool
+ 
+ _DSML = "｜DSML｜"
++_LEGACY_DSML = "|DSML|"
+ 
+ DSML_THINK_START = "<think>"
+ DSML_THINK_END = "</think>"
+@@ -49,14 +50,25 @@ DSML_INVOKE_NAME_END = '\">'
+ DSML_INVOKE_END = f"</{_DSML}invoke>"
+ DSML_PARAM_CLOSE = f"</{_DSML}parameter>"
+ 
++# A small number of tool clients have historically injected DSML examples
++# with ASCII pipes and without the optional ``tool_calls`` wrapper.  The
++# model can faithfully reproduce that example.  Treat it as an input-format
++# compatibility variant rather than passing protocol text to the user.
++LEGACY_DSML_TOOL_START = f"<{_LEGACY_DSML}tool_calls>"
++LEGACY_DSML_TOOL_END = f"</{_LEGACY_DSML}tool_calls>"
++LEGACY_DSML_INVOKE_PREFIX = f'<{_LEGACY_DSML}invoke name="'
++LEGACY_DSML_INVOKE_END = f"</{_LEGACY_DSML}invoke>"
++LEGACY_DSML_PARAM_CLOSE = f"</{_LEGACY_DSML}parameter>"
++
+ _ESCAPED_DSML = re.escape(_DSML)
++_DSML_TOKEN_RE = rf"(?:{_ESCAPED_DSML}|{re.escape(_LEGACY_DSML)})"
+ _PARAM_RE = re.compile(
+-    rf'<{_ESCAPED_DSML}parameter\s+name="([^"]+)"\s+string="(true|false)">'
+-    rf"(.*?)</{_ESCAPED_DSML}parameter>",
++    rf'<{_DSML_TOKEN_RE}parameter\s+name="([^"]+)"\s+string="(true|false)">'
++    rf"(.*?)</{_DSML_TOKEN_RE}parameter>",
+     re.DOTALL,
+ )
+ _PARTIAL_PARAM_RE = re.compile(
+-    rf'<{_ESCAPED_DSML}parameter\s+name="([^"]+)"\s+string="(true|false)">'
++    rf'<{_DSML_TOKEN_RE}parameter\s+name="([^"]+)"\s+string="(true|false)">'
+     rf"(.*)$",
+     re.DOTALL,
+ )
+@@ -135,6 +147,11 @@ def deepseek_v4_config(thinking: bool = False) -> ParserEngineConfig:
+             "INVOKE_NAME_END": DSML_INVOKE_NAME_END,
+             "INVOKE_END": DSML_INVOKE_END,
+             "PARAM_CLOSE": DSML_PARAM_CLOSE,
++            "TOOL_START_LEGACY": LEGACY_DSML_TOOL_START,
++            "TOOL_END_LEGACY": LEGACY_DSML_TOOL_END,
++            "INVOKE_PREFIX_LEGACY": LEGACY_DSML_INVOKE_PREFIX,
++            "INVOKE_END_LEGACY": LEGACY_DSML_INVOKE_END,
++            "PARAM_CLOSE_LEGACY": LEGACY_DSML_PARAM_CLOSE,
+         },
+         token_id_terminals={
+             "THINK_START": DSML_THINK_START,
+@@ -177,10 +194,40 @@ def deepseek_v4_config(thinking: bool = False) -> ParserEngineConfig:
+                 ParserState.TOOL_PREAMBLE,
+                 (),
+             ),
++            (ParserState.CONTENT, "TOOL_START_LEGACY"): Transition(
++                ParserState.TOOL_PREAMBLE,
++                (),
++            ),
++            # Accept direct invoke blocks too. Some older tool prompts omit
++            # the optional outer ``tool_calls`` wrapper.
++            (ParserState.CONTENT, "INVOKE_PREFIX"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.TOOL_CALL_START,),
++            ),
++            (ParserState.CONTENT, "INVOKE_PREFIX_LEGACY"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.TOOL_CALL_START,),
++            ),
++            (ParserState.REASONING, "TOOL_START_LEGACY"): Transition(
++                ParserState.TOOL_PREAMBLE,
++                (EventType.REASONING_END,),
++            ),
++            (ParserState.REASONING, "INVOKE_PREFIX"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.REASONING_END, EventType.TOOL_CALL_START),
++            ),
++            (ParserState.REASONING, "INVOKE_PREFIX_LEGACY"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.REASONING_END, EventType.TOOL_CALL_START),
++            ),
+             (ParserState.TOOL_PREAMBLE, "INVOKE_PREFIX"): Transition(
+                 ParserState.TOOL_NAME,
+                 (EventType.TOOL_CALL_START,),
+             ),
++            (ParserState.TOOL_PREAMBLE, "INVOKE_PREFIX_LEGACY"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.TOOL_CALL_START,),
++            ),
+             (ParserState.TOOL_NAME, "INVOKE_NAME_END"): Transition(
+                 ParserState.TOOL_ARGS,
+                 (),
+@@ -189,19 +236,35 @@ def deepseek_v4_config(thinking: bool = False) -> ParserEngineConfig:
+                 ParserState.TOOL_BETWEEN,
+                 (EventType.TOOL_CALL_END,),
+             ),
++            (ParserState.TOOL_ARGS, "INVOKE_END_LEGACY"): Transition(
++                ParserState.TOOL_BETWEEN,
++                (EventType.TOOL_CALL_END,),
++            ),
+             (ParserState.TOOL_ARGS, "TOOL_END"): Transition(
+                 ParserState.CONTENT,
+                 (EventType.TOOL_CALL_END,),
+             ),
++            (ParserState.TOOL_ARGS, "TOOL_END_LEGACY"): Transition(
++                ParserState.CONTENT,
++                (EventType.TOOL_CALL_END,),
++            ),
+             # Parallel tool calls
+             (ParserState.TOOL_BETWEEN, "INVOKE_PREFIX"): Transition(
+                 ParserState.TOOL_NAME,
+                 (EventType.TOOL_CALL_START,),
+             ),
++            (ParserState.TOOL_BETWEEN, "INVOKE_PREFIX_LEGACY"): Transition(
++                ParserState.TOOL_NAME,
++                (EventType.TOOL_CALL_START,),
++            ),
+             (ParserState.TOOL_BETWEEN, "TOOL_END"): Transition(
+                 ParserState.CONTENT,
+                 (),
+             ),
++            (ParserState.TOOL_BETWEEN, "TOOL_END_LEGACY"): Transition(
++                ParserState.CONTENT,
++                (),
++            ),
+         },
+         content_events={
+             ParserState.CONTENT: EventType.TEXT_CHUNK,
