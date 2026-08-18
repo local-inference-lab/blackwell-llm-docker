@@ -40,6 +40,18 @@ exit 22
 SH
 chmod +x "${tmp_root}/bin/curl"
 
+cat >"${tmp_root}/bin/lmcache-shm-preflight.py" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" >"${LMCACHE_TEST_SHM_PREFLIGHT_ARGS}"
+if [[ -n "${LMCACHE_TEST_SHM_LOCK_TARGET:-}" ]] && \
+    flock -n "${LMCACHE_TEST_SHM_LOCK_TARGET}" -c true; then
+  echo "named SHM startup lock was not held during preflight" >&2
+  exit 91
+fi
+SH
+chmod +x "${tmp_root}/bin/lmcache-shm-preflight.py"
+
 cat >"${tmp_root}/model-server" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -127,6 +139,30 @@ grep -Fq -- '"lmcache.mp.mp_transfer_mode":"engine_driven"' \
 sed -n '1p' "${tmp_root}/engine-server.env" | grep -Fxq ''
 sed -n '2p' "${tmp_root}/engine-server.env" | grep -Fxq 'LAZY'
 grep -Fxq '0,1' "${tmp_root}/engine-model-cuda.env"
+
+# A non-empty name selects direct shared-memory transfer and must pass a
+# capacity/stale-holder preflight before LMCache creates the region.
+mkdir -p "${tmp_root}/shm-locks"
+PATH="${tmp_root}/bin:${PATH}" \
+LMCACHE_MODE=ram \
+LMCACHE_SHM_NAME=direct-l1 \
+LMCACHE_L1_GB=2 \
+LMCACHE_L1_INIT_GB=1.5 \
+LMCACHE_SHM_LOCK_ROOT="${tmp_root}/shm-locks" \
+LMCACHE_SHM_PREFLIGHT_BIN="${tmp_root}/bin/lmcache-shm-preflight.py" \
+LMCACHE_TEST_SHM_LOCK_TARGET="${tmp_root}/shm-locks" \
+LMCACHE_TEST_SHM_PREFLIGHT_ARGS="${tmp_root}/shm-preflight.args" \
+LMCACHE_LOG="${tmp_root}/shm.log" \
+LMCACHE_TEST_SERVER_ARGS="${tmp_root}/shm-server.args" \
+LMCACHE_TEST_MODEL_ARGS="${tmp_root}/shm-model.args" \
+bash "${lmcache_wrapper}" \
+  "${tmp_root}/model-server" direct-shm
+grep -Fq -- '--shm-name direct-l1' "${tmp_root}/shm-server.args"
+grep -Fxq -- '--name' < <(sed -n '1p' "${tmp_root}/shm-preflight.args")
+grep -Fxq -- 'direct-l1' < <(sed -n '2p' "${tmp_root}/shm-preflight.args")
+grep -Fxq -- '--expected-gb' < <(sed -n '3p' "${tmp_root}/shm-preflight.args")
+grep -Fxq -- '1.5' < <(sed -n '4p' "${tmp_root}/shm-preflight.args")
+flock -n "${tmp_root}/shm-locks" -c true
 
 # HTTP health is the primary readiness contract; this test intentionally uses
 # a log string that cannot satisfy the fallback.
