@@ -8,6 +8,15 @@ scratch_dir="$(mktemp -d)"
 trap 'rm -rf "${scratch_dir}"' EXIT
 missing_source="${scratch_dir}/missing-vllm-source"
 
+grep -Fq \
+  'COPY --chmod=0755 launchers/lmcache-layout-fingerprint.py /usr/local/bin/lmcache-layout-fingerprint.py' \
+  "${repo_root}/Dockerfile.kimi-k3-qsrt-tp16-runtime"
+grep -Fq \
+  'export LMCACHE_RESET_L2_ON_START="${LMCACHE_RESET_L2_ON_START:-auto}"' \
+  "${repo_root}/launchers/serve-kimi-k3-production-dspark-ii"
+grep -Fq 'LMCACHE_LAYOUT_CONFIG_PATHS' \
+  "${repo_root}/launchers/serve-kimi-k3-production-dspark-ii"
+
 output="$({
   PYTHONPATH="${overlay_dir}" \
     VLLM_SOURCE_OVERLAY_ROOT="${missing_source}" \

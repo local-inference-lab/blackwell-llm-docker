@@ -4,6 +4,8 @@
 # control, or LMCACHE_MODE=disk with a persistent /cache mount for an L2 tier.
 set -euo pipefail
 
+export MODEL="${MODEL:-/root/.cache/huggingface/hub/models--moonshotai--Kimi-K3/snapshots/2496450e92e425c886db095102a52a6682ca3970}"
+export DRAFT_MODEL="${DRAFT_MODEL:-/root/.cache/huggingface/hub/models--Inferact--Kimi-K3-DSpark/snapshots/cf6b8244620e7ea4b0651d214f28e89eac75bed6}"
 export LMCACHE_MODE="${LMCACHE_MODE:-ram}"
 export LMCACHE_L1_GB="${LMCACHE_L1_GB:-32}"
 # The standalone cache server has no CUDA context. Existing vLLM workers own
@@ -14,6 +16,12 @@ export LMCACHE_EXPECTED_SOURCE_ROOT="${LMCACHE_EXPECTED_SOURCE_ROOT:-/opt/kimi-k
 export LMCACHE_SHM_NAME="${LMCACHE_SHM_NAME-}"
 export LMCACHE_SEPARATE_OBJECT_GROUPS="${LMCACHE_SEPARATE_OBJECT_GROUPS:-1}"
 export LMCACHE_SERVER_ENV="${LMCACHE_SERVER_ENV-CUDA_VISIBLE_DEVICES= CUDA_MODULE_LOADING=LAZY}"
+export LMCACHE_RESET_L2_ON_START="${LMCACHE_RESET_L2_ON_START:-auto}"
+# Auto mode refuses to erase a non-empty directory that predates fingerprint
+# metadata. Set this to 1 for one confirmed migration of a dedicated L2 path.
+export LMCACHE_LAYOUT_ADOPT_UNMARKED="${LMCACHE_LAYOUT_ADOPT_UNMARKED:-0}"
+export LMCACHE_LAYOUT_CONFIG_PATHS="${LMCACHE_LAYOUT_CONFIG_PATHS:-${MODEL}/config.json:${DRAFT_MODEL}/config.json}"
+export LMCACHE_LAYOUT_SOFTWARE_PATHS="${LMCACHE_LAYOUT_SOFTWARE_PATHS:-/opt/kimi-k3-qsrt/lmcache/lmcache/integration/vllm:/opt/kimi-k3-qsrt/lmcache/lmcache/v1/multiprocess}"
 # Kimi-K3 DCP16 exposes 768-token scheduler blocks and 12,288-token MLA
 # transfer groups. LMCache chunks must preserve both granularities.
 export LMCACHE_CHUNK_SIZE="${LMCACHE_CHUNK_SIZE:-12288}"

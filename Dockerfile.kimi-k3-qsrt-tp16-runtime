@@ -127,6 +127,7 @@ COPY --chmod=0755 launchers/serve-kimi-k3-full-mxfp4-dflash-ii /usr/local/bin/se
 COPY --chmod=0755 launchers/serve-kimi-k3-qsrt-nospec /usr/local/bin/serve-kimi-k3-qsrt-nospec
 COPY --chmod=0755 launchers/serve-kimi-k3-qsrt-dspark /usr/local/bin/serve-kimi-k3-qsrt-dspark
 COPY --chmod=0755 launchers/lmcache-mp-wrapper.sh /usr/local/bin/lmcache-mp-wrapper.sh
+COPY --chmod=0755 launchers/lmcache-layout-fingerprint.py /usr/local/bin/lmcache-layout-fingerprint.py
 COPY --chmod=0755 launchers/serve-kimi-k3-production-dspark-ii /usr/local/bin/serve-kimi-k3-production-dspark-ii
 
 RUN set -eux; \
