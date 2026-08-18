@@ -75,6 +75,25 @@ lmcache_l1_init_gb="${LMCACHE_L1_INIT_GB:-${lmcache_l1_gb}}"
 lmcache_gpu_workers="${LMCACHE_MAX_GPU_WORKERS:-${TP_SIZE:-${TP:-1}}}"
 lmcache_cpu_workers="${LMCACHE_MAX_CPU_WORKERS:-4}"
 lmcache_log="${LMCACHE_LOG:-/tmp/lmcache-mp-${service_port}.log}"
+lmcache_reset_l2="${LMCACHE_RESET_L2_ON_START:-never}"
+lmcache_reset_l2="${lmcache_reset_l2,,}"
+case "${lmcache_reset_l2}" in
+  auto|always|never) ;;
+  *)
+    echo "ERROR: LMCACHE_RESET_L2_ON_START must be auto, always, or never; got ${lmcache_reset_l2}" >&2
+    exit 2
+    ;;
+esac
+lmcache_layout_adopt_unmarked="${LMCACHE_LAYOUT_ADOPT_UNMARKED:-0}"
+lmcache_layout_adopt_unmarked="${lmcache_layout_adopt_unmarked,,}"
+case "${lmcache_layout_adopt_unmarked}" in
+  1|true|yes|on) lmcache_layout_adopt_unmarked=1 ;;
+  0|false|no|off) lmcache_layout_adopt_unmarked=0 ;;
+  *)
+    echo "ERROR: LMCACHE_LAYOUT_ADOPT_UNMARKED must be a boolean; got ${lmcache_layout_adopt_unmarked}" >&2
+    exit 2
+    ;;
+esac
 lmcache_transfer_mode="${LMCACHE_TRANSFER_MODE:-auto}"
 lmcache_transfer_mode="${lmcache_transfer_mode,,}"
 case "${lmcache_transfer_mode}" in
@@ -155,6 +174,41 @@ print(
 PY
   )"
   server_args+=(--l2-adapter "${l2_config}")
+
+  if [[ "${lmcache_reset_l2}" != never ]]; then
+    wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    layout_fingerprint="${LMCACHE_LAYOUT_FINGERPRINT_BIN:-${wrapper_dir}/lmcache-layout-fingerprint.py}"
+    if [[ ! -x "${layout_fingerprint}" ]]; then
+      echo "ERROR: LMCache layout fingerprint helper is not executable: ${layout_fingerprint}" >&2
+      exit 2
+    fi
+    layout_args=(
+      --l2-path "${lmcache_l2_path}"
+      --policy "${lmcache_reset_l2}"
+      --value "runtime_fingerprint=${LOCAL_INFERENCE_CACHE_FINGERPRINT:-unknown}"
+      --value "model=${MODEL:-}"
+      --value "draft_model=${DRAFT_MODEL:-}"
+      --value "tp_size=${TP_SIZE:-${TP:-1}}"
+      --value "dcp_size=${DCP_SIZE:-${DCP:-1}}"
+      --value "chunk_size=${lmcache_chunk_size}"
+      --value "transfer_mode=${lmcache_transfer_mode}"
+      --value "separate_object_groups=${lmcache_separate_object_groups}"
+    )
+    if [[ "${lmcache_layout_adopt_unmarked}" == 1 ]]; then
+      layout_args+=(--adopt-unmarked)
+    fi
+    IFS=: read -r -a layout_config_paths \
+      <<< "${LMCACHE_LAYOUT_CONFIG_PATHS:-}"
+    for path in "${layout_config_paths[@]}"; do
+      [[ -n "${path}" ]] && layout_args+=(--config-path "${path}")
+    done
+    IFS=: read -r -a layout_software_paths \
+      <<< "${LMCACHE_LAYOUT_SOFTWARE_PATHS:-}"
+    for path in "${layout_software_paths[@]}"; do
+      [[ -n "${path}" ]] && layout_args+=(--software-path "${path}")
+    done
+    "${layout_fingerprint}" "${layout_args[@]}"
+  fi
 fi
 
 transfer_config="$(

@@ -40,6 +40,13 @@ exit 22
 SH
 chmod +x "${tmp_root}/bin/curl"
 
+cat >"${tmp_root}/bin/lmcache-layout-fingerprint.py" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" >"${LMCACHE_TEST_LAYOUT_ARGS}"
+SH
+chmod +x "${tmp_root}/bin/lmcache-layout-fingerprint.py"
+
 cat >"${tmp_root}/model-server" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -196,6 +203,15 @@ PORT=8003 \
 LMCACHE_L1_GB=2 \
 LMCACHE_L2_GB=7 \
 LMCACHE_L2_PATH="${tmp_root}/l2" \
+LMCACHE_RESET_L2_ON_START=auto \
+LMCACHE_LAYOUT_FINGERPRINT_BIN="${tmp_root}/bin/lmcache-layout-fingerprint.py" \
+LMCACHE_LAYOUT_CONFIG_PATHS='/models/target/config.json:/models/draft/config.json' \
+LMCACHE_LAYOUT_SOFTWARE_PATHS='/opt/runtime/lmcache:/opt/runtime/vllm' \
+LMCACHE_LAYOUT_ADOPT_UNMARKED=1 \
+LMCACHE_TEST_LAYOUT_ARGS="${tmp_root}/layout.args" \
+LOCAL_INFERENCE_CACHE_FINGERPRINT=runtime-tree \
+MODEL=/models/target \
+DRAFT_MODEL=/models/draft \
 LMCACHE_HTTP_PORT=8181 \
 LMCACHE_LOG="${tmp_root}/disk.log" \
 LMCACHE_TEST_SERVER_ARGS="${tmp_root}/disk-server.args" \
@@ -212,6 +228,25 @@ fi
 grep -Fq -- 'fs_native' "${tmp_root}/disk-server.args"
 grep -Fq -- 'use_odirect' "${tmp_root}/disk-server.args"
 grep -Fq -- 'max_capacity_gb' "${tmp_root}/disk-server.args"
+grep -Fxq -- '--l2-path' < <(sed -n '1p' "${tmp_root}/layout.args")
+grep -Fxq -- "${tmp_root}/l2" < <(sed -n '2p' "${tmp_root}/layout.args")
+grep -Fq -- '--policy' "${tmp_root}/layout.args"
+grep -Fq -- 'auto' "${tmp_root}/layout.args"
+grep -Fq -- '--adopt-unmarked' "${tmp_root}/layout.args"
+grep -Fq -- '/models/target/config.json' "${tmp_root}/layout.args"
+grep -Fq -- '/models/draft/config.json' "${tmp_root}/layout.args"
+grep -Fq -- '/opt/runtime/lmcache' "${tmp_root}/layout.args"
+grep -Fq -- 'runtime_fingerprint=runtime-tree' "${tmp_root}/layout.args"
+grep -Fq -- 'chunk_size=512' "${tmp_root}/layout.args"
+
+if PATH="${tmp_root}/bin:${PATH}" \
+  LMCACHE_MODE=disk \
+  LMCACHE_RESET_L2_ON_START=invalid \
+  bash "${lmcache_wrapper}" \
+    "${tmp_root}/model-server"; then
+  echo 'Invalid LMCache L2 reset policy unexpectedly succeeded' >&2
+  exit 1
+fi
 
 if PATH="${tmp_root}/bin:${PATH}" \
   LMCACHE_MODE=invalid \
