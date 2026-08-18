@@ -75,6 +75,15 @@ lmcache_l1_init_gb="${LMCACHE_L1_INIT_GB:-${lmcache_l1_gb}}"
 lmcache_gpu_workers="${LMCACHE_MAX_GPU_WORKERS:-${TP_SIZE:-${TP:-1}}}"
 lmcache_cpu_workers="${LMCACHE_MAX_CPU_WORKERS:-4}"
 lmcache_log="${LMCACHE_LOG:-/tmp/lmcache-mp-${service_port}.log}"
+lmcache_l2_prefetch_policy="${LMCACHE_L2_PREFETCH_POLICY:-retain}"
+lmcache_l2_prefetch_policy="${lmcache_l2_prefetch_policy,,}"
+case "${lmcache_l2_prefetch_policy}" in
+  default|retain) ;;
+  *)
+    echo "ERROR: LMCACHE_L2_PREFETCH_POLICY must be default or retain; got ${lmcache_l2_prefetch_policy}" >&2
+    exit 2
+    ;;
+esac
 lmcache_transfer_mode="${LMCACHE_TRANSFER_MODE:-auto}"
 lmcache_transfer_mode="${lmcache_transfer_mode,,}"
 case "${lmcache_transfer_mode}" in
@@ -112,7 +121,7 @@ server_args=(
   --eviction-trigger-watermark 0.90
   --eviction-ratio 0.10
   --l2-store-policy default
-  --l2-prefetch-policy retain
+  --l2-prefetch-policy "${lmcache_l2_prefetch_policy}"
   --http-port "${lmcache_http_port}"
 )
 

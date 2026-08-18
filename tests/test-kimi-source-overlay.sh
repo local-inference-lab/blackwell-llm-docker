@@ -8,6 +8,10 @@ scratch_dir="$(mktemp -d)"
 trap 'rm -rf "${scratch_dir}"' EXIT
 missing_source="${scratch_dir}/missing-vllm-source"
 
+grep -Fq \
+  'export LMCACHE_L2_PREFETCH_POLICY="${LMCACHE_L2_PREFETCH_POLICY:-default}"' \
+  "${repo_root}/launchers/serve-kimi-k3-production-dspark-ii"
+
 output="$({
   PYTHONPATH="${overlay_dir}" \
     VLLM_SOURCE_OVERLAY_ROOT="${missing_source}" \

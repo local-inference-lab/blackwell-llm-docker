@@ -14,6 +14,10 @@ export LMCACHE_EXPECTED_SOURCE_ROOT="${LMCACHE_EXPECTED_SOURCE_ROOT:-/opt/kimi-k
 export LMCACHE_SHM_NAME="${LMCACHE_SHM_NAME-}"
 export LMCACHE_SEPARATE_OBJECT_GROUPS="${LMCACHE_SEPARATE_OBJECT_GROUPS:-1}"
 export LMCACHE_SERVER_ENV="${LMCACHE_SERVER_ENV-CUDA_VISIBLE_DEVICES= CUDA_MODULE_LOADING=LAZY}"
+# Kimi's large recurrent-cache objects make retained L2 prefetched buffers
+# accumulate L1 pressure across restores. Use temporary L1 staging by default;
+# operators can opt back into retain for a separately qualified workload.
+export LMCACHE_L2_PREFETCH_POLICY="${LMCACHE_L2_PREFETCH_POLICY:-default}"
 # Kimi-K3 DCP16 exposes 768-token scheduler blocks and 12,288-token MLA
 # transfer groups. LMCache chunks must preserve both granularities.
 export LMCACHE_CHUNK_SIZE="${LMCACHE_CHUNK_SIZE:-12288}"
