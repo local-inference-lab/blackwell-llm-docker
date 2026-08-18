@@ -119,8 +119,39 @@ server_args=(
 # An explicitly empty shared-memory name selects bounded per-request transfer
 # buffers. This avoids mapping and pinning the entire L1 pool in every vLLM
 # worker when the engine-driven transfer path is used.
+lmcache_shm_lock_fd=""
 if [[ -v LMCACHE_SHM_NAME ]]; then
   server_args+=(--shm-name "${LMCACHE_SHM_NAME}")
+  if [[ -n "${LMCACHE_SHM_NAME}" ]]; then
+    if [[ ! "${LMCACHE_SHM_NAME}" =~ ^[[:alnum:]][[:alnum:]_.-]{0,254}$ ]]; then
+      echo "ERROR: invalid LMCACHE_SHM_NAME: ${LMCACHE_SHM_NAME}" >&2
+      exit 2
+    fi
+    shm_lock_root="${LMCACHE_SHM_LOCK_ROOT:-/dev/shm}"
+    if [[ -L "${shm_lock_root}" || ! -d "${shm_lock_root}" ]]; then
+      echo "ERROR: LMCache SHM lock root must be a non-symlink directory: ${shm_lock_root}" >&2
+      exit 2
+    fi
+    if ! command -v flock >/dev/null 2>&1; then
+      echo "ERROR: flock is required for named LMCache SHM startup" >&2
+      exit 2
+    fi
+    # Lock the already-existing SHM directory inode. This avoids creating a
+    # lock pathname in a world-writable directory, where a pre-placed symlink
+    # could redirect a shell redirection to an unrelated file.
+    exec {lmcache_shm_lock_fd}<"${shm_lock_root}"
+    flock -x "${lmcache_shm_lock_fd}"
+
+    wrapper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    shm_preflight="${LMCACHE_SHM_PREFLIGHT_BIN:-${wrapper_dir}/lmcache-shm-preflight.py}"
+    if [[ ! -x "${shm_preflight}" ]]; then
+      echo "ERROR: LMCache SHM preflight helper is not executable: ${shm_preflight}" >&2
+      exit 2
+    fi
+    "${shm_preflight}" \
+      --name "${LMCACHE_SHM_NAME}" \
+      --expected-gb "${lmcache_l1_init_gb}"
+  fi
 fi
 if [[ "${lmcache_separate_object_groups}" == 1 ]]; then
   server_args+=(--separate-object-groups)
@@ -259,6 +290,14 @@ if [[ "${ready}" != 1 ]]; then
   stop_children
   wait "${lmcache_pid}" 2>/dev/null || true
   exit 1
+fi
+
+# The named segment now exists and the LMCache server is healthy. Releasing
+# here serializes cooperating wrappers across both stale cleanup and creation.
+if [[ -n "${lmcache_shm_lock_fd}" ]]; then
+  flock -u "${lmcache_shm_lock_fd}"
+  exec {lmcache_shm_lock_fd}>&-
+  lmcache_shm_lock_fd=""
 fi
 
 printf 'LMCache ready: mode=%s transfer=%s L1=%sGB chunk=%s L2=%s health=http://%s:%s/healthcheck metrics=http://%s:%s/metrics log=%s\n' \

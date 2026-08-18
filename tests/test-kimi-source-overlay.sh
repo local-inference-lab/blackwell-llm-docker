@@ -8,6 +8,10 @@ scratch_dir="$(mktemp -d)"
 trap 'rm -rf "${scratch_dir}"' EXIT
 missing_source="${scratch_dir}/missing-vllm-source"
 
+grep -Fq \
+  'COPY --chmod=0755 launchers/lmcache-shm-preflight.py /usr/local/bin/lmcache-shm-preflight.py' \
+  "${repo_root}/Dockerfile.kimi-k3-qsrt-tp16-runtime"
+
 output="$({
   PYTHONPATH="${overlay_dir}" \
     VLLM_SOURCE_OVERLAY_ROOT="${missing_source}" \

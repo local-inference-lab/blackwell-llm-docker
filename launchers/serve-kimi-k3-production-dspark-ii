@@ -8,7 +8,10 @@ export LMCACHE_MODE="${LMCACHE_MODE:-ram}"
 export LMCACHE_L1_GB="${LMCACHE_L1_GB:-32}"
 # The standalone cache server has no CUDA context. Existing vLLM workers own
 # GPU gather/scatter operations and exchange bounded per-request CPU buffers
-# with the server.
+# with the server by default. Whole-pool direct SHM is opt-in: for a 48 GiB
+# pool set LMCACHE_SHM_NAME together with LMCACHE_L1_GB=48 and
+# LMCACHE_L1_INIT_GB=48. The wrapper validates stale holders and /dev/shm
+# capacity before starting a named pool.
 export LMCACHE_TRANSFER_MODE="${LMCACHE_TRANSFER_MODE:-engine_driven}"
 export LMCACHE_EXPECTED_SOURCE_ROOT="${LMCACHE_EXPECTED_SOURCE_ROOT:-/opt/kimi-k3-qsrt/lmcache}"
 export LMCACHE_SHM_NAME="${LMCACHE_SHM_NAME-}"
