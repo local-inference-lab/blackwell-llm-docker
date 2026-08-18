@@ -173,6 +173,30 @@ bash "${lmcache_wrapper}" \
 grep -Fq -- '--max-gpu-workers 2' "${tmp_root}/override-server.args"
 grep -Fq -- '--chunk-size 768' "${tmp_root}/override-server.args"
 
+# The prefetch policy is independently configurable. Retain remains the
+# generic wrapper default; profiles with sustained L1 pressure can select the
+# temporary-staging policy explicitly.
+PATH="${tmp_root}/bin:${PATH}" \
+LMCACHE_MODE=ram \
+LMCACHE_L2_PREFETCH_POLICY=default \
+LMCACHE_L1_GB=2 \
+LMCACHE_LOG="${tmp_root}/prefetch.log" \
+LMCACHE_TEST_SERVER_ARGS="${tmp_root}/prefetch-server.args" \
+LMCACHE_TEST_MODEL_ARGS="${tmp_root}/prefetch-model.args" \
+bash "${lmcache_wrapper}" \
+  "${tmp_root}/model-server"
+grep -Fq -- '--l2-prefetch-policy default' \
+  "${tmp_root}/prefetch-server.args"
+
+if PATH="${tmp_root}/bin:${PATH}" \
+  LMCACHE_MODE=ram \
+  LMCACHE_L2_PREFETCH_POLICY=invalid \
+  bash "${lmcache_wrapper}" \
+    "${tmp_root}/model-server"; then
+  echo 'Invalid LMCache L2 prefetch policy unexpectedly succeeded' >&2
+  exit 1
+fi
+
 PATH="${tmp_root}/bin:${PATH}" \
 LMCACHE_MODE=ram \
 PORT=8005 \
@@ -212,6 +236,7 @@ fi
 grep -Fq -- 'fs_native' "${tmp_root}/disk-server.args"
 grep -Fq -- 'use_odirect' "${tmp_root}/disk-server.args"
 grep -Fq -- 'max_capacity_gb' "${tmp_root}/disk-server.args"
+grep -Fq -- '--l2-prefetch-policy retain' "${tmp_root}/disk-server.args"
 
 if PATH="${tmp_root}/bin:${PATH}" \
   LMCACHE_MODE=invalid \
