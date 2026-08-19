@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "status": "qualified",
+  "qualified_at_utc": "2026-08-19",
+  "scope": "Kimi-K3 QSRT-K2 TP8/DCP8 with Inferact DSpark depth 3",
+  "runtime": {
+    "base_image_digest": "sha256:a54da4e2432138d42334cac54555f3a51188489cb66029da0d96e4b39162d726",
+    "qualified_image_digest": "sha256:eed268e6993935bd3aeed53c973d324645eae0cf16440438128c987e7893e105",
+    "vllm_tree": "12776c0df15ca4087b636c43004b5bc1fde61434",
+    "b12x_qsrt_compat_tree_sha256": "acbe42b83673b9de75b99a7d50caaa16b8e0491a6169e9be0660d927802f2b06",
+    "b12x_inactive_route_pr": "227@0eba6ae99e0d1fad6ec268d8c291f498ec1dd4d9",
+    "lmcache_tree": "e045d729bc5c4c63a40e13d032f42923de97812f",
+    "code_bind_mounts": 0
+  },
+  "scheduler": {
+    "recurrent_block_tokens": 1536,
+    "max_num_batched_tokens": 1540,
+    "max_num_scheduled_tokens": 1536,
+    "max_num_seqs": 2,
+    "num_speculative_tokens": 3,
+    "parallel_draft_reserved_slots": 4,
+    "invariant": "1540 = 1536 + (3 - 1) * 2"
+  },
+  "pre_fix_reproduction": {
+    "max_num_batched_tokens": 1536,
+    "derived_max_num_scheduled_tokens": 1532,
+    "first_unstable_prompt_tokens": 1536,
+    "failure": "four of four unique-salt greedy requests returned NaN logprobs and HTTP 400",
+    "api_error": "Out of range float values are not JSON compliant: nan"
+  },
+  "post_fix_boundary": {
+    "prompt_tokens": 1540,
+    "partial_prefill_tail_tokens": 4,
+    "unique_salt_greedy_runs": 10,
+    "http_successes": 10,
+    "chosen_first_token": "The",
+    "nan_or_control_marker_failures": 0
+  },
+  "captured_incident_payload": {
+    "sha256": "234e71dab93cb0c1563c345c98e006995b2cdae3f73aa40a89a710523abef43c",
+    "direct_vllm_unique_salt_runs": 5,
+    "direct_vllm_coherent_runs": 5,
+    "llmconduit_runs": 5,
+    "llmconduit_coherent_runs": 5,
+    "local_prefix_hit_tokens": 1536,
+    "local_replay_equal_to_cold": true
+  },
+  "lmcache": {
+    "fixture_prompt_tokens": 14505,
+    "chunk_tokens": 12288,
+    "cold_output": "K3_CACHE_OK",
+    "l1_external_hit_tokens": 12288,
+    "l1_output_equal_to_cold": true,
+    "restarted_l2_external_hit_tokens": 12288,
+    "restarted_l2_output_equal_to_cold": true,
+    "l2_objects": 136,
+    "l2_bytes_approx": 941359104
+  },
+  "user_paths": {
+    "direct_vllm_health": 200,
+    "lmcache_health": 200,
+    "llmconduit_output": "현재 정상 작동 중입니다.",
+    "chatapp_output": "현재 정상 작동 중입니다."
+  },
+  "runtime_failures": {
+    "container_restarts": 0,
+    "oom_killed": false,
+    "nan_or_nonfinite_markers": 0,
+    "cublas_or_illegal_memory_markers": 0,
+    "worker_or_engine_death_markers": 0,
+    "thermal_slowdown_gpus": 0
+  }
+}

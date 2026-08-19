@@ -12,14 +12,48 @@ DCP_SIZE="${DCP_SIZE:-8}"
 KV_CACHE_MEMORY_BYTES="${KV_CACHE_MEMORY_BYTES:-2300000000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-1048576}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-4096}"
+MAX_NUM_SCHEDULED_TOKENS="${MAX_NUM_SCHEDULED_TOKENS:-}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
+DSPARK_SPECULATIVE_TOKENS="${DSPARK_SPECULATIVE_TOKENS:-7}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.98}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-Kimi-K3-QSRT-K2-DSpark7-TP${TP_SIZE}-DCP${DCP_SIZE}}"
+
+require_positive_integer() {
+  local name=$1 value=$2
+  if [[ ! "${value}" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s must be a positive integer: %q\n' "${name}" "${value}" >&2
+    exit 2
+  fi
+}
 
 if (( TP_SIZE < 1 || DCP_SIZE < 1 || TP_SIZE % DCP_SIZE != 0 )); then
   printf 'TP_SIZE must be positive and divisible by DCP_SIZE: TP_SIZE=%s DCP_SIZE=%s\n' \
     "${TP_SIZE}" "${DCP_SIZE}" >&2
   exit 2
+fi
+
+require_positive_integer MAX_NUM_BATCHED_TOKENS "${MAX_NUM_BATCHED_TOKENS}"
+require_positive_integer MAX_NUM_SEQS "${MAX_NUM_SEQS}"
+require_positive_integer DSPARK_SPECULATIVE_TOKENS "${DSPARK_SPECULATIVE_TOKENS}"
+
+# Parallel DSpark drafting reserves depth-1 additional batch slots per active
+# request. Keep those slots outside an explicitly selected target scheduler
+# budget; otherwise a recurrent block boundary can be split by the reserve.
+dspark_slots_per_request=$((DSPARK_SPECULATIVE_TOKENS - 1))
+dspark_reserve=$((dspark_slots_per_request * MAX_NUM_SEQS))
+if [[ -n "${MAX_NUM_SCHEDULED_TOKENS}" ]]; then
+  require_positive_integer MAX_NUM_SCHEDULED_TOKENS "${MAX_NUM_SCHEDULED_TOKENS}"
+  required_batch_slots=$((MAX_NUM_SCHEDULED_TOKENS + dspark_reserve))
+  if (( MAX_NUM_BATCHED_TOKENS < required_batch_slots )); then
+    printf 'MAX_NUM_SCHEDULED_TOKENS=%s with DSpark depth %s and max_num_seqs=%s requires at least %s total batch slots; got %s\n' \
+      "${MAX_NUM_SCHEDULED_TOKENS}" "${DSPARK_SPECULATIVE_TOKENS}" \
+      "${MAX_NUM_SEQS}" "${required_batch_slots}" \
+      "${MAX_NUM_BATCHED_TOKENS}" >&2
+    exit 2
+  fi
+  printf 'DSpark reserve: %s; target scheduler budget: %s; total batch slots: %s\n' \
+    "${dspark_reserve}" "${MAX_NUM_SCHEDULED_TOKENS}" \
+    "${MAX_NUM_BATCHED_TOKENS}" >&2
 fi
 
 required=(
@@ -28,16 +62,25 @@ required=(
   /opt/kimi-k3-qsrt/vllm/vllm/__init__.py
   /opt/kimi-k3-qsrt/b12x/b12x/attention/dense_mla/__init__.py
 )
-for path in "${required[@]}"; do
-  [[ -e "${path}" ]] || {
-    printf 'Required Kimi-K3 artifact is missing: %s\n' "${path}" >&2
+if [[ "${DRY_RUN:-0}" != 1 ]]; then
+  for path in "${required[@]}"; do
+    [[ -e "${path}" ]] || {
+      printf 'Required Kimi-K3 artifact is missing: %s\n' "${path}" >&2
+      exit 1
+    }
+  done
+  runtime_validator="${KIMI_K3_QSRT_RUNTIME_VALIDATOR:-/usr/local/bin/validate-kimi-k3-qsrt-runtime.py}"
+  [[ -f "${runtime_validator}" ]] || {
+    printf 'Kimi-K3 QSRT runtime validator is missing: %s\n' \
+      "${runtime_validator}" >&2
     exit 1
   }
-done
+  /opt/venv/bin/python "${runtime_validator}"
+fi
 
 printf -v speculative_config \
-  '{"method":"dspark","model":"%s","num_speculative_tokens":7,"attention_backend":"B12X_MLA","kv_cache_dtype":"fp8","draft_sample_method":"greedy","rejection_sample_method":"block","quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*fused_qkv_a_proj$"]}}' \
-  "${DRAFT_MODEL}"
+  '{"method":"dspark","model":"%s","num_speculative_tokens":%s,"attention_backend":"B12X_MLA","kv_cache_dtype":"fp8","draft_sample_method":"greedy","rejection_sample_method":"block","quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*fused_qkv_a_proj$"]}}' \
+  "${DRAFT_MODEL}" "${DSPARK_SPECULATIVE_TOKENS}"
 
 export HF_MODULES_CACHE="${HF_MODULES_CACHE:-/tmp/huggingface-modules}"
 export VLLM_SOURCE_OVERLAY_ACTIVE=1
@@ -90,35 +133,52 @@ export INSTANTTENSOR_MAX_FREE_MEM_USAGE="${INSTANTTENSOR_MAX_FREE_MEM_USAGE:-0.6
 export SAFETENSORS_FAST_GPU="${SAFETENSORS_FAST_GPU:-1}"
 unset NCCL_GRAPH_FILE
 
-exec /opt/venv/bin/python -m vllm.entrypoints.cli.main serve "${MODEL}" \
-  --served-model-name "${SERVED_MODEL_NAME}" \
-  --trust-remote-code \
-  --language-model-only \
-  --host 0.0.0.0 \
-  --port "${PORT}" \
-  --tensor-parallel-size "${TP_SIZE}" \
-  --decode-context-parallel-size "${DCP_SIZE}" \
-  --dcp-comm-backend a2a \
-  --dcp-kv-cache-interleave-size 1 \
-  --load-format instanttensor \
-  --moe-backend b12x \
-  --linear-backend b12x \
-  --attention-backend B12X_MLA \
-  --kda-prefill-backend triton \
-  --dtype bfloat16 \
-  --kv-cache-dtype fp8 \
-  --kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}" \
-  --max-model-len "${MAX_MODEL_LEN}" \
-  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
-  --max-num-seqs "${MAX_NUM_SEQS}" \
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-  --enable-chunked-prefill \
-  --no-enable-prefix-caching \
-  --speculative-config "${speculative_config}" \
-  --compilation-config '{"mode":0,"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"],"cudagraph_capture_sizes":[8,16,24,32,40,48,56,64],"pass_config":{"fuse_allreduce_rms":true}}' \
-  --generation-config vllm \
-  --reasoning-parser kimi_k3 \
-  --tool-call-parser kimi_k3 \
-  --enable-auto-tool-choice \
-  --attention-config.flash_attn_version=2 \
-  "$@"
+cmd=(
+  /opt/venv/bin/python -m vllm.entrypoints.cli.main serve "${MODEL}"
+  --served-model-name "${SERVED_MODEL_NAME}"
+  --trust-remote-code
+  --language-model-only
+  --host 0.0.0.0
+  --port "${PORT}"
+  --tensor-parallel-size "${TP_SIZE}"
+  --decode-context-parallel-size "${DCP_SIZE}"
+  --dcp-comm-backend a2a
+  --dcp-kv-cache-interleave-size 1
+  --load-format instanttensor
+  --moe-backend b12x
+  --linear-backend b12x
+  --attention-backend B12X_MLA
+  --kda-prefill-backend triton
+  --dtype bfloat16
+  --kv-cache-dtype fp8
+  --kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}"
+  --max-model-len "${MAX_MODEL_LEN}"
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}"
+  --max-num-seqs "${MAX_NUM_SEQS}"
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
+  --enable-chunked-prefill
+  --no-enable-prefix-caching
+  --speculative-config "${speculative_config}"
+  --compilation-config '{"mode":0,"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"],"cudagraph_capture_sizes":[8,16,24,32,40,48,56,64],"pass_config":{"fuse_allreduce_rms":true}}'
+  --generation-config vllm
+  --reasoning-parser kimi_k3
+  --tool-call-parser kimi_k3
+  --enable-auto-tool-choice
+  --attention-config.flash_attn_version=2
+)
+if [[ -n "${MAX_NUM_SCHEDULED_TOKENS}" ]]; then
+  cmd+=(--max-num-scheduled-tokens "${MAX_NUM_SCHEDULED_TOKENS}")
+fi
+cmd+=("$@")
+
+if [[ "${DRY_RUN:-0}" == 1 ]]; then
+  printf 'TP_SIZE=%q\n' "${TP_SIZE}"
+  printf 'DCP_SIZE=%q\n' "${DCP_SIZE}"
+  printf 'Speculative config: %s\n' "${speculative_config}"
+  printf 'Command:'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec "${cmd[@]}"
