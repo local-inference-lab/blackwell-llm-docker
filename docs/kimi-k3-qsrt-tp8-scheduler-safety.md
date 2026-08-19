@@ -76,6 +76,17 @@ compatibility-base port is B12X PR #237. This deployment change does not
 duplicate either kernel patch; it validates the behavior at the image and
 launcher boundary.
 
+The build composes one immutable source bundle under
+`patches/releases/kimi-k3-qsrt-tp8-safety`: vLLM tree `12776c0`, LMCache tree
+`e045d729`, and B12X tree `64dc2cb`. The B12X tree starts from the pinned QSRT
+compatibility branch, applies PR #237, and then applies a SHA-256-locked patch
+for the remaining qualified Kimi PCIe and atoms-v2 runtime files. Reproduce it
+with:
+
+```bash
+./build-kimi-k3-qsrt-tp16-runtime.sh
+```
+
 ## Qualification
 
 The exact four-token tail was re-exercised at 1,540 prompt tokens after keeping

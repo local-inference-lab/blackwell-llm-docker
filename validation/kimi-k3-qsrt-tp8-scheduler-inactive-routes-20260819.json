@@ -7,8 +7,10 @@
     "base_image_digest": "sha256:a54da4e2432138d42334cac54555f3a51188489cb66029da0d96e4b39162d726",
     "qualified_image_digest": "sha256:eed268e6993935bd3aeed53c973d324645eae0cf16440438128c987e7893e105",
     "vllm_tree": "12776c0df15ca4087b636c43004b5bc1fde61434",
+    "b12x_tree": "64dc2cb0c6582f45a3414f5ba40c370aca7600f1",
     "b12x_qsrt_compat_tree_sha256": "acbe42b83673b9de75b99a7d50caaa16b8e0491a6169e9be0660d927802f2b06",
     "b12x_inactive_route_pr": "227@0eba6ae99e0d1fad6ec268d8c291f498ec1dd4d9",
+    "b12x_compatibility_port_pr": "237@7917d618a09cb01cde7df31ac6696dbe86dd72ab",
     "lmcache_tree": "e045d729bc5c4c63a40e13d032f42923de97812f",
     "code_bind_mounts": 0
   },
