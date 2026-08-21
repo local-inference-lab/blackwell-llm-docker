@@ -1,0 +1,21 @@
+{
+  "base": {
+    "commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+    "ref": "refs/heads/release/v0.5.2-glm52-dcp-base",
+    "repository": "https://github.com/local-inference-lab/LMCache.git"
+  },
+  "composition": null,
+  "composition_strategy": "merge",
+  "manifest": {
+    "sha256": "23c11407f114554da63e7e2018f3f358cce15a7258f015d4ed5bb53235167b11"
+  },
+  "name": "kimi-k3-production-lmcache",
+  "pull_requests": [],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tree": "e045d729bc5c4c63a40e13d032f42923de97812f"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

@@ -1,0 +1,125 @@
+{
+  "base": {
+    "commit": "6dc2f516688fe6f84c6994dcd20fddf296853a6c",
+    "ref": "refs/heads/dev/infernal-invocation",
+    "repository": "https://github.com/local-inference-lab/vllm.git"
+  },
+  "composition": {
+    "commit": "86529c1ec06d5db98a14e1e6a9fde1f40a0d069b",
+    "ref": "refs/heads/agent/kimi-k3-production-sampler-overlay-20260819"
+  },
+  "composition_strategy": "pinned_branch",
+  "manifest": {
+    "sha256": "85f1c1918426f52142effb7035d2552124f6e229306e4400fba1a332c4de5a1c"
+  },
+  "name": "kimi-k3-production-vllm",
+  "pull_requests": [
+    {
+      "commits": [
+        "f85d3d87e196546eff162c2a61b49aab13f2e625"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "f85d3d87e196546eff162c2a61b49aab13f2e625",
+      "number": 310,
+      "ref": "refs/pull/310/head",
+      "title": "Preserve replicated DFlash-family draft semantics under DCP"
+    },
+    {
+      "commits": [
+        "3ebc8967dab28a9df103d8c66bff9688525263bc"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "3ebc8967dab28a9df103d8c66bff9688525263bc",
+      "number": 413,
+      "ref": "refs/pull/413/head",
+      "title": "Stream Kimi-K3 tool arguments incrementally"
+    },
+    {
+      "commits": [
+        "990a63debf7201ae5446436a712609fcc8ffaef7"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "990a63debf7201ae5446436a712609fcc8ffaef7",
+      "number": 414,
+      "ref": "refs/pull/414/head",
+      "title": "Preserve Mamba CoW after external prefix hits"
+    },
+    {
+      "commits": [
+        "c805ebd0896ccfbd2569bc0b2a7944d3282106ff"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "c805ebd0896ccfbd2569bc0b2a7944d3282106ff",
+      "number": 415,
+      "ref": "refs/pull/415/head",
+      "title": "Preserve the DSpark CUDA-graph capture contract"
+    },
+    {
+      "commits": [
+        "6b18a8a767f406f08a519757ca6d5ef118b18296"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "6b18a8a767f406f08a519757ca6d5ef118b18296",
+      "number": 418,
+      "ref": "refs/pull/418/head",
+      "title": "Keep recurrent cache position state unsharded under DCP"
+    },
+    {
+      "commits": [
+        "04a6acfe467f4a208c7231a18fc99faf656d016a"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "04a6acfe467f4a208c7231a18fc99faf656d016a",
+      "number": 419,
+      "ref": "refs/pull/419/head",
+      "title": "Keep Kimi K3 protocol markers out of streamed content"
+    },
+    {
+      "commits": [
+        "6bafa633153a44ba1aa54eb7c5bafac248fe68e6"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "3c296be28b31dba5c4a0ced714d2e21dabe246af",
+      "number": 422,
+      "ref": "refs/pull/422/head",
+      "title": "Handle KV load failures across hybrid cache groups"
+    },
+    {
+      "commits": [
+        "0ad95065da12e45c28d585d8c758a87d3a708b1f"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "0ad95065da12e45c28d585d8c758a87d3a708b1f",
+      "number": 427,
+      "ref": "refs/pull/427/head",
+      "title": "Materialize Kimi-K3 interleaved MLA decode queries"
+    },
+    {
+      "commits": [
+        "45962db4c38a0e430450a087843fc2762a38beb4"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "45962db4c38a0e430450a087843fc2762a38beb4",
+      "number": 428,
+      "ref": "refs/pull/428/head",
+      "title": "Warm Kimi vision interpolation before KV allocation"
+    },
+    {
+      "commits": [
+        "9151d114e270250fb0367333b2dc5a49c6383796"
+      ],
+      "disposition": "recorded_in_composition",
+      "head": "9151d114e270250fb0367333b2dc5a49c6383796",
+      "number": 433,
+      "ref": "refs/pull/433/head",
+      "title": "Enforce cached MRV2 logits-processing state"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "44afa8afe0f191c39bff9df1a3b223ad690a8e792033facefbcf01159c2b8bab",
+    "tree": "12776c0df15ca4087b636c43004b5bc1fde61434"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

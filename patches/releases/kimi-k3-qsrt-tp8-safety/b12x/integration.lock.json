@@ -1,0 +1,38 @@
+{
+  "base": {
+    "commit": "6e2c6bfb3991b27509c0e2e70dda5d90bb039691",
+    "ref": "refs/heads/agent/pr197-base-glm52-sqg",
+    "repository": "https://github.com/local-inference-lab/b12x.git"
+  },
+  "composition": null,
+  "composition_strategy": "merge",
+  "manifest": {
+    "sha256": "3132fad58d73eca70ff819568eba9109f90f4ee9d931164ee2cc256013d1ca79"
+  },
+  "name": "kimi-k3-qsrt-tp8-safety-b12x",
+  "pull_requests": [
+    {
+      "commits": [
+        "7917d618a09cb01cde7df31ac6696dbe86dd72ab"
+      ],
+      "disposition": "merged",
+      "head": "7917d618a09cb01cde7df31ac6696dbe86dd72ab",
+      "number": 237,
+      "ref": "refs/pull/237/head",
+      "title": "Sanitize inactive QSRT W4A16 routes"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "27f2b710d930ab42ec5bb1944be4217d5a7892ba08f83ed6cf2adcb46e511ea1",
+    "tree": "64dc2cb0c6582f45a3414f5ba40c370aca7600f1"
+  },
+  "schema_version": 1,
+  "source_patches": [
+    {
+      "path": "patches/kimi-k3-qsrt-tp8-qualified-compat.patch",
+      "sha256": "3937584294c689de1a2507ff420d0554a3e93bc4dfe39a208790fbe07c84bd55",
+      "title": "Restore the qualified Kimi-K3 QSRT atoms-v2 and PCIe runtime contracts"
+    }
+  ]
+}

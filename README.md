@@ -184,6 +184,17 @@ Use a distinct `/cache/jit` volume for each entrypoint. The three profiles have
 different graph shapes and generated kernels; sharing a writable JIT directory
 between them is unsupported.
 
+The source-locked production image also includes the language-only QSRT-K2
+launcher. Build its immutable vLLM/B12X/LMCache source bundle with
+`./build-kimi-k3-qsrt-tp16-runtime.sh`. For eight 96 GiB GPUs, use
+`/usr/local/bin/serve-kimi-k3-qsrt-dspark-tp8`. It reserves four worker batch
+slots for DSpark depth 3 while keeping the target scheduler aligned to Kimi's
+1,536-token recurrent block (`1540` total / `1536` target / two sequences).
+The generic QSRT launcher validates this reserve before starting and verifies
+that the active B12X package supports both QSRT atoms-v2 and inactive W4A16
+routes. See `docs/kimi-k3-qsrt-tp8-scheduler-safety.md` for the failure analysis,
+source identities, compatibility limits, and qualification evidence.
+
 ### Infernal Invocation CUDA 13.3 runtime for DeepSeek-V4-Flash and GLM-5.2
 
 Status: **qualified for the DeepSeek-V4-Flash profile and source-qualified for

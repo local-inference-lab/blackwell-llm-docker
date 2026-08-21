@@ -127,6 +127,8 @@ COPY --chmod=0755 launchers/serve-kimi-k3-full-mxfp4-dspark-ii /usr/local/bin/se
 COPY --chmod=0755 launchers/serve-kimi-k3-full-mxfp4-dflash-ii /usr/local/bin/serve-kimi-k3-full-mxfp4-dflash-ii
 COPY --chmod=0755 launchers/serve-kimi-k3-qsrt-nospec /usr/local/bin/serve-kimi-k3-qsrt-nospec
 COPY --chmod=0755 launchers/serve-kimi-k3-qsrt-dspark /usr/local/bin/serve-kimi-k3-qsrt-dspark
+COPY --chmod=0755 launchers/serve-kimi-k3-qsrt-dspark-tp8 /usr/local/bin/serve-kimi-k3-qsrt-dspark-tp8
+COPY --chmod=0755 scripts/validate_kimi_k3_qsrt_runtime.py /usr/local/bin/validate-kimi-k3-qsrt-runtime.py
 COPY --chmod=0755 launchers/lmcache-mp-wrapper.sh /usr/local/bin/lmcache-mp-wrapper.sh
 COPY --chmod=0755 launchers/serve-kimi-k3-production-dspark-ii /usr/local/bin/serve-kimi-k3-production-dspark-ii
 
@@ -145,12 +147,14 @@ RUN set -eux; \
     /opt/venv/bin/python -c 'from lmcache.v1.multiprocess.transfer_context.worker_transfer import _collapse_chunks_for_single_destination; chunks=[object(), object()]; selected, ids=_collapse_chunks_for_single_destination(chunks, [7, 7], 1, 1); assert selected == chunks[-1:] and ids == [7]'; \
     /opt/venv/bin/python -c 'from b12x.comm.pcie.pcie_allreduce import recommended_max_bytes; assert recommended_max_bytes(16, default=86016) == 86016'; \
     B12X_PCIE_ALLREDUCE_ALGORITHM=island_rs /opt/venv/bin/python -c 'from b12x.comm.pcie.pcie_allreduce import recommended_max_bytes; assert recommended_max_bytes(16, default=86016) == 163840'; \
+    /opt/venv/bin/python /usr/local/bin/validate-kimi-k3-qsrt-runtime.py; \
     for launcher in \
       /usr/local/bin/serve-kimi-k3-full-mxfp4-nospec-ii \
       /usr/local/bin/serve-kimi-k3-full-mxfp4-dspark-ii \
       /usr/local/bin/serve-kimi-k3-full-mxfp4-dflash-ii \
       /usr/local/bin/serve-kimi-k3-qsrt-nospec \
       /usr/local/bin/serve-kimi-k3-qsrt-dspark \
+      /usr/local/bin/serve-kimi-k3-qsrt-dspark-tp8 \
       /usr/local/bin/lmcache-mp-wrapper.sh \
       /usr/local/bin/serve-kimi-k3-production-dspark-ii; do \
       bash -n "${launcher}"; \

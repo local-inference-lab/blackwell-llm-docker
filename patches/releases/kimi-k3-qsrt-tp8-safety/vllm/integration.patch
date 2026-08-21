@@ -1,0 +1,2079 @@
+diff --git a/tests/models/kimi_k3/test_vision_warmup.py b/tests/models/kimi_k3/test_vision_warmup.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..7fc562b31fd3b8f76c76fc2dac3a675c2a9bc0a4
+--- /dev/null
++++ b/tests/models/kimi_k3/test_vision_warmup.py
+@@ -0,0 +1,59 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++import torch
++
++from vllm.model_executor.models import kimi_k25_vit
++from vllm.model_executor.warmup import kimi_k3_triton_warmup
++from vllm.model_executor.warmup.kimi_k3_triton_warmup import (
++    _warm_vision_position_interpolation,
++)
++
++
++def test_warm_vision_position_interpolation(monkeypatch) -> None:
++    model = torch.nn.Sequential(
++        kimi_k25_vit.Learnable2DInterpPosEmbDivided_fixed(
++            height=14,
++            width=14,
++            num_frames=4,
++            dim=32,
++        )
++    )
++    get_rope_shape = Mock(return_value=torch.empty(64 * 64, 32))
++    monkeypatch.setattr(kimi_k25_vit, "get_rope_shape", get_rope_shape)
++
++    assert _warm_vision_position_interpolation(model) == 1
++    get_rope_shape.assert_called_once_with(
++        model[0].weight,
++        interpolation_mode="bicubic",
++        shape=(64, 64),
++    )
++
++
++def test_warm_vision_position_interpolation_ignores_other_modules() -> None:
++    assert _warm_vision_position_interpolation(torch.nn.Linear(2, 2)) == 0
++
++
++def test_kimi_warmup_runs_vision_before_kda_state_exists(monkeypatch) -> None:
++    model = torch.nn.Linear(2, 2)
++    calls = []
++    warm_vision = Mock(side_effect=lambda model: calls.append("vision") or 1)
++    get_kda_layer = Mock(side_effect=lambda worker: calls.append("kda"))
++    monkeypatch.setattr(kimi_k3_triton_warmup.current_platform, "is_cuda", lambda: True)
++    monkeypatch.setattr(
++        kimi_k3_triton_warmup,
++        "_warm_vision_position_interpolation",
++        warm_vision,
++    )
++    monkeypatch.setattr(kimi_k3_triton_warmup, "_get_kda_layer", get_kda_layer)
++
++    kimi_k3_triton_warmup.kimi_k3_triton_warmup(
++        SimpleNamespace(get_model=lambda: model)
++    )
++
++    warm_vision.assert_called_once_with(model)
++    get_kda_layer.assert_called_once()
++    assert calls == ["vision", "kda"]
+diff --git a/tests/reasoning/test_kimi_k3_reasoning_parser.py b/tests/reasoning/test_kimi_k3_reasoning_parser.py
+index 4f831e851e9b6ed6ef6b028e5ae0faca7dfac4fa..83ee0b5d0951e0f58074d0ee2d56e94b914fe649 100644
+--- a/tests/reasoning/test_kimi_k3_reasoning_parser.py
++++ b/tests/reasoning/test_kimi_k3_reasoning_parser.py
+@@ -52,6 +52,7 @@ def test_parser_selection_thinking_disabled():
+     )
+ 
+     assert parser._thinking_enabled is False
++    assert parser.thinking_enabled is False
+ 
+ 
+ def test_extract_reasoning_with_xtml_tags():
+@@ -119,6 +120,103 @@ def test_is_reasoning_end_ignores_stale_close_from_prior_turn():
+     assert not parser.is_reasoning_end([*new_open])
+ 
+ 
++def test_fresh_assistant_prompt_does_not_inherit_closed_reasoning():
++    parser = KimiK3ReasoningParser(
++        DummyTokenizer(),
++        chat_template_kwargs={
++            "thinking": True,
++            "add_generation_prompt": True,
++            "continue_final_message": False,
++        },
++    )
++
++    assert not parser.is_reasoning_end_for_prompt(CLOSE_IDS)
++
++
++def test_continued_assistant_prompt_uses_rendered_reasoning_state():
++    parser = KimiK3ReasoningParser(
++        DummyTokenizer(),
++        chat_template_kwargs={
++            "thinking": True,
++            "add_generation_prompt": False,
++            "continue_final_message": True,
++        },
++    )
++
++    assert parser.is_reasoning_end_for_prompt(CLOSE_IDS)
++    assert not parser.is_reasoning_end_for_prompt(OPEN_IDS)
++
++
++def test_fresh_assistant_stream_classifies_first_tokens_as_reasoning():
++    parser = ReasoningOnlyParser(
++        DummyTokenizer(),
++        chat_template_kwargs={
++            "thinking": True,
++            "add_generation_prompt": True,
++        },
++    )
++    request = ChatCompletionRequest(model="test-model", messages=[])
++
++    first = parser.parse_delta(
++        delta_text=".",
++        delta_token_ids=[9],
++        request=request,
++        prompt_token_ids=CLOSE_IDS,
++        finished=False,
++    )
++    partial_close = parser.parse_delta(
++        delta_text=f"{CLOSE}think",
++        delta_token_ids=CLOSE_IDS[:2],
++        request=request,
++        prompt_token_ids=CLOSE_IDS,
++        finished=False,
++    )
++    closed = parser.parse_delta(
++        delta_text=f"{SEP}{RESPONSE_OPEN}",
++        delta_token_ids=[CLOSE_IDS[2], 10],
++        request=request,
++        prompt_token_ids=CLOSE_IDS,
++        finished=False,
++    )
++
++    assert first is not None
++    assert first.reasoning == "."
++    assert first.content is None
++    assert partial_close is None
++    assert closed is None
++
++
++def test_content_filter_holds_and_removes_split_protocol_markers():
++    parser = ReasoningOnlyParser(
++        DummyTokenizer(),
++        chat_template_kwargs={
++            "thinking": True,
++            "add_generation_prompt": False,
++            "continue_final_message": True,
++        },
++    )
++    request = ChatCompletionRequest(model="test-model", messages=[])
++    chunks = [".", f"{CLOSE}think", SEP, RESPONSE_OPEN]
++    messages: list[DeltaMessage] = []
++
++    for index, chunk in enumerate(chunks):
++        delta = parser.parse_delta(
++            delta_text=chunk,
++            delta_token_ids=[9 + index],
++            request=request,
++            prompt_token_ids=CLOSE_IDS,
++            finished=index == len(chunks) - 1,
++        )
++        if delta is not None:
++            messages.append(delta)
++
++    content = "".join(message.content or "" for message in messages)
++    assert content == "."
++    assert OPEN not in content
++    assert CLOSE not in content
++    assert SEP not in content
++
++
+ def test_streaming_split_open_marker_is_held_back():
+     parser = KimiK3ReasoningParser(DummyTokenizer())
+ 
+diff --git a/tests/tool_use/test_kimi_k3_tool_parser.py b/tests/tool_use/test_kimi_k3_tool_parser.py
+index 118c51db574e5511d4659e93dd57ec4058c3f7d6..43f29edfc32a7a9a165e497a39899f8fb27d23d5 100644
+--- a/tests/tool_use/test_kimi_k3_tool_parser.py
++++ b/tests/tool_use/test_kimi_k3_tool_parser.py
+@@ -171,6 +171,48 @@ def test_delegating_parser_preserves_tool_calls_after_reasoning():
+     assert json.loads(tool_calls[0].arguments) == {"x": 1}
+ 
+ 
++def test_fresh_tool_stream_does_not_inherit_closed_reasoning():
++    parser = KimiK3DelegatingParser(
++        DummyTokenizer(),
++        chat_template_kwargs={
++            "thinking": True,
++            "add_generation_prompt": True,
++        },
++    )
++    request = _request()
++    messages: list[DeltaMessage] = []
++    chunks = [
++        (".", [9]),
++        (f"{CLOSE}think", [4, 2]),
++        (
++            f"{SEP}{_response('')}{_tools(_call('calc', 1))}",
++            [3, 10],
++        ),
++    ]
++
++    for index, (text, token_ids) in enumerate(chunks):
++        delta = parser.parse_delta(
++            delta_text=text,
++            delta_token_ids=token_ids,
++            request=request,
++            prompt_token_ids=[4, 2, 3],
++            finished=index == len(chunks) - 1,
++        )
++        if delta is not None:
++            messages.append(delta)
++
++    reasoning = "".join(message.reasoning or "" for message in messages)
++    content = "".join(message.content or "" for message in messages)
++    tool_calls = [call for message in messages for call in (message.tool_calls or [])]
++    assert reasoning == "."
++    assert content == ""
++    assert len(tool_calls) == 1
++    assert tool_calls[0].function.name == "calc"
++    assert OPEN not in reasoning + content
++    assert CLOSE not in reasoning + content
++    assert SEP not in reasoning + content
++
++
+ def test_delegating_parser_required_tool_choice_uses_xtml_parser():
+     parser = KimiK3DelegatingParser(DummyTokenizer())
+     request = _request().model_copy(update={"tool_choice": "required"})
+@@ -361,9 +403,141 @@ def test_streaming_split_markers_do_not_leak():
+     assert content == "Hi"
+     assert OPEN not in content
+     assert SEP not in content
+-    assert len(tool_deltas) == 1
+-    assert tool_deltas[0].function.name == "calc"
+-    assert json.loads(tool_deltas[0].function.arguments) == {"x": 1}
++    assert [tool_call.function.name for tool_call in tool_deltas if tool_call.id] == [
++        "calc"
++    ]
++    arguments = "".join(tool_call.function.arguments or "" for tool_call in tool_deltas)
++    assert json.loads(arguments) == {"x": 1}
++
++
++def test_streaming_emits_argument_text_as_it_arrives():
++    """A long string argument must stream, not land in one delta at the close."""
++    parser = KimiK3ToolParser(DummyTokenizer())
++    request = _request()
++    value = "word " * 200
++    body_chunks = [value[i : i + 5] for i in range(0, len(value), 5)]
++    chunks = [
++        f"{OPEN}tools{SEP}",
++        f'{OPEN}call tool="write_file" index="1"{SEP}',
++        f'{OPEN}argument key="content" type="string"{SEP}',
++        *body_chunks,
++        f"{CLOSE}argument{SEP}",
++        f"{CLOSE}call{SEP}",
++    ]
++    previous_text = ""
++    previous_ids: list[int] = []
++    messages: list[DeltaMessage] = []
++    arguments_before_close = ""
++
++    for i, chunk in enumerate(chunks, start=1):
++        if chunk == f"{CLOSE}argument{SEP}":
++            arguments_before_close = "".join(
++                tool_call.function.arguments or ""
++                for message in messages
++                for tool_call in (message.tool_calls or [])
++            )
++        current_text = previous_text + chunk
++        current_ids = previous_ids + [i]
++        delta = parser.extract_tool_calls_streaming(
++            previous_text=previous_text,
++            current_text=current_text,
++            delta_text=chunk,
++            previous_token_ids=previous_ids,
++            current_token_ids=current_ids,
++            delta_token_ids=[i],
++            request=request,
++        )
++        if delta is not None:
++            messages.append(delta)
++        previous_text = current_text
++        previous_ids = current_ids
++
++    tool_deltas = [
++        tool_call for message in messages for tool_call in (message.tool_calls or [])
++    ]
++
++    # the name is announced once, up front, and every body chunk moves the stream
++    assert [tool_call.function.name for tool_call in tool_deltas if tool_call.id] == [
++        "write_file"
++    ]
++    assert len(tool_deltas) >= len(body_chunks)
++    assert all(tool_call.index == 0 for tool_call in tool_deltas)
++    assert (
++        arguments_before_close
++        == json.dumps({"content": value}, ensure_ascii=False)[:-2]
++    )
++
++    arguments = "".join(tool_call.function.arguments or "" for tool_call in tool_deltas)
++    assert json.loads(arguments) == {"content": value}
++    non_streamed = parser.extract_tool_calls(previous_text, request)
++    assert arguments == non_streamed.tool_calls[0].function.arguments
++
++
++def test_streaming_holds_whitespace_tolerant_argument_close_fragments():
++    parser = KimiK3ToolParser(DummyTokenizer())
++    request = _request()
++    chunks = [
++        f"{OPEN}tools{SEP}",
++        f'{OPEN}call tool="write_file" index="1"{SEP}',
++        f'{OPEN}argument key="content" type="string"{SEP}',
++        "payload",
++        f"{CLOSE} arg",
++        "ument ",
++        "<|sep",
++        "|>",
++        f"{CLOSE}call{SEP}",
++    ]
++    previous_text = ""
++    previous_ids: list[int] = []
++    streamed_arguments = ""
++    partial_close_snapshots: list[str] = []
++
++    for i, chunk in enumerate(chunks, start=1):
++        current_text = previous_text + chunk
++        current_ids = previous_ids + [i]
++        delta = parser.extract_tool_calls_streaming(
++            previous_text=previous_text,
++            current_text=current_text,
++            delta_text=chunk,
++            previous_token_ids=previous_ids,
++            current_token_ids=current_ids,
++            delta_token_ids=[i],
++            request=request,
++        )
++        if delta is not None:
++            streamed_arguments += "".join(
++                tool_call.function.arguments or ""
++                for tool_call in (delta.tool_calls or [])
++            )
++        if 5 <= i <= 7:
++            partial_close_snapshots.append(streamed_arguments)
++        previous_text = current_text
++        previous_ids = current_ids
++
++    expected_prefix = json.dumps({"content": "payload"}, ensure_ascii=False)[:-2]
++    assert partial_close_snapshots == [expected_prefix] * 3
++    assert json.loads(streamed_arguments) == {"content": "payload"}
++    non_streamed = parser.extract_tool_calls(previous_text, request)
++    assert streamed_arguments == non_streamed.tool_calls[0].function.arguments
++
++
++def test_streaming_ignores_call_shaped_text_after_tools_close():
++    parser = KimiK3ToolParser(DummyTokenizer())
++    request = _request()
++    output = _tools() + _call("calc", 1, _arg("x", "number", "1"))
++
++    delta = parser.extract_tool_calls_streaming(
++        previous_text="",
++        current_text=output,
++        delta_text=output,
++        previous_token_ids=[],
++        current_token_ids=[1],
++        delta_token_ids=[1],
++        request=request,
++    )
++
++    assert delta is None
++    assert parser.extract_tool_calls(output, request).tools_called is False
+ 
+ 
+ def test_tool_call_ids_are_unique_across_messages():
+diff --git a/tests/v1/core/prefix_cache/test_partial_prefix_cache_hits.py b/tests/v1/core/prefix_cache/test_partial_prefix_cache_hits.py
+index 8f43039face2b3a1b5ebbb5a54603c45924ec49a..54e26459ceeb0a160b8926e3b31a56093abb1579 100644
+--- a/tests/v1/core/prefix_cache/test_partial_prefix_cache_hits.py
++++ b/tests/v1/core/prefix_cache/test_partial_prefix_cache_hits.py
+@@ -514,6 +514,79 @@ def test_hybrid_mamba_partial_tail_owner_uses_cow_on_continue():
+     assert moved[0].block_hash_num_tokens == 6
+ 
+ 
++def test_external_mamba_hit_same_block_uses_running_cow_on_continue():
++    """An external mid-block hit must become a running request even when its
++    first continuation does not need another Mamba block."""
++    hash_block_size = 2
++    mamba_block_size = 4 * hash_block_size
++    kv_cache_config = KVCacheConfig(
++        num_blocks=32,
++        kv_cache_tensors=[],
++        kv_cache_groups=[
++            KVCacheGroupSpec(
++                ["full"],
++                FullAttentionSpec(
++                    block_size=hash_block_size,
++                    num_kv_heads=1,
++                    head_size=1,
++                    dtype=torch.float32,
++                ),
++            ),
++            KVCacheGroupSpec(
++                ["mamba"],
++                MambaSpec(
++                    block_size=mamba_block_size,
++                    shapes=(1, 1),
++                    dtypes=(torch.float32,),
++                    mamba_cache_mode="align",
++                ),
++            ),
++        ],
++    )
++    manager = make_kv_cache_manager(
++        kv_cache_config=kv_cache_config,
++        max_model_len=8192,
++        enable_caching=True,
++        hash_block_size=hash_block_size,
++    )
++
++    request = make_request("0", [0] * 15, hash_block_size, sha256)
++    loaded_blocks = manager.allocate_slots(
++        request,
++        num_new_tokens=0,
++        num_external_computed_tokens=10,
++        delay_cache_blocks=True,
++    )
++    assert loaded_blocks is not None
++
++    request.num_computed_tokens = 10
++    first_step_blocks = manager.allocate_slots(request, num_new_tokens=4)
++    assert first_step_blocks is not None
++    assert first_step_blocks.get_block_ids()[1] == []
++
++    source_block_id = manager.get_blocks("0").get_block_ids()[1][1]
++    partial_hash = request.block_hashes[14 // hash_block_size - 1]
++    partial_block = manager.block_pool.get_cached_block(
++        partial_hash, kv_cache_group_ids=[1]
++    )
++    assert partial_block is not None
++    assert partial_block[0].block_id == source_block_id
++
++    request.num_computed_tokens = 14
++    continuation_blocks = manager.allocate_slots(request, num_new_tokens=1)
++    assert continuation_blocks is not None
++
++    assert continuation_blocks.get_block_ids()[1] == []
++    assert manager.get_blocks("0").get_block_ids()[1][1] == source_block_id
++    copies, _ = manager.take_kv_cache_block_copies()
++    cow_copy = next(c for c in copies if c.src_block_id == source_block_id)
++    assert cow_copy.dst_block_id != source_block_id
++
++    moved = manager.block_pool.get_cached_block(partial_hash, kv_cache_group_ids=[1])
++    assert moved is not None
++    assert moved[0].block_id == cow_copy.dst_block_id
++
++
+ def test_take_partial_tail_offloads_returns_cow_target():
+     """The connector offload hand-off exposes the mamba CoW *target* block Y
+     (the durable boundary state), not the overwritten source X, and only at
+diff --git a/tests/v1/core/test_kv_cache_utils.py b/tests/v1/core/test_kv_cache_utils.py
+index fbcb05908e5c5326efb6628b98df6956daec6e66..8ef1c234ef2b29e5d539dbac561585f86d7776f3 100644
+--- a/tests/v1/core/test_kv_cache_utils.py
++++ b/tests/v1/core/test_kv_cache_utils.py
+@@ -58,6 +58,7 @@ from vllm.v1.kv_cache_interface import (
+     SlidingWindowMLASpec,
+     SlidingWindowSpec,
+     UniformTypeKVCacheSpecs,
++    get_kv_cache_dcp_shard_count,
+     get_kv_cache_spec_kind,
+     get_kv_cache_spec_sliding_window,
+ )
+@@ -197,6 +198,16 @@ def new_mamba_spec(
+     )
+ 
+ 
++def test_mamba_cache_has_one_dcp_token_position_shard():
++    spec = new_mamba_spec(block_size=768, num_speculative_blocks=7)
++    vllm_config = SimpleNamespace(
++        cache_config=SimpleNamespace(mamba_cache_mode="align")
++    )
++
++    assert get_kv_cache_dcp_shard_count(spec, dcp_world_size=16) == 1
++    assert spec.max_num_blocks_per_req(vllm_config, max_len=1_000_000) == 1310
++
++
+ def test_unify_kv_cache_spec_page_size_uses_lcm_for_non_divisible_pages():
+     mimo_spec = FullAttentionSpec(
+         block_size=64,
+diff --git a/tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py b/tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py
+index 77d62972977651f0cdee838f5be6c71324025259..9c41bd40782818ded855422eddd6a6d74a2c32d8 100644
+--- a/tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py
++++ b/tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py
+@@ -15,8 +15,18 @@ from collections.abc import Callable
+ from unittest.mock import Mock
+ 
+ import pytest
++import torch
+ 
++from vllm.distributed.kv_transfer.kv_connector.v1.nixl.connector import (
++    NixlBaseConnector,
++)
+ from vllm.v1.core.sched.scheduler import Scheduler
++from vllm.v1.kv_cache_interface import (
++    FullAttentionSpec,
++    KVCacheConfig,
++    KVCacheGroupSpec,
++    SlidingWindowSpec,
++)
+ from vllm.v1.request import FinishReason, Request, RequestStatus
+ 
+ from .utils import (
+@@ -24,6 +34,7 @@ from .utils import (
+     create_request,
+     create_scheduler,
+     create_vllm_config,
++    make_kv_cache_config,
+ )
+ 
+ pytestmark = pytest.mark.cpu_test
+@@ -478,3 +489,299 @@ def test_async_recompute_blocks_not_cached_when_invalid(
+ 
+     # request should be in the running queue
+     assert request in recompute_scheduler.running
++
++
++def test_sync_recompute_handles_invalid_block_in_second_kv_cache_group():
++    """Invalid blocks in any hybrid KV group must trigger recomputation."""
++    block_size = 16
++    num_blocks = 128
++    num_prompt_blocks = 8
++    num_external_computed_blocks = 7
++    invalid_block_idx = 3
++
++    vllm_config = create_vllm_config(
++        block_size=block_size,
++        kv_load_failure_policy="recompute",
++    )
++    scheduler = create_scheduler(
++        vllm_config,
++        num_blocks=num_blocks,
++        kv_cache_config=make_kv_cache_config(
++            block_size=block_size,
++            swa_enabled=True,
++            sw_size=num_prompt_blocks * block_size,
++            num_blocks=num_blocks,
++        ),
++    )
++
++    request = create_request(
++        num_tokens=num_prompt_blocks * block_size,
++        block_size=block_size,
++    )
++    scheduler.add_request(request)
++
++    num_external_computed_tokens = num_external_computed_blocks * block_size
++    scheduler.connector = Mock()
++    scheduler.connector.get_num_new_matched_tokens.side_effect = (
++        _make_get_num_new_matched_tokens(
++            {
++                request.request_id: num_external_computed_tokens,
++            },
++            False,
++        )
++    )
++    scheduler.connector.request_finished.return_value = (False, None)
++    scheduler.connector.request_finished_all_groups.return_value = (
++        False,
++        None,
++    )
++    scheduler.connector.take_events.return_value = ()
++
++    scheduler_output = scheduler.schedule()
++
++    assert request.status == RequestStatus.RUNNING
++    assert len(scheduler_output.scheduled_new_reqs) == 1
++
++    block_ids_by_group = scheduler_output.scheduled_new_reqs[0].block_ids
++    assert len(block_ids_by_group) == 2
++    assert all(
++        len(group_block_ids) > invalid_block_idx
++        for group_block_ids in block_ids_by_group
++    )
++
++    # Report a load failure in the second KV cache group, not the first.
++    invalid_block_id = block_ids_by_group[1][invalid_block_idx]
++    model_runner_output = create_model_runner_output(
++        [request],
++        invalid_block_ids={invalid_block_id},
++        use_eos=False,
++    )
++
++    scheduler.update_from_output(
++        scheduler_output,
++        model_runner_output,
++    )
++
++    assert request.status == RequestStatus.RUNNING
++    assert request.num_computed_tokens == invalid_block_idx * block_size
++    assert request in scheduler.running
++    assert request.request_id in scheduler.requests
++
++
++def test_sync_fail_handles_invalid_block_in_seventeenth_kv_cache_group():
++    """A hybrid-cache load failure must fail one request, not the scheduler."""
++    block_size = 16
++    num_blocks = 512
++    num_prompt_blocks = 8
++    num_external_computed_blocks = 7
++    invalid_block_idx = 3
++    num_kv_cache_groups = 17
++
++    vllm_config = create_vllm_config(
++        block_size=block_size,
++        kv_load_failure_policy="fail",
++    )
++    kv_cache_config = KVCacheConfig(
++        num_blocks=num_blocks,
++        kv_cache_tensors=[],
++        kv_cache_groups=[
++            *[
++                KVCacheGroupSpec(
++                    [f"full_attention_layer_{group_idx}"],
++                    FullAttentionSpec(
++                        block_size=block_size,
++                        num_kv_heads=1,
++                        head_size=1,
++                        dtype=torch.float32,
++                    ),
++                )
++                for group_idx in range(num_kv_cache_groups - 1)
++            ],
++            KVCacheGroupSpec(
++                ["sliding_window_layer"],
++                SlidingWindowSpec(
++                    block_size=block_size,
++                    num_kv_heads=1,
++                    head_size=1,
++                    dtype=torch.float32,
++                    sliding_window=num_prompt_blocks * block_size,
++                ),
++            ),
++        ],
++    )
++    scheduler = create_scheduler(
++        vllm_config,
++        num_blocks=num_blocks,
++        kv_cache_config=kv_cache_config,
++    )
++
++    failed_request = create_request(
++        num_tokens=num_prompt_blocks * block_size,
++        block_size=block_size,
++    )
++    scheduler.add_request(failed_request)
++
++    num_external_computed_tokens = num_external_computed_blocks * block_size
++    scheduler.connector = Mock(spec=NixlBaseConnector)
++    scheduler.connector.get_num_new_matched_tokens.side_effect = (
++        _make_get_num_new_matched_tokens(
++            {
++                failed_request.request_id: num_external_computed_tokens,
++            },
++            False,
++        )
++    )
++    scheduler.connector.request_finished.return_value = (False, None)
++    scheduler.connector.request_finished_all_groups.return_value = (
++        False,
++        None,
++    )
++    scheduler.connector.take_events.return_value = ()
++
++    scheduler_output = scheduler.schedule()
++    block_ids_by_group = scheduler_output.scheduled_new_reqs[0].block_ids
++
++    assert len(block_ids_by_group) == num_kv_cache_groups
++    invalid_block_id = block_ids_by_group[-1][invalid_block_idx]
++    model_runner_output = create_model_runner_output(
++        [failed_request],
++        invalid_block_ids={invalid_block_id},
++        use_eos=False,
++    )
++
++    outputs = scheduler.update_from_output(scheduler_output, model_runner_output)
++
++    assert failed_request.status == RequestStatus.FINISHED_ERROR
++    assert failed_request.request_id not in scheduler.requests
++    assert failed_request not in scheduler.running
++    assert len(outputs) == 1
++    engine_output = next(iter(outputs.values())).outputs[0]
++    assert engine_output.request_id == failed_request.request_id
++    assert engine_output.finish_reason == FinishReason.ERROR
++
++    healthy_request = create_request(
++        num_tokens=2 * block_size,
++        block_size=block_size,
++    )
++    scheduler.add_request(healthy_request)
++    next_scheduler_output = scheduler.schedule()
++
++    assert healthy_request.request_id in next_scheduler_output.num_scheduled_tokens
++    assert healthy_request.status == RequestStatus.RUNNING
++
++
++def test_sync_recompute_handles_mixed_kv_group_block_sizes():
++    """Recompute from a common boundary for mixed KV block sizes."""
++    hash_block_size = 16
++    scheduler_block_size = 64
++    num_blocks = 512
++    num_prompt_tokens = 8 * scheduler_block_size
++    num_external_computed_tokens = 7 * scheduler_block_size
++
++    # The invalid block begins at token 3 * 32 = 96.
++    # Scheduling granularity is 64, so recomputation must restart at 64.
++    invalid_group_idx = 1
++    invalid_block_idx = 3
++
++    vllm_config = create_vllm_config(
++        block_size=scheduler_block_size,
++        kv_load_failure_policy="recompute",
++    )
++    kv_cache_config = KVCacheConfig(
++        num_blocks=num_blocks,
++        kv_cache_tensors=[],
++        kv_cache_groups=[
++            KVCacheGroupSpec(
++                ["full_16"],
++                FullAttentionSpec(
++                    block_size=16,
++                    num_kv_heads=4,
++                    head_size=16,
++                    dtype=torch.float16,
++                ),
++            ),
++            KVCacheGroupSpec(
++                ["window_32"],
++                SlidingWindowSpec(
++                    block_size=32,
++                    num_kv_heads=4,
++                    head_size=16,
++                    dtype=torch.float16,
++                    sliding_window=num_prompt_tokens,
++                ),
++            ),
++            KVCacheGroupSpec(
++                ["full_64"],
++                FullAttentionSpec(
++                    block_size=64,
++                    num_kv_heads=1,
++                    head_size=32,
++                    dtype=torch.float16,
++                ),
++            ),
++        ],
++    )
++    scheduler = create_scheduler(
++        vllm_config,
++        num_blocks=num_blocks,
++        kv_cache_config=kv_cache_config,
++        hash_block_size=hash_block_size,
++    )
++
++    request = create_request(
++        num_tokens=num_prompt_tokens,
++        block_size=hash_block_size,
++    )
++    scheduler.add_request(request)
++
++    scheduler.connector = Mock()
++    scheduler.connector.get_num_new_matched_tokens.side_effect = (
++        _make_get_num_new_matched_tokens(
++            {
++                request.request_id: num_external_computed_tokens,
++            },
++            False,
++        )
++    )
++    scheduler.connector.request_finished.return_value = (
++        False,
++        None,
++    )
++    scheduler.connector.request_finished_all_groups.return_value = (
++        False,
++        None,
++    )
++    scheduler.connector.take_events.return_value = ()
++
++    scheduler_output = scheduler.schedule()
++
++    assert request.status == RequestStatus.RUNNING
++    assert len(scheduler_output.scheduled_new_reqs) == 1
++
++    block_ids_by_group = scheduler_output.scheduled_new_reqs[0].block_ids
++    assert len(block_ids_by_group) == 3
++    assert len(block_ids_by_group[invalid_group_idx]) > invalid_block_idx
++
++    invalid_block_id = block_ids_by_group[invalid_group_idx][invalid_block_idx]
++    model_runner_output = create_model_runner_output(
++        [request],
++        invalid_block_ids={invalid_block_id},
++        use_eos=False,
++    )
++
++    scheduler.update_from_output(
++        scheduler_output,
++        model_runner_output,
++    )
++
++    invalid_block_start = invalid_block_idx * 32
++    expected_recompute_from = (
++        invalid_block_start // scheduler_block_size * scheduler_block_size
++    )
++
++    assert invalid_block_start == 96
++    assert expected_recompute_from == 64
++    assert request.num_computed_tokens == expected_recompute_from
++    assert request.status == RequestStatus.RUNNING
++    assert request in scheduler.running
++    assert request.request_id in scheduler.requests
+diff --git a/tests/v1/kv_connector/unit/utils.py b/tests/v1/kv_connector/unit/utils.py
+index b1fb43353374a470b7fd6454e8c197ffe92f008b..a2908b7ab2e4713e81be8001a551e13148fd4c63 100644
+--- a/tests/v1/kv_connector/unit/utils.py
++++ b/tests/v1/kv_connector/unit/utils.py
+@@ -153,6 +153,7 @@ def create_scheduler(
+     vllm_config: VllmConfig,
+     num_blocks: int = 10000,
+     kv_cache_config: KVCacheConfig | None = None,
++    hash_block_size: int | None = None,
+ ) -> Scheduler | AsyncScheduler:
+     """Initialize Scheduler For Testing."""
+     block_size = vllm_config.cache_config.block_size
+@@ -183,6 +184,7 @@ def create_scheduler(
+         log_stats=True,
+         structured_output_manager=StructuredOutputManager(vllm_config),
+         block_size=block_size,
++        hash_block_size=hash_block_size,
+     )
+ 
+ 
+diff --git a/tests/v1/spec_decode/test_dflash_causality.py b/tests/v1/spec_decode/test_dflash_causality.py
+index 02e2a0bdbec21f64e5cf2eabf52de5d9f53205cb..015281027894615b75f1e10e1e73aa83b4f5eb4e 100644
+--- a/tests/v1/spec_decode/test_dflash_causality.py
++++ b/tests/v1/spec_decode/test_dflash_causality.py
+@@ -10,11 +10,13 @@ per-layer causality, and the no-``layer_types`` fallback) is worth pinning.
+ from types import SimpleNamespace
+ 
+ import pytest
++import torch.nn as nn
+ 
+ from vllm.model_executor.models.qwen3_dflash import (
+     _dflash_layer_causal,
+     _get_dflash_fc_input_size,
+     dflash_has_any_non_causal,
++    dflash_target_rope_is_neox_style,
+ )
+ from vllm.v1.worker.gpu.spec_decode.eagle.eagle3_utils import (
+     get_eagle3_aux_layers_from_config,
+@@ -89,3 +91,105 @@ def test_eagle_aux_layers_preserves_legacy_layer_ids(config_name):
+     assert get_eagle3_aux_layers_from_config(vllm_config.speculative_config) == tuple(
+         layer_ids
+     )
++
++
++class _TargetRotaryModule(nn.Module):
++    def __init__(self, is_neox_style: bool):
++        super().__init__()
++        self.is_neox_style = is_neox_style
++
++
++class _TargetModel(nn.Module):
++    def __init__(self, is_neox_style: bool):
++        super().__init__()
++        self.rotary = _TargetRotaryModule(is_neox_style)
++
++
++@pytest.mark.parametrize("is_neox_style", [False, True])
++def test_dflash_target_rope_layout_is_discovered(is_neox_style):
++    target = _TargetModel(is_neox_style)
++
++    assert dflash_target_rope_is_neox_style(target) is is_neox_style
++
++
++def test_dflash_loader_propagates_target_rope_layout(monkeypatch):
++    """DFlash configures the target rotary layout before draft construction."""
++    from vllm.v1.worker.gpu.spec_decode.dflash import utils as loader_module
++
++    draft_hf_config = SimpleNamespace(
++        num_hidden_layers=1,
++        layer_types=["sliding_attention"],
++        dflash_config={"causal": True},
++    )
++    speculative_config = SimpleNamespace(
++        draft_model_config=SimpleNamespace(hf_config=draft_hf_config),
++        attention_backend=None,
++        kv_cache_dtype=None,
++        draft_load_config=None,
++    )
++    vllm_config = SimpleNamespace(
++        speculative_config=speculative_config,
++        attention_config=SimpleNamespace(),
++        cache_config=SimpleNamespace(),
++        quant_config=None,
++    )
++
++    def fake_replace(obj, **changes):
++        values = vars(obj).copy()
++        values.update(changes)
++        return SimpleNamespace(**values)
++
++    class DraftConstructionObserved(Exception):
++        pass
++
++    def fake_get_model(**_kwargs):
++        assert draft_hf_config.is_neox_style is False
++        raise DraftConstructionObserved
++
++    monkeypatch.setattr(loader_module, "replace", fake_replace)
++    monkeypatch.setattr(loader_module, "get_model", fake_get_model)
++    with pytest.raises(DraftConstructionObserved):
++        loader_module.load_dflash_model(_TargetModel(is_neox_style=False), vllm_config)
++
++
++def test_dspark_loader_preserves_checkpoint_rope_layout(monkeypatch):
++    """DSpark inference uses the rotary layout encoded by its training model."""
++    from vllm.model_executor.models import utils as model_utils
++    from vllm.v1.worker.gpu.spec_decode.dspark import utils as loader_module
++
++    draft_hf_config = SimpleNamespace(
++        num_hidden_layers=1,
++        layer_types=["sliding_attention"],
++        dflash_config={"causal": True},
++        is_neox_style=True,
++    )
++    speculative_config = SimpleNamespace(
++        draft_model_config=SimpleNamespace(hf_config=draft_hf_config),
++        attention_backend=None,
++        kv_cache_dtype=None,
++        draft_load_config=None,
++    )
++    vllm_config = SimpleNamespace(
++        speculative_config=speculative_config,
++        attention_config=SimpleNamespace(),
++        cache_config=SimpleNamespace(),
++        quant_config=None,
++    )
++
++    class DraftConstructionObserved(Exception):
++        pass
++
++    def fake_get_model(**_kwargs):
++        assert draft_hf_config.is_neox_style is True
++        raise DraftConstructionObserved
++
++    monkeypatch.setattr(loader_module, "get_model", fake_get_model)
++    monkeypatch.setattr(
++        loader_module,
++        "_create_draft_vllm_config",
++        lambda _config: vllm_config,
++    )
++    monkeypatch.setattr(model_utils, "get_draft_quant_config", lambda _config: None)
++
++    with pytest.raises(DraftConstructionObserved):
++        loader_module.load_dspark_model(_TargetModel(is_neox_style=False), vllm_config)
+diff --git a/tests/v1/spec_decode/test_dflash_swa.py b/tests/v1/spec_decode/test_dflash_swa.py
+index 2a0c9d6d6f7e6765f7ca3c490896472228f1b2b6..092e86492cb5883092450975c660e97797caee5a 100644
+--- a/tests/v1/spec_decode/test_dflash_swa.py
++++ b/tests/v1/spec_decode/test_dflash_swa.py
+@@ -10,6 +10,7 @@ from vllm.model_executor.layers.attention import Attention
+ from vllm.model_executor.models.qwen3_dflash import DFlashAttention
+ from vllm.transformers_utils.configs.speculators import SpeculatorsConfig
+ from vllm.v1.attention.backend import AttentionType, CommonAttentionMetadata
++from vllm.v1.attention.backends import flash_attn as flash_attn_backend
+ from vllm.v1.kv_cache_interface import (
+     FullAttentionSpec,
+     SlidingWindowSpec,
+@@ -161,6 +162,53 @@ def test_dflash_swa_layers_keep_sliding_window_kv_cache_spec(monkeypatch):
+     assert spec.dcp_replicated is True
+ 
+ 
++def test_flash_attention_metadata_treats_replicated_kv_as_dcp1(monkeypatch):
++    """Replicated draft cache metadata uses global sequence lengths locally."""
++    spec = SlidingWindowSpec(
++        block_size=16,
++        num_kv_heads=1,
++        head_size=128,
++        dtype=torch.bfloat16,
++        sliding_window=2048,
++        dcp_replicated=True,
++    )
++    model_config = SimpleNamespace(
++        get_num_attention_heads=lambda _parallel_config: 96,
++        get_num_kv_heads=lambda _parallel_config: 16,
++        get_head_size=lambda: 128,
++        rswa_window=None,
++        is_mm_prefix_lm=False,
++    )
++    vllm_config = SimpleNamespace(
++        model_config=model_config,
++        parallel_config=SimpleNamespace(cp_kv_cache_interleave_size=1),
++        cache_config=SimpleNamespace(cache_dtype="bfloat16"),
++        compilation_config=SimpleNamespace(
++            cudagraph_mode=SimpleNamespace(has_full_cudagraphs=lambda: False),
++            max_cudagraph_capture_size=None,
++        ),
++        attention_config=SimpleNamespace(
++            flash_attn_max_num_splits_for_cuda_graph=0,
++        ),
++        scheduler_config=SimpleNamespace(max_num_seqs=1),
++    )
++
++    monkeypatch.setattr(
++        flash_attn_backend,
++        "get_dcp_group",
++        lambda: SimpleNamespace(world_size=16, rank_in_group=7),
++    )
++    builder = flash_attn_backend.FlashAttentionMetadataBuilder(
++        spec,
++        ["draft.layer"],
++        vllm_config,
++        torch.device("cpu"),
++    )
++
++    assert builder.dcp_world_size == 1
++    assert builder.dcp_rank == 0
++
++
+ def test_dflash_swa_layers_use_causal_metadata():
+     proposer = object.__new__(DFlashProposer)
+     proposer.model = SimpleNamespace(sliding_attention_layer_names={"layer.sw"})
+diff --git a/tests/v1/spec_decode/test_dspark_cudagraph_contract.py b/tests/v1/spec_decode/test_dspark_cudagraph_contract.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c1c1c444e52f85dd9b0c84ae7283cc3b4bb50c1d
+--- /dev/null
++++ b/tests/v1/spec_decode/test_dspark_cudagraph_contract.py
+@@ -0,0 +1,43 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++import torch
++
++from vllm.config.compilation import CUDAGraphMode
++from vllm.v1.worker.gpu.spec_decode.dspark.speculator import DSparkSpeculator
++
++
++def test_dspark_generate_draft_accepts_dflash_capture_contract():
++    head_hidden = torch.randn(10, 8)
++    speculator = SimpleNamespace(
++        num_query_per_req=5,
++        capacity_activation_batch_size=1,
++        _speculative_steps_for_query_len=Mock(return_value=5),
++        _run_model=Mock(return_value=head_hidden),
++        _sample_sequential=Mock(),
++    )
++
++    DSparkSpeculator._generate_draft(
++        speculator,
++        num_reqs=2,
++        num_tokens_padded=10,
++        attn_metadata=None,
++        slot_mappings=None,
++        num_tokens_across_dp=None,
++        cudagraph_runtime_mode=CUDAGraphMode.FULL,
++        is_profile=True,
++        num_query_per_req=5,
++        capture_only=True,
++    )
++
++    speculator._sample_sequential.assert_called_once_with(
++        2,
++        head_hidden,
++        5,
++        5,
++        is_profile=True,
++        use_capacity=True,
++    )
+diff --git a/tests/v1/worker/test_cp_utils.py b/tests/v1/worker/test_cp_utils.py
+index 186d49a038c2bbb8e481c037d9e4757fc038efed..ddcf0c171dcab4a7d00d0ed1cf2fcba130c68c1b 100644
+--- a/tests/v1/worker/test_cp_utils.py
++++ b/tests/v1/worker/test_cp_utils.py
+@@ -94,3 +94,34 @@ def test_check_attention_cp_compatibility_rejects_no_lse_return(monkeypatch):
+ 
+     with pytest.raises(AssertionError, match="requires attention implementations"):
+         cp_utils.check_attention_cp_compatibility(_make_config(dcp_size=2))
++
++
++def test_replicated_kv_group_executes_attention_as_dcp1(monkeypatch):
++    """A complete per-rank KV copy must not enter DCP attention collectives."""
++    impl = SimpleNamespace(
++        can_return_lse_for_decode=True,
++        dcp_world_size=16,
++        dcp_rank=7,
++        total_cp_world_size=16,
++        total_cp_rank=7,
++        need_to_return_lse_for_decode=True,
++        supports_pcp=False,
++    )
++    layer = SimpleNamespace(
++        impl=impl,
++        get_kv_cache_spec=lambda _config: SimpleNamespace(dcp_replicated=True),
++    )
++
++    monkeypatch.setattr(
++        cp_utils,
++        "get_layers_from_vllm_config",
++        lambda vllm_config, layer_type: {"draft.layer": layer},
++    )
++
++    cp_utils.check_attention_cp_compatibility(_make_config(dcp_size=16))
++
++    assert impl.dcp_world_size == 1
++    assert impl.dcp_rank == 0
++    assert impl.total_cp_world_size == 1
++    assert impl.total_cp_rank == 0
++    assert impl.need_to_return_lse_for_decode is False
+diff --git a/tests/v1/worker/test_gpu_sampler_flags.py b/tests/v1/worker/test_gpu_sampler_flags.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3fd1cb3b3c681fddb66c9bb03b85201a38face3f
+--- /dev/null
++++ b/tests/v1/worker/test_gpu_sampler_flags.py
+@@ -0,0 +1,90 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import numpy as np
++import pytest
++import torch
++
++pytest.importorskip("triton")
++if not torch.cuda.is_available():
++    pytest.skip("CUDA required for sampler flag tests", allow_module_level=True)
++
++from vllm.sampling_params import SamplingParams
++from vllm.v1.worker.gpu.sample.sampler import Sampler
++from vllm.v1.worker.gpu.states import RequestState
++
++DEVICE = torch.device("cuda")
++VOCAB_SIZE = 128
++
++
++class MockReasoningConfig:
++    reasoning_start_token_ids = [90]
++    reasoning_end_token_ids = [91]
++    natural_reasoning_end_token_ids = [91]
++
++
++def _make_sampler() -> Sampler:
++    req_states = RequestState(
++        max_num_reqs=4,
++        max_model_len=64,
++        max_num_batched_tokens=16,
++        num_speculative_steps=1,
++        vocab_size=VOCAB_SIZE,
++        device=DEVICE,
++    )
++    return Sampler(
++        max_num_reqs=4,
++        vocab_size=VOCAB_SIZE,
++        device=DEVICE,
++        req_states=req_states,
++        reasoning_config=MockReasoningConfig(),
++    )
++
++
++@pytest.mark.parametrize(
++    ("sampling_params", "expected"),
++    [
++        pytest.param(SamplingParams(), False, id="defaults"),
++        pytest.param(SamplingParams(temperature=0.0), False, id="greedy"),
++        pytest.param(
++            SamplingParams(thinking_token_budget=3), True, id="thinking-budget"
++        ),
++        pytest.param(SamplingParams(logit_bias={1: 1.0}), True, id="logit-bias"),
++        pytest.param(SamplingParams(frequency_penalty=0.1), True, id="penalty"),
++        pytest.param(SamplingParams(_bad_words_token_ids=[[1]]), True, id="bad-words"),
++        pytest.param(SamplingParams(temperature=0.7), True, id="temperature"),
++        pytest.param(SamplingParams(min_p=0.1), True, id="min-p"),
++        pytest.param(SamplingParams(top_k=10), True, id="top-k"),
++        pytest.param(SamplingParams(top_p=0.9), True, id="top-p"),
++        pytest.param(
++            SamplingParams.for_sampler_warmup(), True, id="all-logits-processors"
++        ),
++    ],
++)
++def test_logits_processing_cache_matches_request_features(
++    sampling_params: SamplingParams, expected: bool
++):
++    sampler = _make_sampler()
++    sampler.add_request(3, prompt_len=1, sampling_params=sampling_params)
++
++    assert sampler.needs_logits_processing[3] == expected
++
++
++def test_logits_processing_cache_is_overwritten_when_slot_is_reused():
++    sampler = _make_sampler()
++    sampler.add_request(3, 1, SamplingParams.for_sampler_warmup())
++    sampler.add_request(3, 1, SamplingParams())
++
++    assert not sampler.needs_logits_processing[3]
++
++
++def test_logits_processing_cache_only_checks_active_requests():
++    sampler = _make_sampler()
++    sampler.add_request(0, 1, SamplingParams(temperature=0.0))
++    sampler.add_request(2, 1, SamplingParams.for_sampler_warmup())
++
++    sampling_only = np.array([0], dtype=np.int32)
++    with_processing = np.array([0, 2], dtype=np.int32)
++
++    assert not np.any(sampler.needs_logits_processing[sampling_only])
++    assert np.any(sampler.needs_logits_processing[with_processing])
+diff --git a/tests/v1/worker/test_gpu_thinking_budget.py b/tests/v1/worker/test_gpu_thinking_budget.py
+index 0b0f19f7dbf0129a0273b5fcf143a0a04e684b40..2bc697b0843834dbe09109e0ec5fb37cf96a5de9 100644
+--- a/tests/v1/worker/test_gpu_thinking_budget.py
++++ b/tests/v1/worker/test_gpu_thinking_budget.py
+@@ -12,6 +12,7 @@ if not torch.cuda.is_available():
+     )
+ 
+ from vllm.sampling_params import SamplingParams
++from vllm.v1.worker.gpu.sample.sampler import Sampler
+ from vllm.v1.worker.gpu.sample.thinking_budget import ThinkingBudgetState
+ from vllm.v1.worker.gpu.states import RequestState
+ 
+@@ -185,6 +186,44 @@ def test_v2_thinking_budget_ignores_plain_request():
+     assert torch.all(out == 0)
+ 
+ 
++def test_v2_greedy_sampling_applies_thinking_budget():
++    """Greedy-only requests must not bypass thinking-budget processing."""
++    req_states = _make_req_states([1, START, 10, 11, 12], prompt_len=1)
++    sampler = Sampler(
++        max_num_reqs=4,
++        vocab_size=VOCAB_SIZE,
++        device=DEVICE,
++        req_states=req_states,
++        reasoning_config=MockReasoningConfig(),
++    )
++    sampler.add_request(
++        req_idx=3,
++        prompt_len=1,
++        sampling_params=SamplingParams(
++            temperature=0.0,
++            thinking_token_budget=3,
++        ),
++    )
++    sampler.apply_staged_writes()
++
++    idx_mapping = torch.tensor([3], dtype=torch.int32, device=DEVICE)
++    idx_mapping_np = idx_mapping.cpu().numpy()
++    expanded_idx_mapping = idx_mapping.clone()
++    input_ids = torch.tensor([12], dtype=torch.int32, device=DEVICE)
++    logits = torch.zeros((1, VOCAB_SIZE), device=DEVICE)
++    out = sampler.apply_sampling_params(
++        logits,
++        expanded_idx_mapping,
++        idx_mapping,
++        idx_mapping_np,
++        torch.tensor([4], dtype=torch.int32, device=DEVICE),
++        input_ids,
++        torch.tensor([0], dtype=torch.int32, device=DEVICE),
++    )
++
++    assert out[0, END].item() == pytest.approx(1.0e9)
++
++
+ def test_v2_thinking_budget_latest_prefill_end_disables_forcing():
+     req_states = _make_req_states(
+         [1, START, 10, 11, 12, END, 13],
+diff --git a/vllm/model_executor/models/qwen3_dflash.py b/vllm/model_executor/models/qwen3_dflash.py
+index 58c59fcbb5cbf653760dd8a543ea3d3226db41b6..929beae39207a8e6c31f95eef65eb85fbfe79459 100644
+--- a/vllm/model_executor/models/qwen3_dflash.py
++++ b/vllm/model_executor/models/qwen3_dflash.py
+@@ -86,6 +86,33 @@ def dflash_has_any_non_causal(config: Qwen3Config) -> bool:
+     )
+ 
+ 
++def dflash_target_rope_is_neox_style(target_model: nn.Module) -> bool | None:
++    """Return the target model's rotary-embedding layout when it is exposed.
++
++    A DFlash-family draft must rotate query and key tensors with the same
++    dimension layout as the target model used during hidden-state extraction.
++    Draft checkpoints do not encode this property. A mismatch changes every
++    drafted attention result without raising an error and collapses token
++    acceptance.
++
++    Args:
++        target_model: Target model that can expose rotary layout modules.
++
++    Returns:
++        The exposed NeoX rotary-layout setting, or ``None`` when unavailable.
++    """
++    language_model = (
++        target_model.get_language_model()
++        if hasattr(target_model, "get_language_model")
++        else target_model
++    )
++    for module in language_model.modules():
++        style = getattr(module, "is_neox_style", None)
++        if isinstance(style, bool):
++            return style
++    return None
++
++
+ def _get_dflash_fc_input_size(vllm_config: VllmConfig) -> int:
+     spec_config = vllm_config.speculative_config
+     config = spec_config.draft_model_config.hf_config
+@@ -216,6 +243,7 @@ class DFlashQwen3Attention(nn.Module):
+         add_swa_attention_sink_bias: bool = False,
+         sliding_window: int | None = None,
+         causal: bool = False,
++        is_neox_style: bool = True,
+         cache_config: CacheConfig | None = None,
+         quant_config: QuantizationConfig | None = None,
+         prefix: str = "",
+@@ -259,6 +287,7 @@ class DFlashQwen3Attention(nn.Module):
+         self.rotary_emb = get_rope(
+             self.head_dim,
+             max_position=max_position,
++            is_neox_style=is_neox_style,
+             rope_parameters=rope_parameters,
+         )
+ 
+@@ -342,6 +371,12 @@ class DFlashQwen3DecoderLayer(nn.Module):
+         # non-causal) from the draft config.
+         sliding_window, causal = _resolve_layer_attention(config, layer_idx)
+ 
++        # The loader copies this value from the built target model. Kimi-K3
++        # uses interleaved rotary dimensions while Qwen3 defaults to NeoX
++        # rotary dimensions, so relying on the Qwen3 default is not valid for
++        # a Kimi-trained DFlash-family checkpoint.
++        is_neox_style = getattr(config, "is_neox_style", True)
++
+         self.self_attn = DFlashQwen3Attention(
+             hidden_size=self.hidden_size,
+             num_heads=config.num_attention_heads,
+@@ -352,6 +387,7 @@ class DFlashQwen3DecoderLayer(nn.Module):
+             add_swa_attention_sink_bias=add_swa_attention_sink_bias,
+             sliding_window=sliding_window,
+             causal=causal,
++            is_neox_style=is_neox_style,
+             head_dim=getattr(config, "head_dim", None),
+             cache_config=cache_config,
+             quant_config=quant_config,
+diff --git a/vllm/model_executor/warmup/kimi_k3_triton_warmup.py b/vllm/model_executor/warmup/kimi_k3_triton_warmup.py
+index 257c8a8bceadca0b59c300408c1b51d91c239f30..83162b5d3591fce9bf78d5aa6a26a022dd8df913 100644
+--- a/vllm/model_executor/warmup/kimi_k3_triton_warmup.py
++++ b/vllm/model_executor/warmup/kimi_k3_triton_warmup.py
+@@ -18,6 +18,34 @@ if TYPE_CHECKING:
+ logger = init_logger(__name__)
+ 
+ 
++def _warm_vision_position_interpolation(model: torch.nn.Module) -> int:
++    """Compile Kimi vision interpolation before KV-cache allocation.
++
++    Args:
++        model: Loaded model whose module tree may contain Kimi vision position
++            embeddings.
++
++    Returns:
++        Number of Kimi vision interpolation modules invoked.
++    """
++    from vllm.model_executor.models.kimi_k25_vit import (
++        Learnable2DInterpPosEmbDivided_fixed,
++        get_rope_shape,
++    )
++
++    warmed = 0
++    for module in model.modules():
++        if not isinstance(module, Learnable2DInterpPosEmbDivided_fixed):
++            continue
++        get_rope_shape(
++            module.weight,
++            interpolation_mode=module.interpolation_mode,
++            shape=(64, 64),
++        )
++        warmed += 1
++    return warmed
++
++
+ def _get_kda_layer(worker: Worker) -> KimiK3DeltaAttention | None:
+     from vllm.models.kimi_k3.nvidia.kda import KimiK3DeltaAttention
+ 
+@@ -187,6 +215,15 @@ def kimi_k3_triton_warmup(worker: Worker) -> None:
+     if not current_platform.is_cuda():
+         return
+ 
++    warmed_vision_interpolators = _warm_vision_position_interpolation(
++        worker.get_model()
++    )
++    if warmed_vision_interpolators:
++        logger.info(
++            "Warmed up %d Kimi vision position interpolator(s).",
++            warmed_vision_interpolators,
++        )
++
+     layer = _get_kda_layer(worker)
+     if layer is None:
+         return
+diff --git a/vllm/parser/kimi_k3.py b/vllm/parser/kimi_k3.py
+index 380e2cce5f91182fda7f95469d40d9af07a2746d..e3f58d25f4d7b76598f448d358b10709336d998a 100644
+--- a/vllm/parser/kimi_k3.py
++++ b/vllm/parser/kimi_k3.py
+@@ -12,6 +12,7 @@ from vllm.entrypoints.openai.engine.protocol import (
+ )
+ from vllm.parser.abstract_parser import DelegatingParser
+ from vllm.reasoning.kimi_k3_reasoning_parser import KimiK3ReasoningParser
++from vllm.tool_parsers.utils import partial_tag_overlap
+ 
+ if TYPE_CHECKING:
+     from vllm.entrypoints.openai.chat_completion.protocol import (
+@@ -23,6 +24,45 @@ if TYPE_CHECKING:
+ class KimiK3Parser(DelegatingParser):
+     """Compose the Kimi K3 reasoning and tool parsers for XTML output."""
+ 
++    _CONTENT_PROTOCOL_MARKERS = (
++        "<|open|>think<|sep|>",
++        "<|close|>think<|sep|>",
++        "<|open|>response<|sep|>",
++        "<|close|>response<|sep|>",
++        "<|close|>message<|sep|>",
++    )
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self._pending_content_protocol = ""
++
++    def _strip_content_protocol(
++        self, content: str | None, *, finished: bool
++    ) -> str | None:
++        """Remove Kimi XTML control markers from streamed API content.
++
++        Reasoning and tool parsers normally consume these markers before this
++        method runs. The final filter preserves the API invariant when a
++        malformed model transition or an inconsistent initial parser phase
++        routes a marker through the content field. Marker prefixes are held
++        across stream chunks so partial control tokens are never exposed.
++        """
++        pending = self._pending_content_protocol + (content or "")
++        for marker in self._CONTENT_PROTOCOL_MARKERS:
++            pending = pending.replace(marker, "")
++
++        overlap = max(
++            partial_tag_overlap(pending, marker)
++            for marker in self._CONTENT_PROTOCOL_MARKERS
++        )
++        if overlap:
++            emitted = pending[:-overlap]
++            self._pending_content_protocol = "" if finished else pending[-overlap:]
++        else:
++            emitted = pending
++            self._pending_content_protocol = ""
++        return emitted or None
++
+     # TODO: Switch Kimi K3 to the parser engine once its XTML reasoning/tool
+     # path is covered there.
+     def _extract_tool_calls(
+@@ -113,18 +153,25 @@ class KimiK3Parser(DelegatingParser):
+         )
+ 
+         if (
+-            self._tool_parser is not None
+-            or not isinstance(self._reasoning_parser, KimiK3ReasoningParser)
+-            or not state.reasoning_ended
+-            or delta_message is None
++            delta_message is not None
++            and self._tool_parser is None
++            and isinstance(self._reasoning_parser, KimiK3ReasoningParser)
++            and state.reasoning_ended
+         ):
+-            return delta_message
++            stripped = self._reasoning_parser.strip_content_streaming(
++                previous_text=previous_content,
++                current_text=state.previous_text,
++            )
++            delta_message.content = stripped.content if stripped is not None else None
++
++        if delta_message is None:
++            if finished:
++                self._pending_content_protocol = ""
++            return None
+ 
+-        stripped = self._reasoning_parser.strip_content_streaming(
+-            previous_text=previous_content,
+-            current_text=state.previous_text,
++        delta_message.content = self._strip_content_protocol(
++            delta_message.content, finished=finished
+         )
+-        delta_message.content = stripped.content if stripped is not None else None
+         if (
+             delta_message.role is None
+             and delta_message.content is None
+diff --git a/vllm/reasoning/kimi_k3_reasoning_parser.py b/vllm/reasoning/kimi_k3_reasoning_parser.py
+index f05d5c044805c4111cd49e9aeebc07aa5a15c518..d170652a20e8f1253099c8e78e0aec9bc41e501c 100644
+--- a/vllm/reasoning/kimi_k3_reasoning_parser.py
++++ b/vllm/reasoning/kimi_k3_reasoning_parser.py
+@@ -95,6 +95,9 @@ class KimiK3ReasoningParser(ReasoningParser):
+         if thinking is None:
+             thinking = chat_kwargs.get("enable_thinking", True)
+         self._thinking_enabled = bool(thinking)
++        self._starts_new_assistant_message = bool(
++            chat_kwargs.get("add_generation_prompt", True)
++        ) and not bool(chat_kwargs.get("continue_final_message", False))
+ 
+         # XTML markers as literal strings (skip_special_tokens=False at serve time)
+         self._think_open = "<|open|>think<|sep|>"
+@@ -145,6 +148,11 @@ class KimiK3ReasoningParser(ReasoningParser):
+     def reasoning_end_str(self) -> str | None:
+         return self._think_close
+ 
++    @property
++    def thinking_enabled(self) -> bool:
++        """Whether the request opens a Kimi K3 reasoning channel."""
++        return self._thinking_enabled
++
+     def adjust_request(
+         self,
+         request: "ChatCompletionRequest | ResponsesRequest",
+@@ -170,6 +178,24 @@ class KimiK3ReasoningParser(ReasoningParser):
+             _newest_marker(input_ids, self._think_close_ids, self._think_open_ids) == 0
+         )
+ 
++    def is_reasoning_end_for_prompt(self, input_ids: Sequence[int]) -> bool:
++        """Return the reasoning phase at the generation boundary.
++
++        A fresh Kimi K3 assistant message starts in the think channel whenever
++        thinking is enabled. That request contract is authoritative even when
++        the token list exposed to the output parser does not contain the
++        generation-prefix marker; closed think channels from historical turns
++        cannot determine the phase of a fresh assistant message.
++
++        ``continue_final_message`` does not open a fresh channel, so its prompt
++        markers remain authoritative.
++        """
++        if not self._thinking_enabled:
++            return True
++        if self._starts_new_assistant_message:
++            return False
++        return self.is_reasoning_end(input_ids)
++
+     def is_reasoning_end_streaming(
+         self, input_ids: Sequence[int], delta_ids: Iterable[int]
+     ) -> bool:
+diff --git a/vllm/tool_parsers/kimi_k3_tool_parser.py b/vllm/tool_parsers/kimi_k3_tool_parser.py
+index 9f688f2270e4733fe143781b12edfc4437ca8bdc..e1fc5a156996453515a9467c62189db773aaa4f7 100644
+--- a/vllm/tool_parsers/kimi_k3_tool_parser.py
++++ b/vllm/tool_parsers/kimi_k3_tool_parser.py
+@@ -37,6 +37,7 @@ from collections.abc import Sequence
+ import regex as re
+ from openai.types.responses import ToolChoiceFunction
+ 
++from vllm.entrypoints.chat_utils import make_tool_call_id
+ from vllm.entrypoints.openai.chat_completion.protocol import (
+     ChatCompletionNamedToolChoiceParam,
+     ChatCompletionRequest,
+@@ -69,6 +70,25 @@ def _partial_tag_overlap(text: str, tag: str) -> int:
+     return 0
+ 
+ 
++def _partial_pattern_overlap(text: str, pattern: re.Pattern) -> int:
++    """Return a trailing prefix accepted by a partial regular expression.
++
++    Args:
++        text: Generated text that may end inside a structural marker.
++        pattern: Complete structural-marker expression.
++
++    Returns:
++        The number of trailing characters that form an incomplete match.
++    """
++    candidate = text.rfind("<")
++    while candidate >= 0:
++        match = pattern.fullmatch(text[candidate:], partial=True)
++        if match is not None and match.partial:
++            return len(text) - candidate
++        candidate = text.rfind("<", 0, candidate)
++    return 0
++
++
+ class KimiK3ToolParser(ToolParser):
+     supports_required_and_named = False
+     # Enables the vLLM-side XTML structural tag builder
+@@ -86,6 +106,7 @@ class KimiK3ToolParser(ToolParser):
+         self.tools_close = "<|close|>tools<|sep|>"
+         self.response_open = "<|open|>response<|sep|>"
+         self.response_close = "<|close|>response<|sep|>"
++        self.argument_close = "<|close|>argument<|sep|>"
+ 
+         # Regexes operate on detokenized text. The XTML markers reach us as the
+         # literal strings <|open|>/<|close|>/<|sep|>. adjust_request keeps them
+@@ -127,6 +148,16 @@ class KimiK3ToolParser(ToolParser):
+             + _S,
+             re.DOTALL,
+         )
++        # Half-open variants: streaming needs to see a call/argument as soon as
++        # its opening marker lands, before the matching close marker exists.
++        self._call_open_re = re.compile(
++            _O + r"\s*call\s+(?P<attrs>" + _TEXT_UNTIL_SEP + r")" + _S
++        )
++        self._call_close_re = re.compile(_C + r"\s*call\s*" + _S)
++        self._arg_open_re = re.compile(
++            _O + r"\s*argument\s+(?P<attrs>" + _TEXT_UNTIL_SEP + r")" + _S
++        )
++        self._arg_close_re = re.compile(_C + r"\s*argument\s*" + _S)
+         # attr segment: key="value" (value already escaped on the encode side)
+         self._attr_re = re.compile(r'(?P<k>\w+)="(?P<v>[^"]*)"')
+         self._response_re = re.compile(
+@@ -136,7 +167,8 @@ class KimiK3ToolParser(ToolParser):
+ 
+         # streaming state
+         self._sent_content_idx = 0
+-        self._sent_tool_call_count = 0
++        # arguments already streamed, per tool-call index
++        self._streamed_args: list[str] = []
+ 
+         if not self.model_tokenizer:
+             raise ValueError(
+@@ -218,6 +250,17 @@ class KimiK3ToolParser(ToolParser):
+         """
+         call_attrs = self._attrs(attrs)
+         tool_name = call_attrs.get("tool", "")
++        if not tool_name:
++            return None
++        return ToolCall(
++            type="function",
++            function=FunctionCall(
++                name=tool_name,
++                arguments=json.dumps(self._decode_arguments(body), ensure_ascii=False),
++            ),
++        )
++
++    def _decode_arguments(self, body: str) -> dict:
+         arguments: dict = {}
+         for arg_match in self._arg_re.finditer(body):
+             arg_attrs = self._attrs(arg_match["attrs"])
+@@ -231,15 +274,37 @@ class KimiK3ToolParser(ToolParser):
+                     arguments[key] = json.loads(raw_value)
+                 except json.JSONDecodeError:
+                     arguments[key] = raw_value
+-        if not tool_name:
+-            return None
+-        return ToolCall(
+-            type="function",
+-            function=FunctionCall(
+-                name=tool_name,
+-                arguments=json.dumps(arguments, ensure_ascii=False),
+-            ),
+-        )
++        return arguments
++
++    def _partial_arguments(self, body: str) -> str:
++        """Serialize the arguments of a ``call`` block that has not closed yet.
++
++        Args:
++            body: The incomplete XTML call body.
++
++        Returns:
++            A prefix of the completed call's JSON arguments. String values can
++            stream as generated. Other argument types remain buffered until
++            their complete JSON literal is available.
++        """
++        closed_end = 0
++        for arg_match in self._arg_re.finditer(body):
++            closed_end = arg_match.end()
++        arguments = self._decode_arguments(body[:closed_end])
++
++        m_open = self._arg_open_re.search(body, closed_end)
++        if m_open is None:
++            # drop the closing "}" of the object
++            return json.dumps(arguments, ensure_ascii=False)[:-1]
++
++        arg_attrs = self._attrs(m_open["attrs"])
++        if arg_attrs.get("type", "string") != "string":
++            return json.dumps(arguments, ensure_ascii=False)[:-1]
++        raw_value = body[m_open.end() :]
++        held = _partial_pattern_overlap(raw_value, self._arg_close_re)
++        arguments[arg_attrs.get("key", "")] = raw_value[: len(raw_value) - held]
++        # drop the closing quote of the open value and the "}" of the object
++        return json.dumps(arguments, ensure_ascii=False)[:-2]
+ 
+     def _strip_response_content(self, text: str) -> str | None:
+         """Strip XTML response/message markers from generated response text.
+@@ -361,35 +426,66 @@ class KimiK3ToolParser(ToolParser):
+         delta_token_ids: Sequence[int],
+         request: ChatCompletionRequest,
+     ) -> DeltaMessage | None:
+-        # Conservative streaming: stream unwrapped response-channel text, then
+-        # buffer tool calls and emit each call once its block closes.
++        # Stream unwrapped response-channel text, then stream each tool call as
++        # it is generated: the open marker carries the name, and argument text
++        # is forwarded as it arrives rather than buffered until the call closes.
+         content = self._extract_response_content(current_text)
+ 
+-        # tools channel is open: parse fully-closed calls we have not emitted yet
+         m_tools = self._tools_open_re.search(current_text)
+         if m_tools is None:
+             return DeltaMessage(content=content) if content else None
+ 
+-        section = current_text[m_tools.end() :]
+-        calls = [
+-            tc
+-            for m in self._call_re.finditer(section)
+-            if (tc := self._decode_call(m["attrs"], m["body"])) is not None
+-        ]
+-        if len(calls) <= self._sent_tool_call_count:
+-            return DeltaMessage(content=content) if content else None
+-        new = calls[self._sent_tool_call_count :]
+-
+-        deltas = [
+-            DeltaToolCall(
+-                index=self._sent_tool_call_count + i,
+-                id=tc.id,
+-                type="function",
+-                function=DeltaFunctionCall(
+-                    name=tc.function.name, arguments=tc.function.arguments
+-                ).model_dump(exclude_none=True),
++        section_start = m_tools.end()
++        m_tools_close = self._tools_close_re.search(current_text, section_start)
++        section = current_text[
++            section_start : (
++                len(current_text) if m_tools_close is None else m_tools_close.start()
+             )
+-            for i, tc in enumerate(new)
+         ]
+-        self._sent_tool_call_count = len(calls)
++        opens = list(self._call_open_re.finditer(section))
++        deltas: list[DeltaToolCall] = []
++        index = 0
++        for i, m_open in enumerate(opens):
++            end = opens[i + 1].start() if i + 1 < len(opens) else len(section)
++            body = section[m_open.end() : end]
++            name = self._attrs(m_open["attrs"]).get("tool", "")
++            if not name:
++                # an empty/garbage block is dropped, as in _decode_call
++                continue
++            m_close = self._call_close_re.search(body)
++            if m_close is None:
++                arguments = self._partial_arguments(body)
++            else:
++                arguments = json.dumps(
++                    self._decode_arguments(body[: m_close.start()]), ensure_ascii=False
++                )
++
++            if index == len(self._streamed_args):
++                self._streamed_args.append(arguments)
++                deltas.append(
++                    DeltaToolCall(
++                        index=index,
++                        id=make_tool_call_id(),
++                        type="function",
++                        function=DeltaFunctionCall(
++                            name=name, arguments=arguments
++                        ).model_dump(exclude_none=True),
++                    )
++                )
++            else:
++                sent = self._streamed_args[index]
++                if arguments != sent and arguments.startswith(sent):
++                    self._streamed_args[index] = arguments
++                    deltas.append(
++                        DeltaToolCall(
++                            index=index,
++                            function=DeltaFunctionCall(
++                                arguments=arguments[len(sent) :]
++                            ).model_dump(exclude_none=True),
++                        )
++                    )
++            index += 1
++
++        if not deltas:
++            return DeltaMessage(content=content) if content else None
+         return DeltaMessage(content=content, tool_calls=deltas)
+diff --git a/vllm/v1/attention/backends/flash_attn.py b/vllm/v1/attention/backends/flash_attn.py
+index 97f30736fda34bd38df5e06fcb44dd6235253a98..a8444f7bbb7bd3895a8273cbd64ec02ca979f948 100755
+--- a/vllm/v1/attention/backends/flash_attn.py
++++ b/vllm/v1/attention/backends/flash_attn.py
+@@ -395,15 +395,20 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
+         self.max_num_splits = 0  # No upper bound on the number of splits.
+         self.aot_schedule = get_flash_attn_version() == 3
+ 
+-        try:
+-            from vllm.distributed.parallel_state import get_dcp_group
+-
+-            self.dcp_world_size = get_dcp_group().world_size
+-            self.dcp_rank = get_dcp_group().rank_in_group
+-        except AssertionError:
+-            # DCP might not be initialized in testing
++        # A DCP-replicated KV group stores the complete sequence on every
++        # rank. Build ordinary local-attention metadata for that group instead
++        # of partitioning its sequence lengths for a second time.
++        if getattr(kv_cache_spec, "dcp_replicated", False):
+             self.dcp_world_size = 1
+             self.dcp_rank = 0
++        else:
++            try:
++                self.dcp_world_size = get_dcp_group().world_size
++                self.dcp_rank = get_dcp_group().rank_in_group
++            except AssertionError:
++                # DCP might not be initialized in testing
++                self.dcp_world_size = 1
++                self.dcp_rank = 0
+ 
+         self.cp_kv_cache_interleave_size = (
+             self.parallel_config.cp_kv_cache_interleave_size
+diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
+index ae08df9c35b2f6694109452b53d79c0d237bb244..dcb2cd1a5fe1459bd8b5eb276f4ab0c5ac61aec0 100644
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -2914,50 +2914,73 @@ class Scheduler(SchedulerInterface):
+             is_affected = False
+             marked_invalid_block = False
+             req_id = request.request_id
+-            # TODO (davidb): add support for hybrid memory allocator
+-            (req_block_ids,) = self.kv_cache_manager.get_block_ids(req_id)
+-            # We iterate only over blocks that may contain externally computed
+-            # tokens
++            req_block_ids_by_group = self.kv_cache_manager.get_block_ids(req_id)
++            # We iterate only over blocks that may contain externally
++            # computed tokens.
+             req_num_computed_tokens = (
+                 request.num_computed_tokens - num_scheduled_tokens.get(req_id, 0)
+             )
++            computed_block_ids_by_group = (
++                self.kv_cache_manager.get_block_ids_for_computed_tokens(
++                    req_id,
++                    req_num_computed_tokens,
++                )
++            )
+ 
+-            req_num_computed_blocks = (
+-                req_num_computed_tokens + self.block_size - 1
+-            ) // self.block_size
+-            for idx, block_id in zip(range(req_num_computed_blocks), req_block_ids):
+-                if block_id not in invalid_block_ids:
+-                    continue
+-
+-                is_affected = True
+-
+-                if block_id in marked_invalid_block_ids:
+-                    # This invalid block is shared with a previous request
+-                    # and was already marked for recomputation.
+-                    # This means this request can still consider this block
+-                    # as computed when rescheduled.
+-                    # Currently this only applies to sync loading; Async
+-                    # loading does not yet support block sharing
+-                    continue
+-
+-                marked_invalid_block_ids.add(block_id)
++            # Map each invalid block to the earliest scheduler-aligned token
++            # boundary from which this request must be recomputed.
++            invalid_block_boundaries: dict[int, int] = {}
++            for group, group_block_ids in zip(
++                self.kv_cache_config.kv_cache_groups,
++                computed_block_ids_by_group,
++                strict=True,
++            ):
++                group_block_size = group.kv_cache_spec.block_size
++                for block_idx, block_id in enumerate(group_block_ids):
++                    if block_id not in invalid_block_ids:
++                        continue
+ 
+-                if marked_invalid_block:
+-                    # This request has already marked an invalid block for
+-                    # recomputation and updated its num_computed_tokens.
+-                    continue
++                    block_start = block_idx * group_block_size
++                    recompute_from = block_start // self.block_size * self.block_size
++                    previous_boundary = invalid_block_boundaries.get(block_id)
++                    invalid_block_boundaries[block_id] = (
++                        recompute_from
++                        if previous_boundary is None
++                        else min(previous_boundary, recompute_from)
++                    )
+ 
+-                marked_invalid_block = True
+-                # Truncate the computed tokens at the first failed block
+-                request.num_computed_tokens = idx * self.block_size
+-                num_affected_tokens = (
+-                    req_num_computed_tokens - request.num_computed_tokens
++            if invalid_block_boundaries:
++                is_affected = True
++                new_invalid_block_ids = (
++                    invalid_block_boundaries.keys() - marked_invalid_block_ids
+                 )
+-                total_affected_tokens += num_affected_tokens
++                marked_invalid_block_ids.update(new_invalid_block_ids)
+ 
+-                # collect invalid block and all downstream dependent blocks
+-                if evict_blocks:
+-                    blocks_to_evict.update(req_block_ids[idx:])
++                if new_invalid_block_ids:
++                    marked_invalid_block = True
++                    request.num_computed_tokens = min(
++                        invalid_block_boundaries[block_id]
++                        for block_id in new_invalid_block_ids
++                    )
++                    num_affected_tokens = (
++                        req_num_computed_tokens - request.num_computed_tokens
++                    )
++                    total_affected_tokens += num_affected_tokens
++
++                    # Every KV group after the common recomputation boundary
++                    # depends on the failed prefix, so collect downstream
++                    # blocks from all groups.
++                    if evict_blocks:
++                        for group, group_block_ids in zip(
++                            self.kv_cache_config.kv_cache_groups,
++                            req_block_ids_by_group,
++                            strict=True,
++                        ):
++                            group_block_size = group.kv_cache_spec.block_size
++                            first_block_idx = (
++                                request.num_computed_tokens // group_block_size
++                            )
++                            blocks_to_evict.update(group_block_ids[first_block_idx:])
+ 
+             if is_affected:
+                 if not marked_invalid_block:
+diff --git a/vllm/v1/core/single_type_kv_cache_manager.py b/vllm/v1/core/single_type_kv_cache_manager.py
+index a334a8dde9da0a52cd18bf4b156506477d1656ed..686cae8257e609619943c4328d0e8690c8e4bd30 100644
+--- a/vllm/v1/core/single_type_kv_cache_manager.py
++++ b/vllm/v1/core/single_type_kv_cache_manager.py
+@@ -1597,6 +1597,7 @@ class MambaManager(SingleTypeKVCacheManager):
+             # `num_required_blocks` might be less than `len(req_blocks)` if blocks are
+             # over-allocated at last round.
+             if num_required_blocks <= len(req_blocks) and not has_partial_hit:
++                self._allocated_block_reqs.add(request_id)
+                 return []
+             else:
+                 prev_block_len = len(req_blocks)
+diff --git a/vllm/v1/kv_cache_interface.py b/vllm/v1/kv_cache_interface.py
+index 14f238b4c735810f7e3d69dfc1e5c9fe7984dfc1..a69a5183f73ddb14100f627075f42c11b796e509 100644
+--- a/vllm/v1/kv_cache_interface.py
++++ b/vllm/v1/kv_cache_interface.py
+@@ -404,6 +404,13 @@ def get_kv_cache_dcp_shard_count(
+             f"Configured decode-context-parallel size must be positive: "
+             f"{configured_dcp}"
+         )
++    # Recurrent state has one token-position shard across the DCP group. Its
++    # feature dimensions may still be partitioned by TP. MambaManager therefore
++    # uses the unscaled Mamba block size; reporting multiple position shards
++    # here would make worker block tables too narrow for their absolute sparse
++    # indices and route state writes through out-of-bounds block IDs.
++    if isinstance(spec, MambaSpec):
++        return 1
+     replicated = bool(getattr(spec, "dcp_replicated", False))
+     override = getattr(spec, "dcp_kv_shard_count", None)
+     if replicated:
+diff --git a/vllm/v1/worker/cp_utils.py b/vllm/v1/worker/cp_utils.py
+index 243d8f19052c1a432218cfd97ecf472df643932c..f6725cba470cfc00de60ee1f7b19d6e8fbd60333 100644
+--- a/vllm/v1/worker/cp_utils.py
++++ b/vllm/v1/worker/cp_utils.py
+@@ -47,6 +47,15 @@ def check_attention_cp_compatibility(vllm_config: VllmConfig) -> None:
+                 except Exception:
+                     spec = None
+                 if getattr(spec, "dcp_replicated", False):
++                    # A replicated KV group contains the complete sequence on
++                    # every rank. Its attention kernel must therefore execute
++                    # as a local DCP1 operation; applying DCP collectives would
++                    # partition and reduce the same cache a second time.
++                    layer_impl.dcp_world_size = 1
++                    layer_impl.dcp_rank = 0
++                    layer_impl.total_cp_world_size = 1
++                    layer_impl.total_cp_rank = 0
++                    layer_impl.need_to_return_lse_for_decode = False
+                     continue
+             if vllm_config.speculative_config is not None and interleave_size > 1:
+                 assert layer_impl.supports_mtp_with_cp_non_trivial_interleave_size, (
+diff --git a/vllm/v1/worker/gpu/sample/sampler.py b/vllm/v1/worker/gpu/sample/sampler.py
+index bfea7ca635cbe49b5ff7b26925d1cb84d98d5d5c..557cc8bbae8925bbe8143fad5c496f1ef45675f8 100644
+--- a/vllm/v1/worker/gpu/sample/sampler.py
++++ b/vllm/v1/worker/gpu/sample/sampler.py
+@@ -53,6 +53,7 @@ class Sampler:
+         self.bad_words_state = BadWordsState(req_states)
+         self.logprob_token_ids_state = LogprobTokenIdsState(max_num_reqs, device)
+         self.thinking_budget_state = ThinkingBudgetState(req_states, reasoning_config)
++        self.needs_logits_processing = np.zeros(max_num_reqs, dtype=bool)
+         self.num_speculative_tokens = num_speculative_tokens
+         self.use_flashinfer = flashinfer_sampler_supported()
+ 
+@@ -66,6 +67,22 @@ class Sampler:
+         self.logprob_token_ids_state.add_request(req_idx, sampling_params)
+         self.thinking_budget_state.add_request(req_idx, sampling_params)
+ 
++        states = self.sampling_states
++        temperature = states.temperature.np[req_idx]
++        self.needs_logits_processing[req_idx] = (
++            self.logit_bias_state.use_logit_bias[req_idx]
++            or self.penalties_state.use_penalty[req_idx]
++            or self.bad_words_state.num_bad_words.np[req_idx] > 0
++            or (
++                self.thinking_budget_state.enabled
++                and self.thinking_budget_state.use_thinking_budget[req_idx]
++            )
++            or (temperature != 0.0 and temperature != 1.0)
++            or states.min_p.np[req_idx] != 0.0
++            or states.top_k.np[req_idx] != states.vocab_size
++            or states.top_p.np[req_idx] != 1.0
++        )
++
+     def apply_staged_writes(self) -> None:
+         self.sampling_states.apply_staged_writes()
+         self.penalties_state.apply_staged_writes()
+@@ -162,7 +179,7 @@ class Sampler:
+         expanded_local_pos: torch.Tensor,
+         skip_top_k_top_p: bool = False,
+     ) -> torch.Tensor:
+-        if not self._requires_logits_processing(idx_mapping_np):
++        if not np.any(self.needs_logits_processing[idx_mapping_np]):
+             return logits
+ 
+         # Copy logits to a new FP32 tensor.
+@@ -218,24 +235,6 @@ class Sampler:
+             logits, expanded_idx_mapping, idx_mapping_np
+         )
+ 
+-    def _requires_logits_processing(self, idx_mapping_np: np.ndarray) -> bool:
+-        if np.any(self.logit_bias_state.use_logit_bias[idx_mapping_np]):
+-            return True
+-        if np.any(self.penalties_state.use_penalty[idx_mapping_np]):
+-            return True
+-        if np.any(self.bad_words_state.num_bad_words.np[idx_mapping_np] > 0):
+-            return True
+-
+-        states = self.sampling_states
+-        temperatures = states.temperature.np[idx_mapping_np]
+-        if np.any((temperatures != 0.0) & (temperatures != 1.0)):
+-            return True
+-        if np.any(states.min_p.np[idx_mapping_np] != 0.0):
+-            return True
+-        if np.any(states.top_k.np[idx_mapping_np] != states.vocab_size):
+-            return True
+-        return bool(np.any(states.top_p.np[idx_mapping_np] != 1.0))
+-
+     def sample(
+         self,
+         logits: torch.Tensor,
+diff --git a/vllm/v1/worker/gpu/spec_decode/dflash/utils.py b/vllm/v1/worker/gpu/spec_decode/dflash/utils.py
+index 256f23c42ace86724eccf966eb727e213805855b..a5e643ed10c7bacbeb35086fc1a0db75dadddc06 100644
+--- a/vllm/v1/worker/gpu/spec_decode/dflash/utils.py
++++ b/vllm/v1/worker/gpu/spec_decode/dflash/utils.py
+@@ -81,11 +81,17 @@ def maybe_load_mask_embedding(
+ 
+ def load_dflash_model(target_model: nn.Module, vllm_config: VllmConfig) -> nn.Module:
+     from vllm.compilation.backends import set_model_tag
+-    from vllm.model_executor.models.qwen3_dflash import dflash_has_any_non_causal
++    from vllm.model_executor.models.qwen3_dflash import (
++        dflash_has_any_non_causal,
++        dflash_target_rope_is_neox_style,
++    )
+ 
+     speculative_config = vllm_config.speculative_config
+     assert speculative_config is not None
+     draft_model_config = speculative_config.draft_model_config
++    is_neox_style = dflash_target_rope_is_neox_style(target_model)
++    if is_neox_style is not None:
++        draft_model_config.hf_config.is_neox_style = is_neox_style
+     # Select an attention backend that supports the drafter's attention: mixing
+     # a non-causal layer onto a causal-only backend would fail.
+     draft_vllm_config = replace(
+diff --git a/vllm/v1/worker/gpu/spec_decode/dspark/utils.py b/vllm/v1/worker/gpu/spec_decode/dspark/utils.py
+index cd23ae1bb559fbaf58b773869acaa59d4333d035..f366a0386b90159f1d9f37331e1428389cbae557 100644
+--- a/vllm/v1/worker/gpu/spec_decode/dspark/utils.py
++++ b/vllm/v1/worker/gpu/spec_decode/dspark/utils.py
+@@ -59,7 +59,9 @@ def load_dspark_model(target_model: nn.Module, vllm_config: VllmConfig) -> nn.Mo
+ 
+     with rope_ownership, set_model_tag("dspark_head"):
+         draft_model = get_model(
+-            vllm_config=draft_vllm_config, model_config=draft_model_config
++            vllm_config=draft_vllm_config,
++            model_config=draft_model_config,
++            load_config=speculative_config.draft_load_config,
+         )
+ 
+     if get_pp_group().world_size != 1:
