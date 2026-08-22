@@ -1,0 +1,142 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BASE_IMAGE=voipmonitor/vllm@sha256:ff9d4f2402ed88b1ae7ca3a6886c80a64d72993f1a593380c8cb6f193437567d
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG BASE_IMAGE_ID
+ARG B12X_REPO=https://github.com/local-inference-lab/b12x.git
+ARG B12X_BASE_COMMIT=c25cdba2c1df7a69b2d7771e4243e12a8fbf19d5
+ARG B12X_BASE_TREE=a4a0bc8a8f5e56dbef85f9b46b0d74f6e8edb491
+ARG B12X_PR_COMMIT=1dfe87039951735b39e937e4a1d1bffe25b79e79
+ARG B12X_PR_CHANGED_PATHS_SHA256=bbc89ff67b3846e6bf57d2abe7e412d14168051b6e771c72344d6822c3903624
+ARG B12X_RUNTIME_TREE=28f10076d5df9898d0d68ac41edec0f787c93b57
+ARG B12X_RECONCILIATION_SHA256=249a29c47efb3a1637dbe9dd0923de38f4cbeaee1573dea9a88a00409568a0c3
+ARG VLLM_REPO=https://github.com/local-inference-lab/vllm.git
+ARG VLLM_BASE_COMMIT=d6e0bb7c813264f1293288b9de0d18f277be7c9f
+ARG VLLM_BASE_RUNTIME_TREE=5beffc48f7cd9d4ade076e4b6d1f117ac8e79d4a
+ARG VLLM_PR461_COMMIT=0942707892ca26c5b379fb9a6b88b3f8468a5adc
+ARG VLLM_PR461_CHANGED_PATHS_SHA256=59ae0c411ac0e4c9ef4a99c5ae0648ad97fd7d271f34ff9c217269ac7acc3c2e
+ARG VLLM_PR462_BASE_COMMIT=b5f995e73e6b7fe27c9927477e277a151ebcc9e9
+ARG VLLM_PR462_COMMIT=1d341d8482e4bcc6fd2404efbd245207d6deddf1
+ARG VLLM_PR462_CHANGED_PATHS_SHA256=5965a99a2b7cb705b2e1f6569db43c65ac08ea49abebd232daa546217c3be2ee
+ARG VLLM_RUNTIME_TREE=188217905a37f04ce50659441a03fa4f7256435f
+ARG QSRT_PACKAGER_COMMIT=3fb7b0a1f020d2667d93e356ee92639fa34abfff
+ARG VLLM_PRS
+ARG B12X_PRS
+ARG RELEASE_DATE
+ARG DOCKER_COMMIT
+ARG LAUNCHER_SHA256
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+COPY patches/qwen38-qsrt/b12x-pr236-r16-reconciliation.patch /tmp/qwen38-qsrt/b12x-reconciliation.patch
+COPY --chmod=0755 launchers/serve-qwen38-qsrt-k5 /usr/local/bin/serve-qwen38-qsrt-k5
+
+# The base image contains qualified aggregate vLLM and B12X trees. The rotary
+# compatibility and hybrid page-table capacity changes plus Qwen PR 236 are
+# overlaid at immutable commits. The three overlapping B12X hot-path files and
+# CUTLASS dependency pins are then reconciled. The exact combined trees are the
+# runtime source identities.
+RUN set -eux; \
+    vllm_root=/opt/infernal-invocation/vllm; \
+    b12x_root=/opt/infernal-invocation/b12x; \
+    test "$(git -C "$vllm_root" write-tree)" = "$VLLM_BASE_RUNTIME_TREE"; \
+    git clone --filter=blob:none --no-checkout "$VLLM_REPO" /tmp/qwen38-qsrt/vllm-pr; \
+    git -C /tmp/qwen38-qsrt/vllm-pr fetch --depth=1 origin "$VLLM_BASE_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr fetch --depth=1 origin "$VLLM_PR461_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr checkout --detach "$VLLM_PR461_COMMIT"; \
+    test "$(git -C /tmp/qwen38-qsrt/vllm-pr rev-parse HEAD)" = "$VLLM_PR461_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr diff --name-only \
+        "$VLLM_BASE_COMMIT..$VLLM_PR461_COMMIT" \
+        > /tmp/qwen38-qsrt/vllm-changed-paths.txt; \
+    echo "$VLLM_PR461_CHANGED_PATHS_SHA256  /tmp/qwen38-qsrt/vllm-changed-paths.txt" \
+        | sha256sum -c -; \
+    while IFS= read -r path; do \
+        test -f "/tmp/qwen38-qsrt/vllm-pr/$path"; \
+        install -D -m 0644 "/tmp/qwen38-qsrt/vllm-pr/$path" "$vllm_root/$path"; \
+    done < /tmp/qwen38-qsrt/vllm-changed-paths.txt; \
+    git -C /tmp/qwen38-qsrt/vllm-pr fetch --depth=1 origin "$VLLM_PR462_BASE_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr fetch --depth=1 origin "$VLLM_PR462_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr checkout --detach "$VLLM_PR462_COMMIT"; \
+    test "$(git -C /tmp/qwen38-qsrt/vllm-pr rev-parse HEAD)" = "$VLLM_PR462_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/vllm-pr diff --name-only \
+        "$VLLM_PR462_BASE_COMMIT..$VLLM_PR462_COMMIT" \
+        > /tmp/qwen38-qsrt/vllm-pr462-changed-paths.txt; \
+    echo "$VLLM_PR462_CHANGED_PATHS_SHA256  /tmp/qwen38-qsrt/vllm-pr462-changed-paths.txt" \
+        | sha256sum -c -; \
+    while IFS= read -r path; do \
+        test -f "/tmp/qwen38-qsrt/vllm-pr/$path"; \
+        install -D -m 0644 "/tmp/qwen38-qsrt/vllm-pr/$path" "$vllm_root/$path"; \
+    done < /tmp/qwen38-qsrt/vllm-pr462-changed-paths.txt; \
+    git -C "$vllm_root" add -A; \
+    test "$(git -C "$vllm_root" write-tree)" = "$VLLM_RUNTIME_TREE"; \
+    /opt/venv/bin/python -c 'from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb; assert callable(ApplyRotaryEmb.forward_cuda)'; \
+    /opt/venv/bin/python -c 'from vllm.v1.attention.backends.b12x_attn import _max_page_table_width; assert _max_page_table_width(65536, 128, 8192, True) == 576'; \
+    /opt/venv/bin/python -c 'import exllamav3_ext; from flash_attn.layers.rotary import apply_rotary_emb; assert callable(apply_rotary_emb)'; \
+    test "$(git -C "$b12x_root" rev-parse HEAD)" = "$B12X_BASE_COMMIT"; \
+    test "$(git -C "$b12x_root" write-tree)" = "$B12X_BASE_TREE"; \
+    echo "$B12X_RECONCILIATION_SHA256  /tmp/qwen38-qsrt/b12x-reconciliation.patch" \
+        | sha256sum -c -; \
+    git clone --filter=blob:none --no-checkout "$B12X_REPO" /tmp/qwen38-qsrt/b12x-pr; \
+    git -C /tmp/qwen38-qsrt/b12x-pr fetch --depth=1 origin "$B12X_BASE_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/b12x-pr fetch --depth=1 origin "$B12X_PR_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/b12x-pr checkout --detach "$B12X_PR_COMMIT"; \
+    test "$(git -C /tmp/qwen38-qsrt/b12x-pr rev-parse HEAD)" = "$B12X_PR_COMMIT"; \
+    git -C /tmp/qwen38-qsrt/b12x-pr diff --name-only \
+        "$B12X_BASE_COMMIT..$B12X_PR_COMMIT" \
+        > /tmp/qwen38-qsrt/changed-paths.txt; \
+    echo "$B12X_PR_CHANGED_PATHS_SHA256  /tmp/qwen38-qsrt/changed-paths.txt" \
+        | sha256sum -c -; \
+    while IFS= read -r path; do \
+        test -f "/tmp/qwen38-qsrt/b12x-pr/$path"; \
+        install -D -m 0644 "/tmp/qwen38-qsrt/b12x-pr/$path" "$b12x_root/$path"; \
+    done < /tmp/qwen38-qsrt/changed-paths.txt; \
+    git -C "$b12x_root" apply --check /tmp/qwen38-qsrt/b12x-reconciliation.patch; \
+    git -C "$b12x_root" apply /tmp/qwen38-qsrt/b12x-reconciliation.patch; \
+    git -C "$b12x_root" add -A; \
+    test "$(git -C "$b12x_root" write-tree)" = "$B12X_RUNTIME_TREE"; \
+    mkdir -p /tmp/qwen38-qsrt/wheels; \
+    /opt/venv/bin/pip wheel --quiet --no-deps --no-build-isolation \
+        --wheel-dir /tmp/qwen38-qsrt/wheels "$b12x_root"; \
+    b12x_wheel=$(find /tmp/qwen38-qsrt/wheels -maxdepth 1 \
+        -type f -name 'b12x-*.whl' -print -quit); \
+    test -n "$b12x_wheel"; \
+    /opt/venv/bin/pip install --quiet --force-reinstall --no-deps "$b12x_wheel"; \
+    unzip -p "$b12x_wheel" '*/entry_points.txt' \
+        > "$b12x_root/b12x.egg-info/entry_points.txt"; \
+    /opt/venv/bin/python -c 'import importlib.metadata as m; entries={(e.name,e.value) for e in m.entry_points(group="vllm.general_plugins")}; assert ("b12x_qsrt", "b12x.integration.vllm.qsrt_plugin:register_b12x_qsrt") in entries'; \
+    /opt/venv/bin/python -c 'import inspect; from b12x.integration.vllm import qsrt_plugin; source=inspect.getsource(qsrt_plugin._require_cudagraphs_disabled); assert "requires CUDA graphs to be disabled" in source'; \
+    /opt/venv/bin/python -c 'import inspect; from b12x.moe._shared.kernels.w4a16 import kernel; source=inspect.getsource(kernel._run_trellis256_dense_current_device); assert "hadamard_128 = _resolve_exl3_hadamard_128(hadamard_128)" not in source'; \
+    cd "$b12x_root"; \
+    PYTHONPATH=. /opt/venv/bin/python -m pytest -q tests/test_vllm_qsrt_plugin.py; \
+    test "$(git -C "$vllm_root" write-tree)" = "$VLLM_RUNTIME_TREE"; \
+    test "$(git -C "$b12x_root" write-tree)" = "$B12X_RUNTIME_TREE"; \
+    echo "$LAUNCHER_SHA256  /usr/local/bin/serve-qwen38-qsrt-k5" \
+        | sha256sum -c -; \
+    rm -rf /tmp/qwen38-qsrt
+
+LABEL org.opencontainers.image.title="Qwen3.8-27B QSRT K5 plus rank-16 runtime" \
+      org.opencontainers.image.description="TP1 Qwen3.8 packed dense-MLP QSRT K5 serving on CUDA 13.3 and PyTorch 2.13" \
+      org.opencontainers.image.source="https://github.com/local-inference-lab/blackwell-llm-docker" \
+      org.opencontainers.image.version="${RELEASE_DATE}" \
+      org.opencontainers.image.revision="${DOCKER_COMMIT}" \
+      local-inference.release.name="qwen38-qsrt-k5-rank16" \
+      local-inference.docker.commit="${DOCKER_COMMIT}" \
+      local-inference.runtime.base-image="${BASE_IMAGE}" \
+      local-inference.runtime.base-id="${BASE_IMAGE_ID}" \
+      local-inference.vllm.integration.tree="${VLLM_RUNTIME_TREE}" \
+      local-inference.vllm.integration.prs="${VLLM_PRS}" \
+      local-inference.vllm.pr461.commit="${VLLM_PR461_COMMIT}" \
+      local-inference.vllm.pr462.commit="${VLLM_PR462_COMMIT}" \
+      local-inference.b12x.base.tree="${B12X_BASE_TREE}" \
+      local-inference.b12x.pr236.commit="${B12X_PR_COMMIT}" \
+      local-inference.b12x.integration.tree="${B12X_RUNTIME_TREE}" \
+      local-inference.b12x.integration.prs="${B12X_PRS}" \
+      local-inference.b12x.reconciliation.sha256="${B12X_RECONCILIATION_SHA256}" \
+      local-inference.qwen38.qsrt-packager.commit="${QSRT_PACKAGER_COMMIT}" \
+      local-inference.qwen38.launcher.sha256="${LAUNCHER_SHA256}" \
+      local-inference.qwen38.cudagraphs="unsupported" \
+      local-inference.qwen38.torch-compile="enabled"
+
+ENTRYPOINT ["/usr/local/bin/serve-qwen38-qsrt-k5"]
