@@ -11,6 +11,7 @@ Docker images for LLM inference on NVIDIA Blackwell GPUs (SM120).
 | `voipmonitor/vllm:cu130` | `Dockerfile.vllm-cu130` | CUDA 13.0, torch 2.11 stable cu130, FlashInfer source (PR #2913), vLLM + cherry-picks |
 | `voipmonitor/vllm:vllm-b12x-cu132` | `Dockerfile.vllm-b12x-cu132` | Clean CUDA 13.2.1, PyTorch 2.12 cu132 wheels, patched NCCL 2.30.4, FlashInfer, DeepGEMM, B12X, vLLM |
 | `voipmonitor/vllm:lucifer` | `Dockerfile.vllm-b12x-cu132` | Lucifer DS4 Flash/CUTLASS vLLM branch on the same CUDA 13.2.1 base, FlashInfer, DeepGEMM, and Triton kernels source hook |
+| `voipmonitor/vllm:glm53-flash-dflash2-mxfp8-*` | `Dockerfile.glm53-flash-nvfp4-jovian-cu133-torch213` | GLM-5.3-Flash NVFP4 TP4 target with B12X kernels and serialized ModelOpt MXFP8 DFlash2 |
 
 Base image for cu132 (torch + FlashInfer compiled from source):
 
@@ -107,6 +108,10 @@ IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
 # Invocation, B12X, and LMCache integration trees on CUDA 13.3/PyTorch 2.13.
 ./build-deepseek-infernal-invocation-cu133-torch213.sh
 
+# Build the GLM-5.3-Flash NVFP4 TP4 runtime from dev/jovian-judgement plus
+# vLLM PR #491 and B12X master plus B12X PR #250.
+./build-glm53-flash-nvfp4-jovian-cu133-torch213.sh
+
 # Build the unified GLM-5.2 and DS4/DSpark v16 image from immutable vLLM,
 # B12X, FlashInfer, DeepGEMM, CUTLASS, InstantTensor, and NCCL commits.
 ./build-fathomless-firmament-v16-cu132.sh
@@ -120,6 +125,101 @@ IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
 # manifests from scratch.
 ./build-gilded-gnosis-v20-final-cu132.sh
 ```
+
+### GLM-5.3-Flash NVFP4 with ModelOpt MXFP8 DFlash2
+
+Status: **qualified** for TP4 on NVIDIA RTX PRO 6000 Blackwell GPUs. The build
+script composes these immutable source inputs:
+
+- `local-inference-lab/vllm:dev/jovian-judgement` at
+  `015dcd423d6aabf843c8ad69074ff67d35c2a395` plus vLLM PR #491 at
+  `b77333ca8824897ff6ddf96a62208ea406c555a9`;
+- `local-inference-lab/b12x:master` at
+  `2fcf23a0ce269be27b2e03fece73d46e90e6aeea` plus test-only B12X PR #250 at
+  `dd8cf60505e0363ab9d6ef6b2116c3a37216a2f1`.
+
+The integration locks under `patches/releases/glm53-flash-nvfp4-jovian/`
+record both branch commits, both pull-request heads, the generated patch
+digests, and the resulting Git trees. The Docker build independently verifies
+those trees before compiling vLLM and installing B12X.
+
+The serving interface uses these Hugging Face model identifiers:
+
+- target: `local-inference-lab/GLM-5.3-Flash-NVFP4`;
+- DFlash2 draft: `local-inference-lab/GLM-5.3-Flash-DFlash2-MXFP8`.
+
+The launcher pins the target checkpoint to
+`520de24eabf507659eaef7c70f14fd584527facc` and the DFlash2 checkpoint to
+`b6d33aa93fc1ac5b23a88251a1c0ce0bfe2ad17c`. `MODEL_REVISION` and
+`DFLASH_MODEL_REVISION` override those revisions; an empty value disables the
+corresponding revision argument for a repository model identifier.
+
+Build the image:
+
+```bash
+export GLM53_IMAGE="$(
+  PRINT_RELEASE_CONFIG=1 \
+    ./build-glm53-flash-nvfp4-jovian-cu133-torch213.sh |
+    sed -n 's/^image=//p'
+)"
+./build-glm53-flash-nvfp4-jovian-cu133-torch213.sh
+```
+
+The qualified build tag records the first 12 hexadecimal characters of the
+Docker recipe commit after the `-git` suffix. This prevents two clean recipe
+commits from publishing different artifacts under one qualified tag. Setting
+`BASE_IMAGE`, `VLLM_PACKAGE_VERSION`, or `ALLOW_DIRTY_BUILD=1` requires an
+explicit `IMAGE` tag containing a `dev`, `test`, or `scratch` marker. Such an
+image is labeled `research-only`; `PUSH_IMAGE=1` is rejected whenever
+`ALLOW_DIRTY_BUILD=1` is set.
+
+The launcher defaults to physical GPUs selected by Docker, TP4, target FP8 KV
+cache, NVFP4 W4A4 routed experts, B12X attention/MoE/linear kernels, B12X PCIe
+all-reduce, and `CUDAGRAPH_MODE=FULL`. The target GDN backend captures decode;
+unsupported prefill segments execute eagerly. DFlash2 uses its checkpoint
+default BF16 KV cache and seven draft tokens.
+
+Start target-only serving on physical GPUs 4, 5, 6, and 7:
+
+```bash
+docker run --rm --name glm53-target-tp4 \
+  --gpus '"device=4,5,6,7"' --network host --ipc host --shm-size 32g \
+  -v glm53-hf:/root/.cache/huggingface \
+  -v glm53-target-jit:/cache/jit \
+  "${GLM53_IMAGE}"
+```
+
+Start MTP with three draft tokens:
+
+```bash
+docker run --rm --name glm53-mtp3-tp4 \
+  --gpus '"device=4,5,6,7"' --network host --ipc host --shm-size 32g \
+  -v glm53-hf:/root/.cache/huggingface \
+  -v glm53-mtp3-jit:/cache/jit \
+  -e SPECULATOR=mtp -e MTP=3 \
+  "${GLM53_IMAGE}"
+```
+
+Start DFlash2 with seven draft tokens:
+
+```bash
+docker run --rm --name glm53-dflash2-tp4 \
+  --gpus '"device=4,5,6,7"' --network host --ipc host --shm-size 32g \
+  -v glm53-hf:/root/.cache/huggingface \
+  -v glm53-dflash2-jit:/cache/jit \
+  -e SPECULATOR=dflash \
+  "${GLM53_IMAGE}"
+```
+
+The launcher listens on `0.0.0.0:8000` by default and does not add an
+authentication layer. Set `HOST=127.0.0.1` for host-local access or place the
+server behind an authenticated proxy and network policy before exposing it to
+untrusted clients.
+
+The MTP expert is serialized as MXFP8 and uses Humming because B12X does not
+implement that MTP projection format. The DFlash2 ModelOpt MXFP8 projections
+use the selected B12X linear backend. The DFlash2 causal attention layers use
+their compatible attention backend while the GLM-5.3 target remains on B12X.
 
 ### Kimi-K3 source-locked production runtime
 

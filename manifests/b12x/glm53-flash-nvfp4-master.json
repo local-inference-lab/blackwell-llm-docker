@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "name": "glm53-flash-nvfp4-dflash2-mxfp8-b12x",
+  "repository": "https://github.com/local-inference-lab/b12x.git",
+  "base_ref": "refs/heads/master",
+  "pull_requests": [
+    {
+      "number": 250,
+      "head": "dd8cf60505e0363ab9d6ef6b2116c3a37216a2f1",
+      "title": "test(moe): qualify GLM-5.3 TP4 graph replay"
+    }
+  ],
+  "source_patches": [],
+  "source_evidence": [
+    {
+      "role": "FP8 C4 decode scoring and top-k selection for GLM-5.3-Flash",
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "branch": "master",
+      "commit": "2fcf23a0ce269be27b2e03fece73d46e90e6aeea",
+      "resolution": "The B12X DSA indexer accepts 32 query heads, selects 512 four-token pools, uses caller-provided scratch, and supports CUDA graph replay and high physical page IDs for decode."
+    },
+    {
+      "role": "Lower-bounded KDA decode used by GLM-5.3-Flash",
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "branch": "master",
+      "commit": "2fcf23a0ce269be27b2e03fece73d46e90e6aeea",
+      "resolution": "The GDN dispatcher exposes lower-bounded KDA through a plan, binding, and replay contract used by GLM decode."
+    },
+    {
+      "role": "Hyperconnection normalization and MTP feedback used by GLM-5.3-Flash",
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "branch": "master",
+      "commit": "2fcf23a0ce269be27b2e03fece73d46e90e6aeea",
+      "resolution": "The B12X public APIs provide CuTe DSL kernels for hyperconnection normalization and MTP feedback with caller-owned runtime bindings."
+    },
+    {
+      "role": "CUDA graph qualification for the GLM-5.3 TP4 NVFP4 routed-expert geometry",
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "branch": "pull/250/head",
+      "commit": "dd8cf60505e0363ab9d6ef6b2116c3a37216a2f1",
+      "resolution": "The qualification captures the 42-layer routed-expert geometry and token widths from 8 through 128 over caller-owned shared scratch. It compares graph replay with eager execution, requires inactive rows to remain zero, rejects replay-time CUDA allocations, and asserts stable buffer addresses. The pull request changes tests only; the runtime kernel remains the implementation from the pinned master commit."
+    }
+  ]
+}

@@ -1,0 +1,298 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BASE_IMAGE=voipmonitor/vllm@sha256:03b67e53dda73c3fa317d4cb529ad38a220c51c7365ee8d54c16e5063fcc54e2
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG BASE_IMAGE_ID
+ARG VLLM_REPO
+ARG VLLM_REF
+ARG VLLM_COMMIT
+ARG VLLM_PATCH_FILE
+ARG VLLM_PATCH_SHA256
+ARG VLLM_INTEGRATION_TREE
+ARG VLLM_INTEGRATION_LOCK_SHA256
+ARG VLLM_PRS
+ARG VLLM_MERGE_HEADS
+ARG B12X_REPO
+ARG B12X_REF
+ARG B12X_COMMIT
+ARG B12X_PATCH_FILE
+ARG B12X_PATCH_SHA256
+ARG B12X_INTEGRATION_TREE
+ARG B12X_INTEGRATION_LOCK_SHA256
+ARG B12X_PRS
+ARG B12X_MERGE_HEADS
+ARG SOURCE_LOCK_SHA256
+ARG VLLM_PACKAGE_VERSION
+ARG FLASH_ATTN_REPO=https://github.com/JaredforReal/flash-attention.git
+ARG FLASH_ATTN_COMMIT=2b84100f50e1d2a8726a86c86d14c2f9c9e5a67c
+ARG CACHE_FINGERPRINT
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:${PATH} \
+    PYTHONPATH=/opt/glm53-flash/vllm:/opt/glm53-flash/b12x \
+    SPARKINFER_DIR=/opt/glm53-flash/b12x \
+    CUTLASS_DSL_VERSION=4.6.2 \
+    TORCH_CUDA_ARCH_LIST=12.0a \
+    CMAKE_CUDA_ARCHITECTURES=120a \
+    FLASHINFER_CUDA_ARCH_LIST=12.0f \
+    FLASHINFER_LOCAL_VERSION=cu133 \
+    FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    NVCC_THREADS=4 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    NCCL_IB_DISABLE=1 \
+    NCCL_P2P_LEVEL=SYS \
+    NCCL_P2P_DISABLE=0 \
+    NCCL_CUMEM_ENABLE=0 \
+    NCCL_PROTO=LL,LL128,Simple \
+    VLLM_ENABLE_PCIE_ALLREDUCE=1 \
+    VLLM_PCIE_ALLREDUCE_BACKEND=b12x \
+    VLLM_CPP_AR_1STAGE_NCCL_CUTOFF=56KB \
+    VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS=0
+
+ENV LOCAL_INFERENCE_CACHE_FINGERPRINT=${CACHE_FINGERPRINT} \
+    XDG_CACHE_HOME=/cache/jit/${CACHE_FINGERPRINT} \
+    VLLM_CACHE_ROOT=/cache/jit/${CACHE_FINGERPRINT}/vllm \
+    VLLM_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/vllm \
+    TRITON_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/triton \
+    TORCH_EXTENSIONS_DIR=/cache/jit/${CACHE_FINGERPRINT}/torch-extensions \
+    TORCHINDUCTOR_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/torchinductor \
+    VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/flashinfer-autotune \
+    FLASHINFER_WORKSPACE_BASE=/cache/jit/${CACHE_FINGERPRINT}/flashinfer \
+    TVM_FFI_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tvm-ffi \
+    TVM_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tvm \
+    TILELANG_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/tilelang \
+    CUTE_DSL_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/cute-dsl \
+    B12X_CUTE_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/b12x/cute \
+    B12X_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/b12x/compile \
+    SPARKINFER_COMPILE_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/b12x/compile \
+    DG_JIT_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/deep-gemm \
+    CUDA_CACHE_PATH=/cache/jit/${CACHE_FINGERPRINT}/cuda \
+    CUPY_CACHE_DIR=/cache/jit/${CACHE_FINGERPRINT}/cupy \
+    HF_HOME=/root/.cache/huggingface
+
+COPY patches/releases/glm53-flash-nvfp4-jovian /tmp/release-patches/glm53-flash-nvfp4-jovian
+
+# Reconstruct both source directories from content-addressed base commits and
+# integration patches. Exact result-tree checks make any source change fail the
+# build.
+RUN set -eux; \
+    mkdir -p /opt/glm53-flash; \
+    compose_source() { \
+      component="$1"; destination="$2"; repository="$3"; reference="$4"; \
+      commit="$5"; patch_file="$6"; patch_sha256="$7"; expected_tree="$8"; \
+      git clone --filter=blob:none --no-checkout "${repository}" "${destination}"; \
+      git -C "${destination}" fetch --filter=blob:none origin "${reference}"; \
+      git -C "${destination}" checkout --detach "${commit}"; \
+      test "$(git -C "${destination}" rev-parse HEAD)" = "${commit}"; \
+      patch_path="/tmp/release-patches/${patch_file}"; \
+      echo "${patch_sha256}  ${patch_path}" | sha256sum -c -; \
+      if test -s "${patch_path}"; then git -C "${destination}" apply --index "${patch_path}"; fi; \
+      actual_tree="$(git -C "${destination}" write-tree)"; \
+      test "${actual_tree}" = "${expected_tree}" || { \
+        echo "${component} tree ${actual_tree} does not match ${expected_tree}" >&2; \
+        exit 1; \
+      }; \
+      if ! git -C "${destination}" diff --cached --quiet; then \
+        GIT_AUTHOR_NAME='Release Composer' \
+        GIT_AUTHOR_EMAIL='release-composer@local' \
+        GIT_COMMITTER_NAME='Release Composer' \
+        GIT_COMMITTER_EMAIL='release-composer@local' \
+        GIT_AUTHOR_DATE='2000-01-01T00:00:00+00:00' \
+        GIT_COMMITTER_DATE='2000-01-01T00:00:00+00:00' \
+          git -C "${destination}" commit --quiet --no-gpg-sign \
+            -m "Compose ${component} source"; \
+      fi; \
+      test "$(git -C "${destination}" rev-parse 'HEAD^{tree}')" = "${expected_tree}"; \
+      test -z "$(git -C "${destination}" status --porcelain)"; \
+    }; \
+    compose_source vllm /opt/glm53-flash/vllm \
+      "${VLLM_REPO}" "${VLLM_REF}" "${VLLM_COMMIT}" \
+      "${VLLM_PATCH_FILE}" "${VLLM_PATCH_SHA256}" "${VLLM_INTEGRATION_TREE}"; \
+    compose_source b12x /opt/glm53-flash/b12x \
+      "${B12X_REPO}" "${B12X_REF}" "${B12X_COMMIT}" \
+      "${B12X_PATCH_FILE}" "${B12X_PATCH_SHA256}" "${B12X_INTEGRATION_TREE}"; \
+    test "$(git -C /opt/glm53-flash/vllm config --get remote.origin.url)" = "${VLLM_REPO}"; \
+    test "$(git -C /opt/glm53-flash/b12x config --get remote.origin.url)" = "${B12X_REPO}"; \
+    rm -rf /tmp/release-patches
+
+# The source-neutral foundation supplies the qualified CUDA 13.3, PyTorch
+# 2.13, FlashInfer, InstantTensor, Rust, and CuTe DSL toolchains.
+RUN set -eux; \
+    test "$(python -c 'import sys; print(sys.prefix)')" = /opt/venv; \
+    python -c 'import torch; assert torch.__version__.startswith("2.13.0")'; \
+    test "$(python -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))')" = 0.6.18+cu133; \
+    test "$(python -c 'import importlib.metadata as m; print(m.version("instanttensor"))')" = 0.1.9; \
+    test "$(python -c 'import importlib.metadata as m; print(m.version("nvidia-cutlass-dsl"))')" = 4.6.2; \
+    python -m pip install --no-build-isolation --no-deps --force-reinstall \
+      /opt/glm53-flash/b12x
+
+WORKDIR /opt/glm53-flash/vllm
+
+# Rebuild vLLM native extensions against the source-locked tree and the
+# foundation's packaged PyTorch ABI.
+RUN --mount=type=cache,id=glm53-dflash2-mxfp8-cu133-vllm-extensions,target=/tmp/vllm-extensions,sharing=locked \
+    set -eux; \
+    cmake -S . -B /tmp/vllm-extensions -G Ninja \
+      -U MARLIN_GEN_SCRIPT_HASH_AND_ARCH \
+      -U MOE_MARLIN_GEN_SCRIPT_HASH_AND_ARCH \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_ARCHITECTURES=75 \
+      -DVLLM_TARGET_DEVICE=cuda \
+      -DVLLM_PYTHON_EXECUTABLE=/opt/venv/bin/python \
+      -DNVCC_THREADS=4; \
+    cmake --build /tmp/vllm-extensions --parallel 48; \
+    cmake --install /tmp/vllm-extensions \
+      --prefix /tmp/vllm-flash-attn-python \
+      --component _vllm_fa4_cutedsl_C; \
+    test -f /tmp/vllm-flash-attn-python/vllm/vllm_flash_attn/cute/utils.py; \
+    flash_attn_source=/tmp/vllm-extensions/_deps/vllm-flash-attn-src/vllm_flash_attn; \
+    test -f "${flash_attn_source}/layers/rotary.py"; \
+    test -f "${flash_attn_source}/ops/triton/rotary.py"; \
+    cp -a /tmp/vllm-flash-attn-python/vllm/vllm_flash_attn/cute \
+      /opt/glm53-flash/vllm/vllm/vllm_flash_attn/; \
+    cp -a "${flash_attn_source}/layers" "${flash_attn_source}/ops" \
+      /opt/glm53-flash/vllm/vllm/vllm_flash_attn/; \
+    find /tmp/vllm-extensions -name '*.abi3.so' > /tmp/vllm-extension-list; \
+    while IFS= read -r extension; do \
+      case "${extension}" in \
+        */vllm-flash-attn/*) destination=/opt/glm53-flash/vllm/vllm/vllm_flash_attn ;; \
+        */_deps/*) continue ;; \
+        *) destination=/opt/glm53-flash/vllm/vllm ;; \
+      esac; \
+      cp "${extension}" "${destination}/$(basename "${extension}")"; \
+    done < /tmp/vllm-extension-list; \
+    test -f /opt/glm53-flash/vllm/vllm/_C_stable_libtorch.abi3.so; \
+    test -f /opt/glm53-flash/vllm/vllm/cumem_allocator.abi3.so; \
+    test -f /opt/glm53-flash/vllm/vllm/vllm_flash_attn/cute/utils.py; \
+    test -f /opt/glm53-flash/vllm/vllm/vllm_flash_attn/layers/rotary.py; \
+    test -f /opt/glm53-flash/vllm/vllm/vllm_flash_attn/ops/triton/rotary.py
+
+ARG TRITON_KERNELS_REPO=https://github.com/triton-lang/triton.git
+ARG TRITON_KERNELS_COMMIT=0add68262ab0a2e33b84524346cb27cbb2787356
+
+RUN set -eux; \
+    git clone --filter=blob:none --no-checkout "${TRITON_KERNELS_REPO}" /tmp/triton-kernels-src; \
+    git -C /tmp/triton-kernels-src fetch --depth=1 origin "${TRITON_KERNELS_COMMIT}"; \
+    git -C /tmp/triton-kernels-src checkout --detach "${TRITON_KERNELS_COMMIT}"; \
+    source_dir=/tmp/triton-kernels-src/python/triton_kernels/triton_kernels; \
+    destination=/opt/glm53-flash/vllm/vllm/third_party/triton_kernels; \
+    test -f "${source_dir}/matmul_ogs.py"; \
+    mkdir -p "${destination}"; \
+    cp -a "${source_dir}/." "${destination}/"; \
+    site_packages="$(python -c 'import site; print(site.getsitepackages()[0])')"; \
+    rm -f "${site_packages}/triton_kernels"; \
+    ln -s "${destination}" "${site_packages}/triton_kernels"; \
+    rm -rf /tmp/triton-kernels-src
+
+# Install package metadata, CLI entry points, and the Rust parser without
+# replacing the native extensions compiled above.
+RUN set -eux; \
+    source /root/.cargo/env; \
+    rust_toolchain="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"; \
+    if ! rustup toolchain list | grep -Fq "${rust_toolchain}"; then \
+      rustup toolchain install "${rust_toolchain}"; \
+    fi; \
+    rustup default "${rust_toolchain}"; \
+    python tools/build_rust.py --release; \
+    VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE="${VLLM_PACKAGE_VERSION}" \
+      VLLM_REQUIRE_RUST_FRONTEND=1 \
+      python -m pip install --no-build-isolation --no-deps --force-reinstall .; \
+    test "$(python -c 'import importlib.metadata as m; print(m.version("vllm"))')" = \
+      "${VLLM_PACKAGE_VERSION}"; \
+    site_packages="$(python -c 'import site; print(site.getsitepackages()[0])')"; \
+    installed_package="${site_packages}/vllm"; \
+    find /opt/glm53-flash/vllm/vllm -maxdepth 1 -type f \
+      -name '*.abi3.so' -exec cp -a -t "${installed_package}" {} +; \
+    rm -rf "${installed_package}/vllm_flash_attn"; \
+    cp -a /opt/glm53-flash/vllm/vllm/vllm_flash_attn \
+      "${installed_package}/vllm_flash_attn"; \
+    test -f "${installed_package}/_C_stable_libtorch.abi3.so"; \
+    test -f "${installed_package}/vllm_flash_attn/_vllm_fa2_C.abi3.so"; \
+    test -f "${installed_package}/vllm_flash_attn/layers/rotary.py"; \
+    test -f "${installed_package}/vllm_flash_attn/ops/triton/rotary.py"; \
+    (cd / && env -u PYTHONPATH python -c \
+      'import pathlib, vllm; expected=pathlib.Path("/opt/venv/lib/python3.12/site-packages/vllm"); assert pathlib.Path(vllm.__file__).resolve().is_relative_to(expected)'); \
+    rm -rf /root/.cargo /root/.rustup target rust/target
+
+COPY launchers/serve-glm53-flash-nvfp4.sh /usr/local/bin/serve-glm53-flash-nvfp4.sh
+COPY tests/verify_glm53_flash_nvfp4_runtime.py /opt/local-inference/verify_glm53_flash_nvfp4_runtime.py
+
+RUN set -eux; \
+    chmod 0755 /usr/local/bin/serve-glm53-flash-nvfp4.sh; \
+    bash -n /usr/local/bin/serve-glm53-flash-nvfp4.sh; \
+    mkdir -p "/cache/jit/${CACHE_FINGERPRINT}"; \
+    python /opt/local-inference/verify_glm53_flash_nvfp4_runtime.py \
+      --vllm-version "${VLLM_PACKAGE_VERSION}" \
+      --vllm-tree "${VLLM_INTEGRATION_TREE}" \
+      --b12x-tree "${B12X_INTEGRATION_TREE}"
+
+ARG RELEASE_DATE
+ARG DOCKER_COMMIT
+ARG RELEASE_STATUS=qualified
+
+LABEL org.opencontainers.image.title="GLM-5.3-Flash NVFP4 and DFlash2 MXFP8 CUDA 13.3 runtime" \
+      org.opencontainers.image.description="Source-locked GLM-5.3-Flash TP4 runtime with B12X target kernels, B12X PCIe all-reduce, and serialized ModelOpt MXFP8 DFlash2 speculation" \
+      org.opencontainers.image.source="https://github.com/local-inference-lab/blackwell-llm-docker" \
+      org.opencontainers.image.version="${RELEASE_DATE}" \
+      org.opencontainers.image.revision="${DOCKER_COMMIT}" \
+      local-inference.release.name="glm53-flash-nvfp4-dflash2-mxfp8" \
+      local-inference.status="${RELEASE_STATUS}" \
+      local-inference.docker.commit="${DOCKER_COMMIT}" \
+      local-inference.runtime.base-image="${BASE_IMAGE}" \
+      local-inference.runtime.base-id="${BASE_IMAGE_ID}" \
+      local-inference.runtime.source-lock.sha256="${SOURCE_LOCK_SHA256}" \
+      local-inference.runtime.host-kv-default="disabled" \
+      local-inference.cache.fingerprint="${CACHE_FINGERPRINT}" \
+      local-inference.vllm.repo="${VLLM_REPO}" \
+      local-inference.vllm.branch="${VLLM_REF}" \
+      local-inference.vllm.commit="${VLLM_COMMIT}" \
+      local-inference.vllm.upstream-base="${VLLM_COMMIT}" \
+      local-inference.vllm.integration.tree="${VLLM_INTEGRATION_TREE}" \
+      local-inference.vllm.integration.prs="${VLLM_PRS}" \
+      local-inference.vllm.merge-heads="${VLLM_MERGE_HEADS}" \
+      local-inference.vllm.patch_sha256="${VLLM_PATCH_SHA256}" \
+      local-inference.vllm.integration.lock_sha256="${VLLM_INTEGRATION_LOCK_SHA256}" \
+      local-inference.vllm.package-version="${VLLM_PACKAGE_VERSION}" \
+      local-inference.b12x.repo="${B12X_REPO}" \
+      local-inference.b12x.branch="${B12X_REF}" \
+      local-inference.b12x.commit="${B12X_COMMIT}" \
+      local-inference.b12x.upstream-base="${B12X_COMMIT}" \
+      local-inference.b12x.integration.tree="${B12X_INTEGRATION_TREE}" \
+      local-inference.b12x.integration.prs="${B12X_PRS}" \
+      local-inference.b12x.merge-heads="${B12X_MERGE_HEADS}" \
+      local-inference.b12x.patch_sha256="${B12X_PATCH_SHA256}" \
+      local-inference.b12x.integration.lock_sha256="${B12X_INTEGRATION_LOCK_SHA256}" \
+      local-inference.flash-attention.repo="${FLASH_ATTN_REPO}" \
+      local-inference.flash-attention.commit="${FLASH_ATTN_COMMIT}" \
+      local-inference.flashinfer.version="0.6.18+cu133" \
+      local-inference.instanttensor.version="0.1.9" \
+      local-inference.cutlass-dsl.version="4.6.2" \
+      local-inference.cuda.version="13.3" \
+      local-inference.torch.version="2.13.0" \
+      local-inference.nccl.version="2.31.2"
+
+LABEL local-inference.model.repository="local-inference-lab/GLM-5.3-Flash-NVFP4" \
+      local-inference.model.revision="520de24eabf507659eaef7c70f14fd584527facc" \
+      local-inference.draft-model.repository="local-inference-lab/GLM-5.3-Flash-DFlash2-MXFP8" \
+      local-inference.draft-model.revision="b6d33aa93fc1ac5b23a88251a1c0ce0bfe2ad17c" \
+      local-inference.draft-model.quantization="ModelOpt MXFP8 1x32" \
+      local-inference.backend.attention.default="B12X" \
+      local-inference.backend.indexer.decode="B12X_C4" \
+      local-inference.backend.indexer.prefill="DeepGEMM_C4" \
+      local-inference.backend.moe.default="b12x" \
+      local-inference.backend.linear.default="b12x" \
+      local-inference.backend.allreduce.default="B12X_PCIE" \
+      local-inference.backend.kda.non-speculative="Triton" \
+      local-inference.backend.kda.speculative="B12X"
+
+ENV NCCL_VERSION=2.31.2 \
+    NCCL_NET_PLUGIN=none \
+    NCCL_TUNER_PLUGIN=none
+
+WORKDIR /
+ENTRYPOINT ["/usr/local/bin/serve-glm53-flash-nvfp4.sh"]

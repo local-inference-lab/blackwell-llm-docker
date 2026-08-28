@@ -1,0 +1,2196 @@
+diff --git a/tests/models/test_glm5next_model.py b/tests/models/test_glm5next_model.py
+index 6c9e67b0a2cc2374264515e5877cd8542a916ed3..435e791392aeac8ce99eba9394d3bf8e6ebd6fc8 100644
+--- a/tests/models/test_glm5next_model.py
++++ b/tests/models/test_glm5next_model.py
+@@ -252,7 +252,7 @@ def test_glm5next_kda_splits_mixed_decode_prefill_batch(monkeypatch) -> None:
+     layer.gate_lower_bound = -5.0
+     layer.A_log = torch.ones(1)
+     layer.dt_bias = torch.ones(1)
+-    layer._b12x_kda_binding = None
++    layer._b12x_kda_plan = None
+     layer.conv1d = SimpleNamespace(
+         weight=torch.ones(3, 1, 3),
+         bias=torch.zeros(3),
+@@ -339,6 +339,61 @@ def test_glm5next_alone_opts_into_b12x_kda_decode() -> None:
+     assert Glm5NextLinearAttention.b12x_kda_null_state_index == 0
+ 
+ 
++@pytest.mark.parametrize(
++    ("backend", "speculative", "uses_b12x"),
++    [
++        ("auto", False, False),
++        ("auto", True, True),
++        ("b12x", False, True),
++        ("b12x", True, True),
++        ("triton", False, False),
++        ("triton", True, False),
++    ],
++)
++def test_glm5next_selects_configured_kda_decode_backend(
++    monkeypatch,
++    backend: str,
++    speculative: bool,
++    uses_b12x: bool,
++) -> None:
++    monkeypatch.setattr(
++        KimiGatedDeltaNetAttention,
++        "__init__",
++        lambda self, config, vllm_config, prefix: None,
++    )
++    vllm_config = SimpleNamespace(
++        additional_config={"glm53_kda_decode_backend": backend},
++        speculative_config=object() if speculative else None,
++    )
++
++    layer = Glm5NextLinearAttention(object(), vllm_config)
++
++    assert layer.enable_b12x_kda_decode is uses_b12x
++
++
++def test_glm5next_defaults_to_hybrid_kda_decode(monkeypatch) -> None:
++    monkeypatch.setattr(
++        KimiGatedDeltaNetAttention,
++        "__init__",
++        lambda self, config, vllm_config, prefix: None,
++    )
++    vllm_config = SimpleNamespace(additional_config={}, speculative_config=None)
++
++    layer = Glm5NextLinearAttention(object(), vllm_config)
++
++    assert layer._glm53_kda_decode_backend == "auto"
++    assert not layer.enable_b12x_kda_decode
++
++
++def test_glm5next_rejects_unknown_kda_decode_backend() -> None:
++    vllm_config = SimpleNamespace(
++        additional_config={"glm53_kda_decode_backend": "unknown"}
++    )
++
++    with pytest.raises(ValueError, match="KDA decode backend"):
++        Glm5NextLinearAttention(object(), vllm_config)
++
++
+ def test_glm5next_b12x_mhc_builds_first_layer_broadcast_fn() -> None:
+     hidden_size = 4
+     hc_mult = 4
+@@ -442,6 +497,34 @@ def test_glm5next_dflash_maps_target_layers_to_completed_outputs() -> None:
+     assert supports_eagle3(Glm5NextForConditionalGeneration)
+ 
+ 
++@pytest.mark.parametrize(
++    ("num_tokens", "expected"),
++    [
++        (1, True),
++        (8, True),
++        (9, False),
++    ],
++)
++def test_glm5next_b12x_mhc_dispatches_decode_sized_batches(
++    num_tokens: int, expected: bool
++) -> None:
++    layer = Glm5NextDecoderLayer.__new__(Glm5NextDecoderLayer)
++    torch.nn.Module.__init__(layer)
++    layer._b12x_mhc = object()
++    layer._b12x_mhc_max_tokens = 8
++
++    assert layer._use_b12x_mhc(torch.empty(num_tokens, 4)) is expected
++
++
++def test_glm5next_b12x_mhc_dispatch_requires_available_backend() -> None:
++    layer = Glm5NextDecoderLayer.__new__(Glm5NextDecoderLayer)
++    torch.nn.Module.__init__(layer)
++    layer._b12x_mhc = None
++    layer._b12x_mhc_max_tokens = 8
++
++    assert not layer._use_b12x_mhc(torch.empty(1, 4))
++
++
+ def test_glm5next_conditional_post_load_finalizes_language_model() -> None:
+     class FakeLanguageModel(torch.nn.Module):
+         def __init__(self) -> None:
+@@ -500,6 +583,82 @@ def test_glm5next_b12x_kda_plan_reserves_null_state_zero(monkeypatch) -> None:
+     assert captured_caps["null_state_index"] == 0
+ 
+ 
++def test_glm5next_b12x_kda_binds_caller_scratch_per_run(monkeypatch) -> None:
++    scratch = torch.empty(32, dtype=torch.uint8)
++    bindings: list[dict[str, object]] = []
++    runs: list[object] = []
++
++    class FakePlan:
++        @staticmethod
++        def shapes_and_dtypes():
++            return (((32,), torch.uint8),)
++
++    class FakeApi:
++        @staticmethod
++        def bind_kda(plan, **kwargs):
++            binding = {"plan": plan, **kwargs}
++            bindings.append(binding)
++            return binding
++
++        @staticmethod
++        def run_kda(binding, **kwargs):
++            runs.append(binding)
++
++    workspace = SimpleNamespace(get_simultaneous=lambda *specs: (scratch,))
++    monkeypatch.setattr(
++        kimi_gdn_linear_attn,
++        "current_workspace_manager",
++        lambda: workspace,
++    )
++
++    layer = Glm5NextLinearAttention.__new__(Glm5NextLinearAttention)
++    torch.nn.Module.__init__(layer)
++    layer._b12x_kda_api = FakeApi()
++    layer._b12x_kda_plan = FakePlan()
++    layer._b12x_kda_max_tokens = 4
++    layer._b12x_kda_max_seqs = 2
++    layer._b12x_kda_state_index_columns = 2
++    layer.local_num_heads = 1
++    layer.head_dim = 2
++    layer.gate_lower_bound = -5.0
++    layer.A_log = torch.ones(1)
++    layer.dt_bias = torch.ones(2)
++    layer.o_norm = SimpleNamespace(weight=torch.ones(2), eps=1e-6)
++    layer.kv_cache = (torch.empty(0), torch.zeros(3, 1, 2, 2))
++    layer._b12x_kda_mixed_qkv = torch.empty(4, 6)
++    layer._b12x_kda_raw_g = torch.empty(4, 1, 2)
++    layer._b12x_kda_raw_beta = torch.empty(4, 1)
++    layer._b12x_kda_z = torch.empty(4, 1, 2)
++    layer._b12x_kda_output = torch.zeros(4, 1, 2)
++    layer._b12x_kda_query_start_loc = torch.zeros(3, dtype=torch.int32)
++    layer._b12x_kda_num_accepted_tokens = torch.ones(2, dtype=torch.int32)
++    layer._b12x_kda_state_indices = torch.zeros(2, 2, dtype=torch.int32)
++    layer._b12x_kda_num_seqs = torch.zeros(1, dtype=torch.int32)
++    layer._b12x_kda_num_tokens = torch.zeros(1, dtype=torch.int32)
++
++    kwargs = dict(
++        mixed_qkv=torch.ones(1, 6),
++        raw_g=torch.ones(1, 1, 2),
++        raw_beta=torch.ones(1, 1),
++        z=torch.ones(1, 1, 2),
++        output=torch.empty(1, 1, 2),
++        state_indices=torch.tensor([[1]], dtype=torch.int32),
++        query_start_loc=torch.tensor([0, 1], dtype=torch.int32),
++        num_accepted_tokens=None,
++        num_requests=1,
++    )
++    layer._run_b12x_kda_decode_post_conv(**kwargs)
++    layer._run_b12x_kda_decode_post_conv(**kwargs)
++
++    assert len(bindings) == 2
++    assert bindings[0] is not bindings[1]
++    assert bindings[0]["scratch"] is scratch
++    assert bindings[1]["scratch"] is scratch
++    assert len(runs) == 2
++    assert runs[0] is bindings[0]
++    assert runs[1] is bindings[1]
++
++
+ def test_glm5next_sparse_mla_selects_b12x_backend(monkeypatch) -> None:
+     captured: dict[str, object] = {}
+ 
+@@ -628,6 +787,40 @@ def test_glm5next_processor_resolves_repository_video_config(
+     )
+ 
+ 
++def test_glm5next_processing_info_pins_processor_revision(monkeypatch) -> None:
++    from vllm.models.glm5next.nvidia.multimodal import Glm5NextProcessingInfo
++
++    calls = []
++    processor = object()
++
++    def fake_from_pretrained(model, **kwargs):
++        calls.append((model, kwargs))
++        return processor
++
++    monkeypatch.setattr(
++        glm5next_processor.Glm5NextProcessor,
++        "from_pretrained",
++        staticmethod(fake_from_pretrained),
++    )
++    info = SimpleNamespace(
++        ctx=SimpleNamespace(
++            model_config=SimpleNamespace(
++                model="local-inference-lab/GLM-5.3-Flash-NVFP4",
++                revision="checkpoint-commit",
++            )
++        )
++    )
++
++    assert Glm5NextProcessingInfo.get_hf_processor(info) is processor
++    assert Glm5NextProcessingInfo.get_hf_processor(info) is processor
++    assert calls == [
++        (
++            "local-inference-lab/GLM-5.3-Flash-NVFP4",
++            {"revision": "checkpoint-commit"},
++        )
++    ]
++
++
+ def test_glm5next_processor_counts_video_only_tokens() -> None:
+     class FakeVideoProcessor:
+         merge_size = 2
+diff --git a/tests/models/test_glm5next_pooled_indexer.py b/tests/models/test_glm5next_pooled_indexer.py
+index 9af76ccb9e05cba21f12e4b4168b05b7d1d17c60..fc98c1530e8b4f2af0df0089db7a5364377602c7 100644
+--- a/tests/models/test_glm5next_pooled_indexer.py
++++ b/tests/models/test_glm5next_pooled_indexer.py
+@@ -8,6 +8,7 @@ import pytest
+ import torch
+ from torch import nn
+ 
++from vllm.models.deepseek_v4.nvidia import b12x_indexer
+ from vllm.models.deepseek_v4.nvidia.b12x_indexer import _flatten_index_cache
+ from vllm.models.glm5next.nvidia.ops.glm_kpool import (
+     expand_c4_block_table,
+@@ -123,10 +124,12 @@ def test_glm53_selector_prefill_lengths_do_not_require_attention_backend() -> No
+         num_decode_tokens=1,
+         prefill=None,
+         prefill_query_lens_cpu=torch.tensor([3], dtype=torch.int32),
++        prefill_seq_lens_cpu=torch.tensor([8], dtype=torch.int32),
+     )
+ 
+     assert metadata.prefill is None
+     assert metadata.prefill_query_lens_cpu.tolist() == [3]
++    assert metadata.prefill_seq_lens_cpu.tolist() == [8]
+ 
+ 
+ def test_glm53_packed_c4_metadata_uses_parent_stride() -> None:
+@@ -376,6 +379,118 @@ def test_glm53_packed_tail_scores_through_existing_c4_indexer() -> None:
+     assert set(output[0, :2].tolist()) == {0, 1}
+ 
+ 
++def test_glm53_deepgemm_prefill_matches_b12x_on_packed_tail(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    device = _require_glm_gpu()
++    _, main = _packed_main_cache(
++        device=device, blocks=2, layers=3, block_size=2304, layer=1
++    )
++    index_cache, _, parent_stride_pages = Glm5NextPooledIndexer._index_cache_view(main)
++    virtual_pages = list(range(parent_stride_pages, parent_stride_pages + 9))
++    generator = torch.Generator(device=device).manual_seed(5303)
++    for virtual_page in virtual_pages:
++        page = index_cache[virtual_page]
++        quant = page.as_strided(
++            (64, 128), (128, 1), storage_offset=page.storage_offset()
++        ).view(torch.float8_e4m3fn)
++        scales = page.as_strided(
++            (64 * 4,),
++            (1,),
++            storage_offset=page.storage_offset() + 64 * 128,
++        ).view(torch.float32)
++        quant.copy_(
++            torch.randn((64, 128), generator=generator, device=device).to(
++                torch.float8_e4m3fn
++            )
++        )
++        scales.copy_(
++            torch.exp2(
++                torch.randint(-3, 3, (64,), generator=generator, device=device).float()
++            )
++        )
++    q = torch.randn(
++        (3, 32, 128), generator=generator, device=device, dtype=torch.float32
++    ).to(torch.float8_e4m3fn)
++    weights = torch.randn(
++        (3, 32), generator=generator, device=device, dtype=torch.float32
++    )
++    seq_lens = torch.tensor([513, 545, 576], dtype=torch.int32, device=device)
++    block_table = torch.tensor([virtual_pages], dtype=torch.int32, device=device)
++    topk = 512
++
++    from vllm.utils.b12x import get_b12x_dsa_indexer
++
++    module = get_b12x_dsa_indexer()
++    assert module is not None
++    plan = module.plan(
++        module.Caps(
++            device=device,
++            source_layout=module.SOURCE_LAYOUT_PAGED,
++            num_q_heads=32,
++            max_q_rows=3,
++            max_page_table_width=len(virtual_pages),
++            topk=topk,
++            mode="prefill",
++            shared_page_table=True,
++        )
++    )
++    scratch = tuple(
++        torch.empty(shape, dtype=dtype, device=device)
++        for shape, dtype in plan.shapes_and_dtypes()
++    )
++    binding = plan.bind(
++        scratch=scratch,
++        real_page_table=block_table.expand(3, -1),
++        cache_seqlens_int32=seq_lens,
++        expected_num_q_heads=32,
++        shared_page_table=True,
++        output_physical_slots=False,
++    )
++    expected = torch.empty((3, topk), dtype=torch.int32, device=device)
++    module.index_topk_fp8(
++        q_fp8=q,
++        weights=weights,
++        index_k_cache=_flatten_index_cache(index_cache),
++        binding=binding,
++        page_size=64,
++        expected_num_q_heads=32,
++        out_indices=expected,
++    )
++
++    class Workspace:
++        def get_simultaneous(self, *specs):
++            return tuple(
++                torch.empty(shape, dtype=dtype, device=device) for shape, dtype in specs
++            )
++
++    monkeypatch.setattr(
++        b12x_indexer,
++        "current_workspace_manager",
++        lambda: Workspace(),
++    )
++    actual = torch.empty_like(expected)
++    b12x_indexer._run_deepgemm_prefill_topk(
++        q=q,
++        weights=weights,
++        kv_cache=index_cache,
++        seq_lens=seq_lens,
++        block_table=block_table,
++        gather_cu_seq_lens=torch.tensor([0, 576], dtype=torch.int32, device=device),
++        row_starts=torch.zeros(3, dtype=torch.int32, device=device),
++        output=actual,
++        topk=topk,
++        total_k_rows=576,
++        workspace_k_rows=576,
++    )
++    torch.accelerator.synchronize()
++
++    assert torch.equal(
++        torch.sort(actual, dim=-1).values,
++        torch.sort(expected, dim=-1).values,
++    )
++
++
+ def test_glm53_pool_write_matches_fp8_reference() -> None:
+     device = _require_glm_gpu()
+     generator = torch.Generator(device=device).manual_seed(53)
+@@ -458,7 +573,7 @@ def test_glm53_decode_tail_completes_the_same_pool_as_prefill() -> None:
+     torch.testing.assert_close(actual_scale, expected_scale.reshape(1), rtol=0, atol=0)
+ 
+ 
+-def test_glm53_decode_writer_matches_batched_prefill_writer() -> None:
++def test_glm53_decode_writer_matches_parallel_prefill_writer() -> None:
+     device = _require_glm_gpu()
+     generator = torch.Generator(device=device).manual_seed(56)
+     key = torch.randn(
+@@ -486,9 +601,13 @@ def test_glm53_decode_writer_matches_batched_prefill_writer() -> None:
+         key,
+         gate,
+         ape,
+-        torch.tensor([-1, -1, -1, 0, -1, -1, -1, 1], device=device),
++        torch.tensor([-1, -1, -1, 3, -1, -1, -1, 7], device=device),
+         torch.arange(8, dtype=torch.int64, device=device),
+         1,
++        num_decode_requests=0,
++        max_query_len=8,
++        model_block_size=256,
++        parent_stride_pages=1,
+     )
+     for position in range(8):
+         update_decode_pools(
+@@ -500,18 +619,127 @@ def test_glm53_decode_writer_matches_batched_prefill_writer() -> None:
+             gate[position : position + 1],
+             ape,
+             torch.tensor(
+-                [position // 4 if position % 4 == 3 else -1],
++                [position if position % 4 == 3 else -1],
+                 dtype=torch.int64,
+                 device=device,
+             ),
+             torch.tensor([position], dtype=torch.int64, device=device),
+             1,
++            model_block_size=256,
++            parent_stride_pages=1,
+         )
+ 
+     assert torch.equal(decode_cache, prefill_cache)
+     assert torch.equal(decode_tail, prefill_tail)
+ 
+ 
++def test_glm53_parallel_prefill_preserves_boundary_tail_and_state_slots() -> None:
++    device = _require_glm_gpu()
++    generator = torch.Generator(device=device).manual_seed(5304)
++    key = torch.randn(
++        (10, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    gate = torch.randn(
++        (10, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    ape = torch.randn(
++        (4, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    initial_tail = torch.randn(
++        (2, 2, 4, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    sequential_tail = initial_tail.clone()
++    parallel_tail = initial_tail.clone()
++    sequential_cache = torch.zeros((2, 64, 132), dtype=torch.uint8, device=device)
++    parallel_cache = torch.zeros_like(sequential_cache)
++    state_slots = torch.tensor([1, 0], dtype=torch.int32, device=device)
++    query_start_loc = torch.tensor([0, 5, 10], dtype=torch.int32, device=device)
++    positions = torch.tensor(
++        [4099, 4100, 4101, 4102, 4103, 4099, 4100, 4101, 4102, 4103],
++        dtype=torch.int64,
++        device=device,
++    )
++    slot_mapping = torch.tensor(
++        [3, -1, -1, -1, 7, 259, -1, -1, -1, 263],
++        dtype=torch.int64,
++        device=device,
++    )
++    common = dict(model_block_size=256, parent_stride_pages=1)
++
++    update_decode_pools(
++        sequential_cache,
++        sequential_tail,
++        state_slots,
++        query_start_loc,
++        key,
++        gate,
++        ape,
++        slot_mapping,
++        positions,
++        2,
++        **common,
++    )
++    update_decode_pools(
++        parallel_cache,
++        parallel_tail,
++        state_slots,
++        query_start_loc,
++        key,
++        gate,
++        ape,
++        slot_mapping,
++        positions,
++        2,
++        num_decode_requests=0,
++        max_query_len=5,
++        **common,
++    )
++
++    assert torch.equal(parallel_cache, sequential_cache)
++    assert torch.equal(parallel_tail, sequential_tail)
++
++
++def test_glm53_parallel_prefill_ignores_invalid_dummy_slots() -> None:
++    device = _require_glm_gpu()
++    generator = torch.Generator(device=device).manual_seed(5305)
++    key = torch.randn(
++        (8, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    gate = torch.randn(
++        (8, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    ape = torch.randn(
++        (4, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    cache = torch.zeros((1, 64, 132), dtype=torch.uint8, device=device)
++    initial_tail = torch.randn(
++        (1, 2, 4, 128), generator=generator, device=device, dtype=torch.bfloat16
++    )
++    tail = initial_tail.clone()
++
++    update_decode_pools(
++        cache,
++        tail,
++        torch.zeros(1, dtype=torch.int32, device=device),
++        torch.tensor([0, 8], dtype=torch.int32, device=device),
++        key,
++        gate,
++        ape,
++        torch.full((8,), -1, dtype=torch.int64, device=device),
++        torch.zeros(8, dtype=torch.int64, device=device),
++        1,
++        num_decode_requests=0,
++        max_query_len=8,
++        model_block_size=256,
++        parent_stride_pages=1,
++    )
++
++    assert torch.count_nonzero(cache).item() == 0
++    torch.testing.assert_close(tail[0, 0, 0], key[-1])
++    torch.testing.assert_close(tail[0, 1, 0], gate[-1])
++    assert torch.equal(tail[:, :, 1:], initial_tail[:, :, 1:])
++
++
+ def test_glm53_tail_state_isolated_between_requests() -> None:
+     device = _require_glm_gpu()
+     generator = torch.Generator(device=device).manual_seed(57)
+diff --git a/tests/v1/attention/test_b12x_sparse_mla_api.py b/tests/v1/attention/test_b12x_sparse_mla_api.py
+index 1227669e39ab4cd8ef22d6403a11040d634f040c..76943ff60661c31d7c96ff36df267906862643cf 100644
+--- a/tests/v1/attention/test_b12x_sparse_mla_api.py
++++ b/tests/v1/attention/test_b12x_sparse_mla_api.py
+@@ -170,10 +170,14 @@ def test_b12x_glm5_next_cache_spec_and_layout(monkeypatch) -> None:
+     assert invalid_reasons == []
+     assert unidentified == probe
+     assert packed_by_glm_backend.state_content_bytes == 528
+-    assert packed_by_glm_backend.page_size_padded == 64 * 528 + 16 * 128 * 2
++    assert packed_by_glm_backend.page_size_padded is None
++    assert packed_by_glm_backend.page_tail_bytes_per_token == 33
++    assert packed_by_glm_backend.page_size_bytes == 64 * (528 + 33)
+     assert packed_by_glm_backend.model_version == "glm5_next"
+     assert packed.state_content_bytes == 528
+-    assert packed.page_size_padded == 64 * 528 + 16 * 128 * 2
++    assert packed.page_size_padded is None
++    assert packed.page_tail_bytes_per_token == 33
++    assert packed.page_size_bytes == 64 * (528 + 33)
+     assert packed.model_version == "glm5_next"
+     assert packed_without_config_context == packed
+     assert layouts == (KVCacheLayout.BLHNC,)
+@@ -515,7 +519,7 @@ def test_glm_selector_metadata_builder_stages_padded_rows_and_capture(
+     monkeypatch.setattr(
+         SparseMLACommonMetadataBuilder,
+         "build",
+-        lambda *args, **kwargs: SimpleNamespace(),
++        lambda *args, **kwargs: SimpleNamespace(num_prefills=0),
+     )
+     builder = _bare_glm_selector_metadata_builder()
+     common = SimpleNamespace(
+@@ -591,7 +595,7 @@ def test_glm_selector_metadata_builder_requires_complete_runtime_state(
+     monkeypatch.setattr(
+         SparseMLACommonMetadataBuilder,
+         "build",
+-        lambda *args, **kwargs: SimpleNamespace(),
++        lambda *args, **kwargs: SimpleNamespace(num_prefills=0),
+     )
+     builder = _bare_glm_selector_metadata_builder()
+     common = SimpleNamespace(
+@@ -839,6 +843,7 @@ def test_b12x_wo_projection_packs_and_runs_public_api(monkeypatch) -> None:
+ 
+ def test_b12x_mhc_uses_public_plan_bind_run(monkeypatch) -> None:
+     calls: dict[str, Any] = {}
++    retained_bindings: list[Any] = []
+ 
+     def make_caps(**kwargs):
+         calls["caps"] = kwargs
+@@ -878,6 +883,11 @@ def test_b12x_mhc_uses_public_plan_bind_run(monkeypatch) -> None:
+     )
+     monkeypatch.setattr(b12x_mla, "_require_b12x_mhc", lambda: module)
+     monkeypatch.setattr(b12x_mla, "current_workspace_manager", lambda: _Workspace())
++    monkeypatch.setattr(
++        b12x_mla,
++        "retain_cuda_graph_capture_resource",
++        retained_bindings.append,
++    )
+ 
+     mhc = b12x_mla.B12xMHCResidual(
+         hidden_size=256,
+@@ -918,6 +928,10 @@ def test_b12x_mhc_uses_public_plan_bind_run(monkeypatch) -> None:
+     assert calls["bind"][1]["scratch"].dtype == torch.uint8
+     assert calls["pre"][1]["binding"].expected_m == 3
+     assert calls["post_pre"][1]["expected_m"] == 3
++    assert retained_bindings == [
++        calls["pre"][1]["binding"],
++        calls["post_pre"][1]["binding"],
++    ]
+     assert residual_out.shape == (3, 4, 256)
+     assert layer_input.shape == (3, 256)
+     assert final is next_outputs[0]
+diff --git a/tests/v1/attention/test_group_head_counts.py b/tests/v1/attention/test_group_head_counts.py
+index 969192681900a059855308560c5212cc0b46f62b..1b4bb0f0d5d291e41e589d38f9f0a70b6ac5499b 100644
+--- a/tests/v1/attention/test_group_head_counts.py
++++ b/tests/v1/attention/test_group_head_counts.py
+@@ -14,6 +14,7 @@ from vllm.v1.attention.backends.cpu_attn import (
+     CPUAttentionMetadataBuilder,
+ )
+ from vllm.v1.attention.backends.flash_attn import FlashAttentionMetadataBuilder
++from vllm.v1.attention.backends.utils import get_kv_cache_dtype_from_layers
+ 
+ requires_cpu = pytest.mark.skipif(
+     not current_platform.is_cpu(), reason="CPU attention backend"
+@@ -127,3 +128,18 @@ def test_flash_attention_geometry_comes_from_the_group():
+     assert builder.num_heads_q == 16
+     assert builder.num_heads_kv == 2
+     assert builder.headdim == 64
++
++
++def test_kv_cache_dtype_comes_from_the_attention_group():
++    """A draft attention group can use a different cache format than its target."""
++    layers = {
++        "draft.layer.0": SimpleNamespace(kv_cache_dtype="fp8"),
++        "draft.layer.1": SimpleNamespace(kv_cache_dtype="fp8"),
++    }
++    with patch(
++        "vllm.v1.attention.backends.utils.get_layers_from_vllm_config",
++        return_value=layers,
++    ):
++        cache_dtype = get_kv_cache_dtype_from_layers(MagicMock(), list(layers))
++
++    assert cache_dtype == "fp8"
+diff --git a/tests/v1/cudagraph/test_breakable_cudagraph.py b/tests/v1/cudagraph/test_breakable_cudagraph.py
+index dc9c1ffb3067863a24c3e4716b9e597408c9343c..a0667e3895c71c10b126aeef3b10c185f05a7c3d 100644
+--- a/tests/v1/cudagraph/test_breakable_cudagraph.py
++++ b/tests/v1/cudagraph/test_breakable_cudagraph.py
+@@ -78,6 +78,51 @@ def test_piecewise_capture_builds_fresh_metadata_for_both_passes():
+     assert create_calls[0][1] is not create_calls[1][1]
+ 
+ 
++def test_breakable_wrapper_retains_capture_resources(monkeypatch):
++    import vllm.compilation.breakable_cudagraph as breakable
++    from vllm.v1.worker.workspace import retain_cuda_graph_capture_resource
++
++    class FakeCapture:
++        def __init__(self, pool):
++            self.pool = pool
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, exc_type, exc, tb):
++            return None
++
++    class FakeOffloader:
++        def sync_prev_onload(self):
++            pass
++
++        def join_after_forward(self):
++            pass
++
++    resource = object()
++
++    def runnable():
++        assert retain_cuda_graph_capture_resource(resource)
++        return object()
++
++    monkeypatch.setattr(breakable, "validate_cudagraph_capturing_enabled", lambda: None)
++    monkeypatch.setattr(breakable, "set_graph_pool_id", lambda _pool: None)
++    monkeypatch.setattr(breakable.gc, "collect", lambda: None)
++    monkeypatch.setattr(torch.accelerator, "empty_cache", lambda: None)
++    monkeypatch.setattr(breakable, "get_offloader", lambda: FakeOffloader())
++    monkeypatch.setattr(breakable, "BreakableCUDAGraphCapture", FakeCapture)
++    monkeypatch.setattr(breakable, "weak_ref_tensors", lambda value: value)
++
++    wrapper = object.__new__(breakable.BreakableCUDAGraphWrapper)
++    wrapper.runnable = runnable
++    wrapper.graph_pool = object()
++    entry = breakable._BreakableEntry(batch_descriptor=object())
++
++    wrapper._capture(entry, (), {})
++
++    assert entry.resources == [resource]
++
++
+ @pytest.fixture(autouse=True)
+ def _reset_breakable_tls():
+     """Defensively clear thread-local capture state between tests so a
+diff --git a/tests/v1/spec_decode/test_dflash2.py b/tests/v1/spec_decode/test_dflash2.py
+index 86cf3327a92252b095405d19d6812a4ee295c26e..8d54a6b2a37121151e4eea2a24ea45af4143b91d 100644
+--- a/tests/v1/spec_decode/test_dflash2.py
++++ b/tests/v1/spec_decode/test_dflash2.py
+@@ -60,6 +60,80 @@ def test_grouped_conv_matches_reference(block_size: int):
+     torch.testing.assert_close(actual, expected.flatten(0, 1).flatten(-2))
+ 
+ 
++def test_dflash2_auxiliary_linears_use_draft_quantization(
++    monkeypatch, default_vllm_config
++):
++    """Every checkpoint-serialized DFlash2 linear receives its quant config."""
++    from torch import nn
++
++    import vllm.model_executor.models.qwen3_dflash2 as dflash2
++
++    class StubLinear(nn.Module):
++        def __init__(self, *args, quant_config=None, **kwargs):
++            super().__init__()
++            self.quant_config = quant_config
++
++    monkeypatch.setattr(dflash2, "ReplicatedLinear", StubLinear)
++    quant_config = object()
++    from vllm.config import set_current_vllm_config
++
++    with set_current_vllm_config(default_vllm_config):
++        grouped_conv = dflash2.DFlashGroupedConv(
++            hidden_size=16,
++            taps=2,
++            group_size=4,
++            block_size=8,
++            params_dtype=torch.float32,
++            quant_config=quant_config,
++            prefix="attention_conv",
++        )
++        selector = dflash2.CandidateSelector(
++            hidden_size=16,
++            vocab_size=32,
++            rank=4,
++            top_k=3,
++            params_dtype=torch.float32,
++            quant_config=quant_config,
++            prefix="candidate_selector",
++        )
++
++    assert grouped_conv.kernel_projection.quant_config is quant_config
++    assert selector.hidden_projection.quant_config is quant_config
++
++
++@pytest.mark.parametrize("mxfp8_layer", [0, 1])
++def test_dflash_context_projection_rejects_mixed_quantization(mxfp8_layer: int):
++    from torch import nn
++
++    from vllm.model_executor.layers.quantization.modelopt import (
++        ModelOptMxFp8LinearMethod,
++    )
++    from vllm.model_executor.models.qwen3_dflash import DFlashQwen3Model
++
++    class UnreadableWeight:
++        def __getitem__(self, _key):
++            raise AssertionError("weights must not be read before validation")
++
++    mxfp8_method = object.__new__(ModelOptMxFp8LinearMethod)
++    methods = [None, None]
++    methods[mxfp8_layer] = mxfp8_method
++    layers_attn = [
++        SimpleNamespace(
++            qkv_proj=SimpleNamespace(
++                quant_method=method,
++                q_size=1,
++                weight=UnreadableWeight(),
++            )
++        )
++        for method in methods
++    ]
++    model = object.__new__(DFlashQwen3Model)
++    nn.Module.__init__(model)
++
++    with pytest.raises(ValueError, match="Every DFlash attention layer"):
++        model._build_context_kv_buffers(layers_attn, has_bias=False)
++
++
+ def test_selector_edges_match_sequential_reference():
+     torch.manual_seed(1)
+     batch, steps, top_k, rank = 2, 4, 3, 5
+diff --git a/tests/v1/worker/test_attn_utils.py b/tests/v1/worker/test_attn_utils.py
+index 06f3635c138097cf87ea1a44e6bc44c2ae349f5c..a0c4d67e2eceb09cf34f2f0de2fce2e49db070d3 100644
+--- a/tests/v1/worker/test_attn_utils.py
++++ b/tests/v1/worker/test_attn_utils.py
+@@ -28,6 +28,7 @@ from vllm.v1.worker.gpu.attn_utils import (
+     build_attn_metadata,
+     get_attn_cg_support,
+     get_query_lens_mismatch_unsupported_backend,
++    synchronize_attention_impl_kv_cache_layout,
+ )
+ from vllm.v1.worker.utils import (
+     AttentionGroup,
+@@ -79,6 +80,26 @@ class _CachingMetadataBuilder:
+         )
+ 
+ 
++def test_attention_impl_cache_layout_preserves_model_specific_dtype():
++    target_cache_config = SimpleNamespace(
++        cache_dtype="fp8_ds_mla", kv_cache_layout=None
++    )
++    draft_cache_config = SimpleNamespace(cache_dtype="fp8", kv_cache_layout=None)
++    layers = {
++        "target": SimpleNamespace(
++            impl=SimpleNamespace(cache_config=target_cache_config)
++        ),
++        "draft": SimpleNamespace(impl=SimpleNamespace(cache_config=draft_cache_config)),
++    }
++
++    synchronize_attention_impl_kv_cache_layout(layers, "BLHNC")
++
++    assert target_cache_config.kv_cache_layout == "BLHNC"
++    assert draft_cache_config.kv_cache_layout == "BLHNC"
++    assert target_cache_config.cache_dtype == "fp8_ds_mla"
++    assert draft_cache_config.cache_dtype == "fp8"
++
++
+ def test_attention_checks_preserve_global_and_target_scoped_support():
+     spec = FullAttentionSpec(
+         block_size=16,
+diff --git a/tests/v1/worker/test_workspace.py b/tests/v1/worker/test_workspace.py
+index a909ea9af89dd68bbee73174459afb7b9a30eaaa..8bbe8e9cc0d178ef886ec46f791568680aa9965c 100644
+--- a/tests/v1/worker/test_workspace.py
++++ b/tests/v1/worker/test_workspace.py
+@@ -100,3 +100,21 @@ def test_workspace_lane_validation(monkeypatch) -> None:
+ 
+     with pytest.raises(ValueError, match="at least one"):
+         workspace.WorkspaceManager(torch.device("cpu"), num_lanes=0)
++
++
++def test_cuda_graph_capture_resources_are_scoped_to_collector() -> None:
++    outside = object()
++    first = object()
++    nested = object()
++    second = object()
++
++    assert not workspace.retain_cuda_graph_capture_resource(outside)
++    with workspace.collect_cuda_graph_capture_resources() as resources:
++        assert workspace.retain_cuda_graph_capture_resource(first)
++        with workspace.collect_cuda_graph_capture_resources() as nested_resources:
++            assert workspace.retain_cuda_graph_capture_resource(nested)
++        assert workspace.retain_cuda_graph_capture_resource(second)
++
++    assert resources == [first, second]
++    assert nested_resources == [nested]
++    assert not workspace.retain_cuda_graph_capture_resource(outside)
+diff --git a/vllm/compilation/breakable_cudagraph.py b/vllm/compilation/breakable_cudagraph.py
+index 6da3ec71786128368adab1027c012bcae0885798..f4fe203714fb2aa24155b9065245084fe2d62b9f 100644
+--- a/vllm/compilation/breakable_cudagraph.py
++++ b/vllm/compilation/breakable_cudagraph.py
+@@ -45,6 +45,7 @@ from vllm.logger import init_logger
+ from vllm.model_executor.offloader.base import get_offloader
+ from vllm.platforms import current_platform
+ from vllm.utils.torch_utils import weak_ref_tensor, weak_ref_tensors
++from vllm.v1.worker.workspace import collect_cuda_graph_capture_resources
+ 
+ logger = init_logger(__name__)
+ 
+@@ -241,6 +242,7 @@ class _BreakableEntry:
+     capture: BreakableCUDAGraphCapture | None = None
+     output: Any = None
+     input_addresses: list[int] | None = None
++    resources: list[Any] | None = None
+ 
+ 
+ class BreakableCUDAGraphWrapper:
+@@ -379,7 +381,7 @@ class BreakableCUDAGraphWrapper:
+         get_offloader().sync_prev_onload()
+ 
+         capture = BreakableCUDAGraphCapture(pool=self.graph_pool)
+-        with capture:
++        with collect_cuda_graph_capture_resources() as resources, capture:
+             output = self.runnable(*args, **kwargs)
+             # Join the offloader's copy stream while we still hold the last
+             # segment open, so the join is captured into the graph (otherwise
+@@ -392,6 +394,7 @@ class BreakableCUDAGraphWrapper:
+             output = weak_ref_tensors(output)
+ 
+         entry.capture = capture
++        entry.resources = resources
+         entry.output = weak_ref_tensors(output)
+ 
+         logger.debug(
+diff --git a/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py b/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
+index a6760cb856e7e6808159490e794e022dd4a62db5..469e9a712bc99eccc9d10a44983fbaa705bf83e3 100644
+--- a/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
++++ b/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
+@@ -26,6 +26,7 @@ from vllm.third_party.flash_linear_attention.ops.kda import FusedRMSNormGated
+ from vllm.transformers_utils.configs.kimi_linear import KimiLinearConfig
+ from vllm.utils.b12x import get_b12x_gdn_decode
+ from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
++from vllm.v1.worker.workspace import current_workspace_manager
+ 
+ from ...linear import (
+     ColumnParallelLinear,
+@@ -308,7 +309,6 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+         self.o_norm = FusedRMSNormGated(self.head_dim, activation="sigmoid")
+         self._b12x_kda_api: Any | None = None
+         self._b12x_kda_plan = None
+-        self._b12x_kda_binding = None
+         self._initialize_b12x_kda_decode(vllm_config)
+         self.o_proj = RowParallelLinear(
+             self.projection_size,
+@@ -412,12 +412,6 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+             torch.zeros(1, dtype=torch.int32, device=device),
+             persistent=False,
+         )
+-        scratch_spec = provisional.scratch_specs()[0]
+-        self.register_buffer(
+-            "_b12x_kda_scratch",
+-            torch.empty(scratch_spec.shape, dtype=scratch_spec.dtype, device=device),
+-            persistent=False,
+-        )
+ 
+     def _make_b12x_kda_plan(self, max_state_slots: int):
+         api = self._b12x_kda_api
+@@ -450,27 +444,8 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+         recurrent_state = self.kv_cache[1]
+         plan = self._make_b12x_kda_plan(max_state_slots=recurrent_state.shape[0])
+         self._b12x_kda_plan = plan
+-        self._b12x_kda_binding = api.bind_kda(
+-            plan,
+-            scratch=self._b12x_kda_scratch,
+-            mixed_qkv=self._b12x_kda_mixed_qkv,
+-            raw_g=self._b12x_kda_raw_g,
+-            raw_beta=self._b12x_kda_raw_beta,
+-            z=self._b12x_kda_z,
+-            A_log=self.A_log,
+-            dt_bias=self.dt_bias.view(self.local_num_heads, self.head_dim),
+-            norm_weight=self.o_norm.weight,
+-            recurrent_state=recurrent_state,
+-            query_start_loc=self._b12x_kda_query_start_loc,
+-            num_accepted_tokens=self._b12x_kda_num_accepted_tokens,
+-            state_indices=self._b12x_kda_state_indices,
+-            num_seqs=self._b12x_kda_num_seqs,
+-            num_tokens=self._b12x_kda_num_tokens,
+-            output=self._b12x_kda_output,
+-        )
+ 
+     def unbind_kv_cache(self) -> None:
+-        self._b12x_kda_binding = None
+         self._b12x_kda_plan = None
+         super().unbind_kv_cache()
+ 
+@@ -486,7 +461,7 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+ 
+     def _can_use_b12x_kda_decode(self, m: GDNAttentionMetadata) -> bool:
+         if (
+-            self._b12x_kda_binding is None
++            self._b12x_kda_plan is None
+             or m.num_prefills != 0
+             or (m.num_decodes == 0 and m.num_spec_decodes == 0)
+         ):
+@@ -518,9 +493,9 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+         num_accepted_tokens: torch.Tensor | None,
+         num_requests: int,
+     ) -> None:
+-        binding = self._b12x_kda_binding
++        plan = self._b12x_kda_plan
+         api = self._b12x_kda_api
+-        if binding is None or api is None:
++        if plan is None or api is None:
+             raise RuntimeError("b12x KDA KV cache was not bound before inference")
+         num_tokens = int(mixed_qkv.shape[0])
+         state_columns = int(state_indices.shape[1])
+@@ -559,6 +534,33 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+             query_start_loc[num_requests : num_requests + 1]
+         )
+ 
++        scratch_buffers = current_workspace_manager().get_simultaneous(
++            *plan.shapes_and_dtypes()
++        )
++        if not scratch_buffers:
++            raise RuntimeError("b12x KDA plan did not expose caller scratch")
++        scratch: torch.Tensor | tuple[torch.Tensor, ...]
++        scratch = (
++            scratch_buffers[0] if len(scratch_buffers) == 1 else tuple(scratch_buffers)
++        )
++        binding = api.bind_kda(
++            plan,
++            scratch=scratch,
++            mixed_qkv=self._b12x_kda_mixed_qkv,
++            raw_g=self._b12x_kda_raw_g,
++            raw_beta=self._b12x_kda_raw_beta,
++            z=self._b12x_kda_z,
++            A_log=self.A_log,
++            dt_bias=self.dt_bias.view(self.local_num_heads, self.head_dim),
++            norm_weight=self.o_norm.weight,
++            recurrent_state=self.kv_cache[1],
++            query_start_loc=self._b12x_kda_query_start_loc,
++            num_accepted_tokens=self._b12x_kda_num_accepted_tokens,
++            state_indices=self._b12x_kda_state_indices,
++            num_seqs=self._b12x_kda_num_seqs,
++            num_tokens=self._b12x_kda_num_tokens,
++            output=self._b12x_kda_output,
++        )
+         api.run_kda(
+             binding,
+             lower_bound=self.gate_lower_bound,
+diff --git a/vllm/model_executor/models/qwen3_dflash.py b/vllm/model_executor/models/qwen3_dflash.py
+index f5a7bff8fc6e1521b9d39f23612a0ff8004e476a..e3db761961bc8d7ffec06b4d16c00628caed8f05 100644
+--- a/vllm/model_executor/models/qwen3_dflash.py
++++ b/vllm/model_executor/models/qwen3_dflash.py
+@@ -472,6 +472,14 @@ class DFlashQwen3Model(nn.Module):
+             self.config.hidden_size,
+             eps=self.config.rms_norm_eps,
+         )
++        # The context projection concatenates K/V weights from every draft
++        # layer. It is not a LinearBase module because its output layout is a
++        # DFlash-specific fusion. Serialized MXFP8 checkpoints retain an
++        # independently packed copy in this parameter container.
++        self._fused_kv_linear = nn.Module()
++        self._fused_kv_quant_method = None
++        self._fused_kv_weight: torch.Tensor | None = None
++        self._fused_kv_weight_scale: torch.Tensor | None = None
+ 
+     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+         embeds = self.embed_tokens(input_ids)
+@@ -486,11 +494,31 @@ class DFlashQwen3Model(nn.Module):
+         layers_attn: list[nn.Module],
+         has_bias: bool,
+     ) -> None:
++        from vllm.model_executor.layers.quantization.modelopt import (
++            ModelOptMxFp8LinearMethod,
++        )
++
++        quant_methods = [a.qkv_proj.quant_method for a in layers_attn]
++        uses_mxfp8 = [
++            isinstance(method, ModelOptMxFp8LinearMethod) for method in quant_methods
++        ]
++        if any(uses_mxfp8) and not all(uses_mxfp8):
++            raise ValueError(
++                "Every DFlash attention layer must use the same MXFP8 "
++                "linear format for the fused context K/V projection."
++            )
++
+         self._hidden_norm_weight = self.hidden_norm.weight.data
+ 
+         # KV projection weights: [num_layers * 2 * kv_size, hidden_size]
+         kv_weights = [a.qkv_proj.weight[a.q_size :] for a in layers_attn]
+         self._fused_kv_weight = torch.cat(kv_weights, dim=0)
++
++        if all(uses_mxfp8):
++            kv_scales = [a.qkv_proj.weight_scale[a.q_size :] for a in layers_attn]
++            self._fused_kv_weight_scale = torch.cat(kv_scales, dim=0)
++        else:
++            self._fused_kv_weight_scale = None
+         if has_bias:
+             kv_biases = [a.qkv_proj.bias[a.q_size :] for a in layers_attn]
+             self._fused_kv_bias: torch.Tensor | None = torch.cat(kv_biases, dim=0)
+@@ -546,6 +574,41 @@ class DFlashQwen3Model(nn.Module):
+         # References to inner Attention layers for direct cache writes
+         self._attn_layers = [layer.self_attn.attn for layer in self.layers]
+ 
++    def process_weights_after_loading(self) -> None:
++        """Pack the serialized MXFP8 context projection for its GEMM backend."""
++        from vllm.model_executor.layers.quantization.modelopt import (
++            ModelOptMxFp8LinearMethod,
++        )
++
++        quant_method = self.layers[0].self_attn.qkv_proj.quant_method
++        if not isinstance(quant_method, ModelOptMxFp8LinearMethod):
++            return
++        if self._fused_kv_weight is None or self._fused_kv_weight_scale is None:
++            raise RuntimeError(
++                "The DFlash MXFP8 context projection requires serialized K/V "
++                "weights and block scales to be fused during checkpoint loading."
++            )
++
++        output_size, input_size = self._fused_kv_weight.shape
++        self._fused_kv_linear.input_size_per_partition = input_size
++        self._fused_kv_linear.output_size_per_partition = output_size
++        self._fused_kv_linear.logical_widths = [output_size]
++        self._fused_kv_linear.register_parameter(
++            "weight", nn.Parameter(self._fused_kv_weight, requires_grad=False)
++        )
++        self._fused_kv_linear.register_parameter(
++            "weight_scale",
++            nn.Parameter(self._fused_kv_weight_scale, requires_grad=False),
++        )
++        quant_method.process_weights_after_loading(self._fused_kv_linear)
++        self._fused_kv_quant_method = quant_method
++        self._fused_kv_weight = None
++        self._fused_kv_weight_scale = None
++        logger.info_once(
++            "Using %s for the fused DFlash context K/V projection.",
++            type(quant_method.kernel).__name__,
++        )
++
+     def _project_context_kv(
+         self,
+         context_states: torch.Tensor,
+@@ -562,9 +625,18 @@ class DFlashQwen3Model(nn.Module):
+             self._hidden_norm_weight,
+             self._rms_norm_eps,
+         )
+-        all_kv_flat = F.linear(
+-            normed_context_states, self._fused_kv_weight, self._fused_kv_bias
+-        )
++        if self._fused_kv_quant_method is None:
++            if self._fused_kv_weight is None:
++                raise RuntimeError("DFlash context K/V projection is not initialized.")
++            all_kv_flat = F.linear(
++                normed_context_states, self._fused_kv_weight, self._fused_kv_bias
++            )
++        else:
++            all_kv_flat = self._fused_kv_quant_method.apply(
++                self._fused_kv_linear,
++                normed_context_states,
++                self._fused_kv_bias,
++            )
+         # Single contiguous copy that separates K/V and transposes to
+         # layer-major layout.  Result: [2, L, num_ctx, nkv, hd] contiguous.
+         # Indexing dim-0 gives contiguous [L, num_ctx, nkv, hd] for K and V.
+@@ -793,6 +865,10 @@ class DFlashQwen3ForCausalLM(Qwen3ForCausalLM):
+             context_states, context_positions, context_slot_mapping
+         )
+ 
++    def process_weights_after_loading(self) -> None:
++        """Finalize the DFlash fused context projection after linear packing."""
++        self.model.process_weights_after_loading()
++
+     def combine_hidden_states(
+         self,
+         hidden_states: torch.Tensor,
+diff --git a/vllm/model_executor/models/qwen3_dflash2.py b/vllm/model_executor/models/qwen3_dflash2.py
+index cb027293f98185b2baa467b00c153d75c7840a49..caaedb5578aca4dc56c70d9553a90225eae9a521 100644
+--- a/vllm/model_executor/models/qwen3_dflash2.py
++++ b/vllm/model_executor/models/qwen3_dflash2.py
+@@ -51,6 +51,7 @@ class DFlashGroupedConv(nn.Module):
+         group_size: int,
+         block_size: int,
+         params_dtype: torch.dtype,
++        quant_config: QuantizationConfig | None,
+         prefix: str,
+     ) -> None:
+         super().__init__()
+@@ -71,7 +72,7 @@ class DFlashGroupedConv(nn.Module):
+             2 * taps * self.num_groups,
+             bias=False,
+             params_dtype=params_dtype,
+-            quant_config=None,
++            quant_config=quant_config,
+             prefix=maybe_prefix(prefix, "kernel_projection"),
+             return_bias=False,
+         )
+@@ -130,6 +131,7 @@ class DFlash2Qwen3DecoderLayer(DFlashQwen3DecoderLayer):
+             # Query tokens per request: the bonus token plus the mask tokens.
+             block_size=1 + speculative_config.num_speculative_tokens,
+             params_dtype=vllm_config.model_config.dtype,
++            quant_config=quant_config,
+         )
+         self.attention_conv = DFlashGroupedConv(
+             **conv_args, prefix=maybe_prefix(prefix, "attention_conv")
+@@ -193,6 +195,7 @@ class CandidateSelector(nn.Module):
+         rank: int,
+         top_k: int,
+         params_dtype: torch.dtype,
++        quant_config: QuantizationConfig | None,
+         prefix: str,
+     ) -> None:
+         super().__init__()
+@@ -208,7 +211,7 @@ class CandidateSelector(nn.Module):
+             rank,
+             bias=False,
+             params_dtype=params_dtype,
+-            quant_config=None,
++            quant_config=quant_config,
+             prefix=maybe_prefix(prefix, "hidden_projection"),
+             return_bias=False,
+         )
+@@ -259,6 +262,7 @@ class DFlash2Qwen3Model(DFlashQwen3Model):
+                 rank=int(draft_config["selector_rank"]),
+                 top_k=int(draft_config["selector_top_k"]),
+                 params_dtype=vllm_config.model_config.dtype,
++                quant_config=self.quant_config,
+                 prefix=maybe_prefix(prefix, "candidate_selector"),
+             )
+ 
+diff --git a/vllm/models/deepseek_v4/nvidia/b12x.py b/vllm/models/deepseek_v4/nvidia/b12x.py
+index 6e4c4003072864a11342921314d9bf3392fb3cc8..649b502890917c71b69ed0bbdabfbc2a5de720fa 100644
+--- a/vllm/models/deepseek_v4/nvidia/b12x.py
++++ b/vllm/models/deepseek_v4/nvidia/b12x.py
+@@ -38,7 +38,10 @@ from vllm.v1.attention.backend import AttentionCGSupport
+ from vllm.v1.attention.backends.mla.compressor_utils import (
+     get_dspark_swa_index_width,
+ )
+-from vllm.v1.worker.workspace import current_workspace_manager
++from vllm.v1.worker.workspace import (
++    current_workspace_manager,
++    retain_cuda_graph_capture_resource,
++)
+ 
+ if TYPE_CHECKING:
+     from vllm.v1.attention.backends.mla.sparse_swa import (
+@@ -170,7 +173,7 @@ class B12xMHCResidual:
+             raise ValueError("B12x mHC scratch plan did not provide any buffers.")
+         scratch: torch.Tensor | tuple[torch.Tensor, ...]
+         scratch = buffers[0] if len(buffers) == 1 else tuple(buffers)
+-        return self._bind(
++        binding = self._bind(
+             plan,
+             scratch=scratch,
+             tokens=tokens,
+@@ -180,6 +183,8 @@ class B12xMHCResidual:
+             out=out,
+             expected_m=expected_m,
+         )
++        retain_cuda_graph_capture_resource(binding)
++        return binding
+ 
+     def run_pre(
+         self,
+diff --git a/vllm/models/deepseek_v4/nvidia/b12x_indexer.py b/vllm/models/deepseek_v4/nvidia/b12x_indexer.py
+index 212730d2f44aac08a8807532efa9c69991cf22ff..ccc915dfb5b56f91a245bba2e0c3cb5c858fcee0 100644
+--- a/vllm/models/deepseek_v4/nvidia/b12x_indexer.py
++++ b/vllm/models/deepseek_v4/nvidia/b12x_indexer.py
+@@ -8,10 +8,12 @@ from typing import Any, cast
+ import torch
+ from torch import nn
+ 
++from vllm import _custom_ops as ops
+ from vllm.config import CUDAGraphMode, VllmConfig
+ from vllm.forward_context import get_forward_context
+ from vllm.platforms import current_platform
+ from vllm.utils.b12x import get_b12x_dsa_indexer
++from vllm.utils.deep_gemm import fp8_fp4_mqa_logits
+ from vllm.v1.attention.backend import AttentionCGSupport
+ from vllm.v1.attention.backends.mla.indexer import (
+     DeepseekV4IndexerBackend,
+@@ -239,6 +241,95 @@ def _run_paged_topk(
+     )
+ 
+ 
++def _run_deepgemm_prefill_topk(
++    *,
++    q: torch.Tensor,
++    weights: torch.Tensor,
++    kv_cache: torch.Tensor,
++    seq_lens: torch.Tensor,
++    block_table: torch.Tensor,
++    gather_cu_seq_lens: torch.Tensor,
++    row_starts: torch.Tensor,
++    output: torch.Tensor,
++    topk: int,
++    total_k_rows: int,
++    workspace_k_rows: int,
++) -> None:
++    """Gather a shared paged cache and score prefill rows with DeepGEMM."""
++    q_rows = int(q.shape[0])
++    expected_cache_tail = (_INDEX_PAGE_SIZE, _INDEX_HEAD_DIM + _INDEX_SCALE_BYTES)
++    if q.ndim != 3 or int(q.shape[2]) != _INDEX_HEAD_DIM:
++        raise ValueError(
++            "DeepGEMM C4 prefill queries must have shape [rows, heads, 128]"
++        )
++    if weights.shape != (q_rows, int(q.shape[1])) or weights.dtype != torch.float32:
++        raise ValueError("DeepGEMM C4 prefill weights must be FP32 [rows, heads]")
++    if (
++        kv_cache.ndim != 3
++        or kv_cache.dtype != torch.uint8
++        or tuple(kv_cache.shape[1:]) != expected_cache_tail
++    ):
++        raise ValueError("DeepGEMM C4 prefill cache must be uint8 [pages, 64, 132]")
++    if seq_lens.shape != (q_rows,) or seq_lens.dtype != torch.int32:
++        raise ValueError("DeepGEMM C4 prefill lengths must be int32 [rows]")
++    if block_table.ndim != 2 or int(block_table.shape[0]) != 1:
++        raise ValueError("DeepGEMM C4 prefill requires one shared page-table row")
++    if gather_cu_seq_lens.shape != (2,) or gather_cu_seq_lens.dtype != torch.int32:
++        raise ValueError("DeepGEMM C4 gather boundaries must be int32 [2]")
++    if row_starts.shape != (q_rows,) or row_starts.dtype != torch.int32:
++        raise ValueError("DeepGEMM C4 row starts must be int32 [rows]")
++    if output.shape != (q_rows, int(topk)) or output.dtype != torch.int32:
++        raise ValueError("DeepGEMM C4 prefill output must be int32 [rows, topk]")
++    if not 0 <= int(total_k_rows) <= int(workspace_k_rows):
++        raise ValueError(
++            "DeepGEMM C4 gathered length exceeds workspace capacity: "
++            f"length={total_k_rows}, capacity={workspace_k_rows}"
++        )
++
++    output.fill_(-1)
++    if q_rows == 0 or total_k_rows == 0:
++        return
++
++    active_pages = (int(total_k_rows) + _INDEX_PAGE_SIZE - 1) // _INDEX_PAGE_SIZE
++    if active_pages > int(block_table.shape[1]):
++        raise ValueError(
++            "DeepGEMM C4 page table does not cover the gathered prefix: "
++            f"required={active_pages}, available={block_table.shape[1]}"
++        )
++
++    k_quant_full, k_scale_full = current_workspace_manager().get_simultaneous(
++        ((max(int(workspace_k_rows), 1), _INDEX_HEAD_DIM), q.dtype),
++        ((max(int(workspace_k_rows), 1), _INDEX_SCALE_BYTES), torch.uint8),
++    )
++    k_quant = k_quant_full[:total_k_rows]
++    k_scale_bytes = k_scale_full[:total_k_rows]
++    ops.cp_gather_indexer_k_quant_cache(
++        kv_cache,
++        k_quant,
++        k_scale_bytes,
++        block_table[:, :active_pages],
++        gather_cu_seq_lens,
++    )
++    logits = fp8_fp4_mqa_logits(
++        (q, None),
++        (k_quant, k_scale_bytes.view(torch.float32).squeeze(-1)),
++        weights,
++        row_starts,
++        seq_lens,
++        clean_logits=False,
++    )
++    ops.top_k_per_row_prefill(
++        logits,
++        row_starts,
++        seq_lens,
++        output,
++        q_rows,
++        int(logits.stride(0)),
++        int(logits.stride(1)),
++        int(topk),
++    )
++
++
+ class B12xC4SparseIndexer(nn.Module):
+     """Shared C4 FP8 paged indexer used by DeepSeek V4 and GLM-5.3-Flash."""
+ 
+@@ -301,6 +392,18 @@ class B12xC4SparseIndexer(nn.Module):
+             if shared_page_table:
+                 _assert_prefill_route(plan)
+             current_workspace_manager().get_simultaneous(*plan.shapes_and_dtypes())
++        current_workspace_manager().get_simultaneous(
++            ((max(self.max_model_len, 1), _INDEX_HEAD_DIM), q.dtype),
++            (
++                (max(self.max_model_len, 1), _INDEX_SCALE_BYTES),
++                torch.uint8,
++            ),
++        )
++        torch.empty(
++            (max(q_rows, 1), max(self.max_model_len, 1)),
++            dtype=torch.float32,
++            device=q.device,
++        )
+ 
+     def reserve_profile_workspace(self, q: torch.Tensor) -> None:
+         self._reserve_profile_workspace(q)
+@@ -347,6 +450,35 @@ class B12xC4SparseIndexer(nn.Module):
+         )
+         return output
+ 
++    def run_deepgemm_prefill_topk(
++        self,
++        *,
++        q: torch.Tensor,
++        weights: torch.Tensor,
++        kv_cache: torch.Tensor,
++        seq_lens: torch.Tensor,
++        block_table: torch.Tensor,
++        gather_cu_seq_lens: torch.Tensor,
++        row_starts: torch.Tensor,
++        output: torch.Tensor,
++        total_k_rows: int,
++    ) -> torch.Tensor:
++        """Use DeepGEMM for shared-page-table C4 prefill selection."""
++        _run_deepgemm_prefill_topk(
++            q=q,
++            weights=weights,
++            kv_cache=kv_cache,
++            seq_lens=seq_lens,
++            block_table=block_table,
++            gather_cu_seq_lens=gather_cu_seq_lens,
++            row_starts=row_starts,
++            output=output,
++            topk=self.topk_tokens,
++            total_k_rows=int(total_k_rows),
++            workspace_k_rows=self.max_model_len,
++        )
++        return output
++
+     def forward(
+         self,
+         hidden_states: torch.Tensor,
+diff --git a/vllm/models/glm5next/nvidia/kda.py b/vllm/models/glm5next/nvidia/kda.py
+index 47f2823fc6c207e5e4c3383c1549e4bb342f92b6..deb4c43527d2338ea884702381d8931f337d673a 100644
+--- a/vllm/models/glm5next/nvidia/kda.py
++++ b/vllm/models/glm5next/nvidia/kda.py
+@@ -2,8 +2,11 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ """GLM-5.3 KDA modeling adapter."""
+ 
++from typing import Any
++
+ import torch
+ 
++from vllm.config import VllmConfig
+ from vllm.model_executor.layers.mamba.gdn.kimi_gdn_linear_attn import (
+     KimiGatedDeltaNetAttention,
+ )
+@@ -15,6 +18,33 @@ class Glm5NextLinearAttention(KimiGatedDeltaNetAttention):
+     enable_b12x_kda_decode = True
+     b12x_kda_null_state_index = 0
+ 
++    def __init__(
++        self,
++        config: Any,
++        vllm_config: VllmConfig,
++        prefix: str = "",
++    ) -> None:
++        additional_config = vllm_config.additional_config
++        backend = (
++            additional_config.get("glm53_kda_decode_backend", "auto")
++            if isinstance(additional_config, dict)
++            else "auto"
++        )
++        if backend not in ("auto", "b12x", "triton"):
++            raise ValueError(
++                "GLM-5.3 KDA decode backend must be 'auto', 'b12x', or "
++                "'triton', "
++                f"got {backend!r}."
++            )
++        self._glm53_kda_decode_backend = backend
++        # A recurrent cache uses one KDA implementation for its full lifetime.
++        # Keeping its BF16 rounding consistent prevents speculative acceptance
++        # from depending on whether a step entered through plain or spec decode.
++        self.enable_b12x_kda_decode = backend == "b12x" or (
++            backend == "auto" and vllm_config.speculative_config is not None
++        )
++        super().__init__(config, vllm_config, prefix)
++
+     def forward(  # type: ignore[override]
+         self,
+         hidden_states: torch.Tensor,
+diff --git a/vllm/models/glm5next/nvidia/model.py b/vllm/models/glm5next/nvidia/model.py
+index 6b499ce780661faa81bc83f9e41ed97fad73e9e7..8b26bed16102052a7576029fbb240052eb4822dc 100644
+--- a/vllm/models/glm5next/nvidia/model.py
++++ b/vllm/models/glm5next/nvidia/model.py
+@@ -437,6 +437,17 @@ class Glm5NextDecoderLayer(nn.Module):
+             self.mhc_post_op = MHCPostOp()
+             self.mhc_fused_post_pre_op = MHCFusedPostPreOp()
+             self._b12x_mhc = None
++            max_decode_tokens = int(vllm_config.scheduler_config.max_num_seqs) * (
++                1 + int(vllm_config.num_speculative_tokens)
++            )
++            max_cudagraph_tokens = int(
++                vllm_config.compilation_config.max_cudagraph_capture_size or 0
++            )
++            max_b12x_mhc_tokens = max(max_decode_tokens, max_cudagraph_tokens)
++            if self.is_sequence_parallel:
++                tp_size = int(parallel_config.tensor_parallel_size)
++                max_b12x_mhc_tokens = (max_b12x_mhc_tokens + tp_size - 1) // tp_size
++            self._b12x_mhc_max_tokens = max_b12x_mhc_tokens
+             if (
+                 current_platform.is_cuda()
+                 and current_platform.is_device_capability_family(120)
+@@ -493,9 +504,11 @@ class Glm5NextDecoderLayer(nn.Module):
+         # hc_post with this layer's attn hc_pre into one kernel (inter-layer
+         # fusion). Layer 0 has no incoming state -> standalone hc_pre.
+         x = hidden_states
++        use_b12x_mhc = self._use_b12x_mhc(x)
+         if post is None:
+-            if self._b12x_mhc is not None:
++            if use_b12x_mhc:
+                 assert self.hc_attn_fn_broadcast is not None
++                assert self._b12x_mhc is not None
+                 residual, post, comb, x = self._b12x_mhc.run_pre(
+                     x,
+                     self.hc_attn_fn_broadcast,
+@@ -527,6 +540,7 @@ class Glm5NextDecoderLayer(nn.Module):
+                 self.hc_attn_base,
+                 norm_weight=self.input_layernorm.weight,
+                 norm_eps=self.input_layernorm.variance_epsilon,
++                use_b12x_mhc=use_b12x_mhc,
+             )
+ 
+         # Attention needs the full token sequence; mHC above ran on the SP
+@@ -553,6 +567,7 @@ class Glm5NextDecoderLayer(nn.Module):
+             self.hc_ffn_base,
+             norm_weight=self.post_attention_layernorm.weight,
+             norm_eps=self.post_attention_layernorm.variance_epsilon,
++            use_b12x_mhc=use_b12x_mhc,
+         )
+ 
+         # Fully Connected
+@@ -565,7 +580,7 @@ class Glm5NextDecoderLayer(nn.Module):
+         # to fuse with) then contracts; every other layer defers its hc_post to
+         # the next layer's fused pre, returning the state.
+         if self.layer_idx == self.num_hidden_layers - 1:
+-            x = self.hc_post(x, residual, post, comb)
++            x = self.hc_post(x, residual, post, comb, use_b12x_mhc=use_b12x_mhc)
+             x = hc_contract(x, self.n)
+             return x, None, None, None
+ 
+@@ -595,14 +610,31 @@ class Glm5NextDecoderLayer(nn.Module):
+         )
+         return post_mix, res_mix, layer_input
+ 
++    def _use_b12x_mhc(self, x: torch.Tensor) -> bool:
++        """Select B12X for decode-sized batches, including graph padding.
++
++        TileLang handles larger prefill batches. The threshold is expressed in
++        rank-local tokens so sequence-parallel layers make the same selection
++        before and after attention.
++        """
++        return self._b12x_mhc is not None and x.shape[0] <= self._b12x_mhc_max_tokens
++
+     def hc_post(
+         self,
+         x: torch.Tensor,
+         residual: torch.Tensor,
+         post: torch.Tensor,
+         comb: torch.Tensor,
++        *,
++        use_b12x_mhc: bool | None = None,
+     ):
+-        if self._b12x_mhc is not None:
++        # Auxiliary-state capture completes deferred mHC state outside the
++        # decoder-layer forward, so it must derive the backend from the same
++        # rank-local token count used by the layer dispatch.
++        if use_b12x_mhc is None:
++            use_b12x_mhc = self._use_b12x_mhc(x)
++        if use_b12x_mhc:
++            assert self._b12x_mhc is not None
+             return self._b12x_mhc.run_post(x, residual, post, comb)
+         return self.mhc_post_op(x, residual, post, comb)
+ 
+@@ -617,8 +649,11 @@ class Glm5NextDecoderLayer(nn.Module):
+         hc_base: torch.Tensor,
+         norm_weight: torch.Tensor | None = None,
+         norm_eps: float = 0.0,
++        *,
++        use_b12x_mhc: bool,
+     ):
+-        if self._b12x_mhc is not None:
++        if use_b12x_mhc:
++            assert self._b12x_mhc is not None
+             return self._b12x_mhc.run_post_pre(
+                 x,
+                 residual,
+diff --git a/vllm/models/glm5next/nvidia/multimodal.py b/vllm/models/glm5next/nvidia/multimodal.py
+index 15e25ade33b7f5182385345847f4e4b0594606cd..951fef21d876924224aa6a0f27b08999794be6a5 100644
+--- a/vllm/models/glm5next/nvidia/multimodal.py
++++ b/vllm/models/glm5next/nvidia/multimodal.py
+@@ -630,7 +630,10 @@ class Glm5NextProcessingInfo(Glm4vProcessingInfo):
+         if proc is None:
+             from vllm.transformers_utils.processors.glm5next import Glm5NextProcessor
+ 
+-            proc = Glm5NextProcessor.from_pretrained(self.ctx.model_config.model)
++            proc = Glm5NextProcessor.from_pretrained(
++                self.ctx.model_config.model,
++                revision=self.ctx.model_config.revision,
++            )
+             self._glm5_hf_processor = proc
+         return proc
+ 
+diff --git a/vllm/models/glm5next/nvidia/ops/glm_kpool.py b/vllm/models/glm5next/nvidia/ops/glm_kpool.py
+index 6f65e93008b5feb958e4df792d023c1050f098ea..e9c2e1d29a38fb0812bce02d1eb3059d6ea30aa5 100644
+--- a/vllm/models/glm5next/nvidia/ops/glm_kpool.py
++++ b/vllm/models/glm5next/nvidia/ops/glm_kpool.py
+@@ -251,6 +251,195 @@ def _decode_update_kernel(
+         tl.store(tail + base + tail_stride_1 + dim, current_gate, mask=dim_mask)
+ 
+ 
++@triton.jit
++def _prefill_pool_kernel(
++    cache_fp8,
++    cache_fp32,
++    tail,
++    state_slots,
++    query_start_loc,
++    key,
++    gate,
++    ape,
++    slot_mapping,
++    positions,
++    page_stride_bytes,
++    model_block_size,
++    parent_stride_pages,
++    tail_stride_0,
++    tail_stride_1,
++    tail_stride_2,
++    key_stride_0,
++    gate_stride_0,
++    ape_stride_0,
++    request_offset,
++    PAGE_SIZE: tl.constexpr,
++    HEAD_DIM: tl.constexpr,
++    POOL_SIZE: tl.constexpr,
++    FP8_MAX: tl.constexpr,
++    BLOCK_D: tl.constexpr,
++):
++    request = request_offset + tl.program_id(0)
++    pool_ordinal = tl.program_id(1)
++    state_slot = tl.load(state_slots + request).to(tl.int64)
++    start = tl.load(query_start_loc + request).to(tl.int64)
++    end = tl.load(query_start_loc + request + 1).to(tl.int64)
++    has_rows = end > start
++    first_position = tl.load(positions + start, mask=has_rows, other=0).to(tl.int64)
++    first_physical_slot = first_position % POOL_SIZE
++    first_completion = start + (POOL_SIZE - 1 - first_physical_slot)
++    completion_row = first_completion + pool_ordinal * POOL_SIZE
++    write_pool = has_rows & (completion_row < end) & (state_slot >= 0)
++    completion_position = tl.load(
++        positions + completion_row, mask=write_pool, other=-1
++    ).to(tl.int64)
++    write_pool &= completion_position % POOL_SIZE == POOL_SIZE - 1
++    main_cache_location = tl.load(
++        slot_mapping + completion_row, mask=write_pool, other=-1
++    ).to(tl.int64)
++    write_pool &= main_cache_location >= 0
++    parent_page = main_cache_location // model_block_size
++    model_page_offset = main_cache_location - parent_page * model_block_size
++    pool_offset = model_page_offset // POOL_SIZE
++    child_page = pool_offset // PAGE_SIZE
++    child_offset = pool_offset - child_page * PAGE_SIZE
++    cache_location = (
++        parent_page * parent_stride_pages + child_page
++    ) * PAGE_SIZE + child_offset
++
++    dim = tl.arange(0, BLOCK_D)
++    dim_mask = dim < HEAD_DIM
++    maximum = tl.full((BLOCK_D,), -float("inf"), tl.float32)
++    for slot in tl.static_range(0, POOL_SIZE):
++        source_row = completion_row - (POOL_SIZE - 1 - slot)
++        from_current_chunk = source_row >= start
++        tail_offset = (
++            state_slot * tail_stride_0 + tail_stride_1 + slot * tail_stride_2 + dim
++        )
++        current_score = tl.load(
++            gate + source_row * gate_stride_0 + dim,
++            mask=dim_mask & write_pool & from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        previous_score = tl.load(
++            tail + tail_offset,
++            mask=dim_mask & write_pool & ~from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        score = tl.where(from_current_chunk, current_score, previous_score)
++        score += tl.load(
++            ape + slot * ape_stride_0 + dim,
++            mask=dim_mask & write_pool,
++            other=0.0,
++        ).to(tl.float32)
++        maximum = tl.maximum(maximum, score)
++
++    numerator = tl.zeros((BLOCK_D,), tl.float32)
++    denominator = tl.zeros((BLOCK_D,), tl.float32)
++    for slot in tl.static_range(0, POOL_SIZE):
++        source_row = completion_row - (POOL_SIZE - 1 - slot)
++        from_current_chunk = source_row >= start
++        tail_offset = state_slot * tail_stride_0 + slot * tail_stride_2 + dim
++        current_value = tl.load(
++            key + source_row * key_stride_0 + dim,
++            mask=dim_mask & write_pool & from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        previous_value = tl.load(
++            tail + tail_offset,
++            mask=dim_mask & write_pool & ~from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        value = tl.where(from_current_chunk, current_value, previous_value)
++        current_score = tl.load(
++            gate + source_row * gate_stride_0 + dim,
++            mask=dim_mask & write_pool & from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        previous_score = tl.load(
++            tail + tail_offset + tail_stride_1,
++            mask=dim_mask & write_pool & ~from_current_chunk,
++            other=0.0,
++        ).to(tl.float32)
++        score = tl.where(from_current_chunk, current_score, previous_score)
++        score += tl.load(
++            ape + slot * ape_stride_0 + dim,
++            mask=dim_mask & write_pool,
++            other=0.0,
++        ).to(tl.float32)
++        weight = tl.exp(score - maximum)
++        numerator += value * weight
++        denominator += weight
++
++    pooled = numerator / tl.maximum(denominator, 1e-20)
++    _write_pool(
++        cache_fp8,
++        cache_fp32,
++        cache_location,
++        pooled,
++        dim,
++        dim_mask,
++        write_pool,
++        page_stride_bytes,
++        PAGE_SIZE,
++        HEAD_DIM,
++        FP8_MAX,
++    )
++
++
++@triton.jit
++def _prefill_tail_kernel(
++    tail,
++    state_slots,
++    query_start_loc,
++    key,
++    gate,
++    positions,
++    request_offset,
++    tail_stride_0,
++    tail_stride_1,
++    tail_stride_2,
++    key_stride_0,
++    gate_stride_0,
++    HEAD_DIM: tl.constexpr,
++    POOL_SIZE: tl.constexpr,
++    BLOCK_D: tl.constexpr,
++):
++    request = request_offset + tl.program_id(0)
++    state_slot = tl.load(state_slots + request).to(tl.int64)
++    start = tl.load(query_start_loc + request).to(tl.int64)
++    end = tl.load(query_start_loc + request + 1).to(tl.int64)
++    last_row = end - 1
++    has_rows = end > start
++    last_position = tl.load(positions + last_row, mask=has_rows, other=0).to(tl.int64)
++    last_physical_slot = last_position % POOL_SIZE
++    dim = tl.arange(0, BLOCK_D)
++    dim_mask = (dim < HEAD_DIM) & has_rows & (state_slot >= 0)
++    for slot in tl.static_range(0, POOL_SIZE):
++        distance = (last_physical_slot - slot + POOL_SIZE) % POOL_SIZE
++        source_row = last_row - distance
++        source_in_chunk = source_row >= start
++        source_position = tl.load(
++            positions + source_row,
++            mask=has_rows & source_in_chunk,
++            other=-1,
++        ).to(tl.int64)
++        write_slot = dim_mask & source_in_chunk & (source_position % POOL_SIZE == slot)
++        value = tl.load(
++            key + source_row * key_stride_0 + dim,
++            mask=write_slot,
++            other=0.0,
++        )
++        score = tl.load(
++            gate + source_row * gate_stride_0 + dim,
++            mask=write_slot,
++            other=0.0,
++        )
++        tail_offset = state_slot * tail_stride_0 + slot * tail_stride_2 + dim
++        tl.store(tail + tail_offset, value, mask=write_slot)
++        tl.store(tail + tail_offset + tail_stride_1, score, mask=write_slot)
++
++
+ def update_decode_pools(
+     kv_cache: torch.Tensor,
+     tail: torch.Tensor,
+@@ -263,10 +452,18 @@ def update_decode_pools(
+     positions: torch.Tensor,
+     num_requests: int,
+     *,
++    num_decode_requests: int | None = None,
++    max_query_len: int | None = None,
+     model_block_size: int | None = None,
+     parent_stride_pages: int | None = None,
+ ) -> None:
+-    """Update raw tails and write every newly completed FP8 pool."""
++    """Update request tails and write every newly completed FP8 C4 pool.
++
++    Decode and speculative-decode requests retain ordered row processing. Prefill
++    requests use one program per completed pool and a separate final-tail update;
++    their positions must be consecutive within each request, as required by the
++    packed GLM MLA cache contract.
++    """
+     if num_requests <= 0:
+         return
+     page_size = int(kv_cache.shape[1])
+@@ -287,7 +484,17 @@ def update_decode_pools(
+     assert parent_stride_pages is not None
+     if parent_stride_pages <= 0:
+         raise ValueError("GLM parent_stride_pages must be positive")
+-    _decode_update_kernel[(num_requests,)](
++    if num_decode_requests is None:
++        num_decode_requests = num_requests
++    if not 0 <= num_decode_requests <= num_requests:
++        raise ValueError("GLM decode request count exceeds the request batch")
++    num_prefill_requests = num_requests - num_decode_requests
++    if num_prefill_requests and not packed_main_slots:
++        raise ValueError("parallel GLM prefill requires packed main-cache slots")
++    if num_prefill_requests and (max_query_len is None or max_query_len <= 0):
++        raise ValueError("parallel GLM prefill requires a positive max_query_len")
++
++    common_args = (
+         kv_cache.view(torch.float8_e4m3fn),
+         kv_cache.view(torch.float32),
+         tail,
+@@ -307,14 +514,48 @@ def update_decode_pools(
+         int(key.stride(0)),
+         int(gate.stride(0)),
+         int(ape.stride(0)),
++    )
++    common_meta = dict(
+         PAGE_SIZE=page_size,
+         HEAD_DIM=_HEAD_DIM,
+         POOL_SIZE=_POOL_SIZE,
+         FP8_MAX=_FP8_MAX,
+         BLOCK_D=128,
+-        PACKED_MAIN_SLOTS=packed_main_slots,
+         num_warps=4,
+     )
++    if num_decode_requests:
++        _decode_update_kernel[(num_decode_requests,)](
++            *common_args,
++            PACKED_MAIN_SLOTS=packed_main_slots,
++            **common_meta,
++        )
++    if num_prefill_requests:
++        assert max_query_len is not None
++        _prefill_pool_kernel[
++            (num_prefill_requests, triton.cdiv(max_query_len, _POOL_SIZE))
++        ](
++            *common_args,
++            num_decode_requests,
++            **common_meta,
++        )
++        _prefill_tail_kernel[(num_prefill_requests,)](
++            tail,
++            state_slots,
++            query_start_loc,
++            key,
++            gate,
++            positions,
++            num_decode_requests,
++            int(tail.stride(0)),
++            int(tail.stride(1)),
++            int(tail.stride(2)),
++            int(key.stride(0)),
++            int(gate.stride(0)),
++            HEAD_DIM=_HEAD_DIM,
++            POOL_SIZE=_POOL_SIZE,
++            BLOCK_D=128,
++            num_warps=4,
++        )
+ 
+ 
+ @triton.jit
+diff --git a/vllm/models/glm5next/nvidia/pooled_indexer.py b/vllm/models/glm5next/nvidia/pooled_indexer.py
+index 71c1330f6dccee76eeea8191c92ca444aa474b6a..a4f10b829389bd83b559dcb5d04623f1ce5564fa 100644
+--- a/vllm/models/glm5next/nvidia/pooled_indexer.py
++++ b/vllm/models/glm5next/nvidia/pooled_indexer.py
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-"""GLM-5.3 C4 pooling around the shared b12x FP8 paged indexer."""
++"""GLM-5.3 C4 pooling with B12X decode and DeepGEMM prefill selection."""
+ 
+ from __future__ import annotations
+ 
+@@ -50,7 +50,7 @@ _MLA_RECORD_BYTES = 528
+ 
+ 
+ class Glm5NextPooledIndexer(nn.Module):
+-    """Produce GLM C4 pools, select them with b12x, and expand token IDs."""
++    """Produce C4 pools, select them by execution phase, and expand token IDs."""
+ 
+     def __init__(
+         self,
+@@ -225,6 +225,16 @@ class Glm5NextPooledIndexer(nn.Module):
+             ),
+             persistent=False,
+         )
++        self.register_buffer(
++            "_pool_seq_starts",
++            torch.zeros(self.max_tokens, dtype=torch.int32, device=device),
++            persistent=False,
++        )
++        self.register_buffer(
++            "_gather_cu_seq_lens",
++            torch.zeros((self.max_seqs, 2), dtype=torch.int32, device=device),
++            persistent=False,
++        )
+         self.register_buffer(
+             "_pool_block_table",
+             torch.empty((self.max_seqs, 1), dtype=torch.int32, device=device),
+@@ -429,6 +439,8 @@ class Glm5NextPooledIndexer(nn.Module):
+             main_metadata.slot_mapping[:rows],
+             positions,
+             num_reqs,
++            num_decode_requests=num_decodes,
++            max_query_len=int(main_metadata.max_query_len),
+             model_block_size=self.block_size,
+             parent_stride_pages=self._parent_stride_pages,
+         )
+@@ -479,29 +491,49 @@ class Glm5NextPooledIndexer(nn.Module):
+ 
+         if decode_rows < live_rows:
+             query_lens_cpu = main_metadata.prefill_query_lens_cpu
+-            if query_lens_cpu is None:
++            request_seq_lens_cpu = main_metadata.prefill_seq_lens_cpu
++            if query_lens_cpu is None or request_seq_lens_cpu is None:
+                 raise RuntimeError("GLM selector prefill metadata is incomplete")
++            if len(query_lens_cpu) != len(request_seq_lens_cpu):
++                raise RuntimeError(
++                    "GLM selector prefill request metadata has inconsistent lengths"
++                )
+             row_start = decode_rows
+             for local_request, query_len in enumerate(query_lens_cpu.tolist()):
+                 row_end = row_start + int(query_len)
+                 request = num_decodes + local_request
+-                shared_table = self._pool_block_table[request : request + 1].expand(
+-                    int(query_len), -1
+-                )
+-                self.indexer_op.run_paged_topk(
+-                    q=q_fp8[row_start:row_end],
+-                    weights=weights[row_start:row_end],
+-                    kv_cache=index_cache,
+-                    seq_lens=seq_lens[row_start:row_end],
+-                    block_table=shared_table,
+-                    output=pool_ids[row_start:row_end],
+-                    scores=(
+-                        pool_scores[row_start:row_end]
+-                        if pool_scores is not None
+-                        else None
+-                    ),
+-                    shared_page_table=True,
+-                )
++                if self.dcp_world_size > 1:
++                    assert pool_scores is not None
++                    shared_table = self._pool_block_table[request : request + 1].expand(
++                        int(query_len), -1
++                    )
++                    self.indexer_op.run_paged_topk(
++                        q=q_fp8[row_start:row_end],
++                        weights=weights[row_start:row_end],
++                        kv_cache=index_cache,
++                        seq_lens=seq_lens[row_start:row_end],
++                        block_table=shared_table,
++                        output=pool_ids[row_start:row_end],
++                        scores=pool_scores[row_start:row_end],
++                        shared_page_table=True,
++                    )
++                else:
++                    total_pool_len = (
++                        int(request_seq_lens_cpu[local_request]) // _POOL_SIZE
++                    )
++                    gather_cu_seq_lens = self._gather_cu_seq_lens[local_request]
++                    gather_cu_seq_lens[1].fill_(total_pool_len)
++                    self.indexer_op.run_deepgemm_prefill_topk(
++                        q=q_fp8[row_start:row_end],
++                        weights=weights[row_start:row_end],
++                        kv_cache=index_cache,
++                        seq_lens=seq_lens[row_start:row_end],
++                        block_table=self._pool_block_table[request : request + 1],
++                        gather_cu_seq_lens=gather_cu_seq_lens,
++                        row_starts=self._pool_seq_starts[row_start:row_end],
++                        output=pool_ids[row_start:row_end],
++                        total_k_rows=total_pool_len,
++                    )
+                 if pool_scores is not None:
+                     _merge_dcp_topk(
+                         pool_ids[row_start:row_end],
+diff --git a/vllm/v1/attention/backends/flashinfer.py b/vllm/v1/attention/backends/flashinfer.py
+index a479b2ca48cc2e432efb6109e36375501b6c28b0..8e81e8fe09d22ffeb90a162efb637fc46cdc16d6 100755
+--- a/vllm/v1/attention/backends/flashinfer.py
++++ b/vllm/v1/attention/backends/flashinfer.py
+@@ -69,6 +69,7 @@ from vllm.v1.attention.backend import (
+ from vllm.v1.attention.backends.utils import (
+     get_dcp_local_seq_lens,
+     get_flashinfer_layout_string,
++    get_kv_cache_dtype_from_layers,
+     get_num_attention_heads_from_layers,
+     get_per_layer_parameters,
+     infer_global_hyperparameters,
+@@ -759,7 +760,10 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
+         self.page_size = self.kv_cache_spec.block_size
+ 
+         if self.kv_cache_spec.kv_quant_mode != KVQuantMode.NONE:
+-            self.cache_dtype = self.cache_config.cache_dtype
++            self.cache_dtype = (
++                get_kv_cache_dtype_from_layers(vllm_config, layer_names)
++                or self.cache_config.cache_dtype
++            )
+             # Cannot use self.kv_cache_spec.dtype here because kv_cache_spec
+             # storage dtype may not be the same as the op dtype (uint8 vs fp8_e4m3)
+             self.is_kvcache_nvfp4 = self.cache_dtype.startswith("nvfp4")
+diff --git a/vllm/v1/attention/backends/mla/b12x_mla_sparse.py b/vllm/v1/attention/backends/mla/b12x_mla_sparse.py
+index b9aaf1ea25cedd7e338c69aefa30ea59957515ba..7c63728d7137fa6bd52701cbd41ada803606bd6c 100644
+--- a/vllm/v1/attention/backends/mla/b12x_mla_sparse.py
++++ b/vllm/v1/attention/backends/mla/b12x_mla_sparse.py
+@@ -265,6 +265,7 @@ class B12xMLASparseMetadata(AttentionMetadata):
+     prefill_max_seq_len: int = 0
+     prefill: MLACommonPrefillMetadata | None = None
+     prefill_query_lens_cpu: torch.Tensor | None = None
++    prefill_seq_lens_cpu: torch.Tensor | None = None
+     block_size: int = 64
+     topk_tokens: int = 2048
+     cp_kv_cache_interleave_size: int = 1
+@@ -490,6 +491,14 @@ class B12xMLASparseMetadataBuilder(
+             metadata.prefill_query_lens_cpu = torch.diff(
+                 common.query_start_loc_cpu[prefill_start:prefill_end]
+             )
++            seq_lens_cpu_source = (
++                common.seq_lens_cpu_upper_bound
++                if common.seq_lens_cpu_upper_bound is not None
++                else common.seq_lens_cpu
++            )
++            metadata.prefill_seq_lens_cpu = seq_lens_cpu_source[
++                prefill_start : prefill_start + metadata.num_prefills
++            ].clone()
+         (
+             metadata.selector_state_slot_ids,
+             metadata.selector_state_is_fresh,
+diff --git a/vllm/v1/attention/backends/utils.py b/vllm/v1/attention/backends/utils.py
+index 29f1ccdfd0623f45a5c62f3a14544426c552202b..d2b1532edd823d84b13fd129df43730826f77e22 100644
+--- a/vllm/v1/attention/backends/utils.py
++++ b/vllm/v1/attention/backends/utils.py
+@@ -387,6 +387,34 @@ def get_num_attention_heads_from_layers(
+     return heads.pop()
+ 
+ 
++def get_kv_cache_dtype_from_layers(
++    vllm_config: VllmConfig, layer_names: list[str]
++) -> str | None:
++    """Return the KV-cache format shared by one attention group.
++
++    Args:
++        vllm_config: Engine configuration containing the attention layers.
++        layer_names: Names of the layers in the attention group.
++
++    Returns:
++        The shared cache format, or ``None`` when the group has no attention
++        layers.
++    """
++    attn_layers = get_layers_from_vllm_config(
++        vllm_config,
++        AttentionLayerBase,  # type: ignore[type-abstract]
++        layer_names,
++    )
++    if not attn_layers:
++        return None
++    cache_dtypes = {cast(Any, layer).kv_cache_dtype for layer in attn_layers.values()}
++    assert len(cache_dtypes) == 1, (
++        "All layers in one attention group must share kv_cache_dtype; "
++        f"got {cache_dtypes} for {layer_names}."
++    )
++    return cache_dtypes.pop()
++
++
+ def infer_global_hyperparameters(
+     per_layer_params: dict[str, PerLayerParameters],
+ ) -> PerLayerParameters:
+diff --git a/vllm/v1/worker/gpu/attn_utils.py b/vllm/v1/worker/gpu/attn_utils.py
+index 5397b1b73dff4cc0ad472e87e66993fccd9bab80..e225c78ffe1989bffaf33a4b3a4da3feab19bf75 100644
+--- a/vllm/v1/worker/gpu/attn_utils.py
++++ b/vllm/v1/worker/gpu/attn_utils.py
+@@ -73,6 +73,24 @@ def get_shared_kv_cache_layers(vllm_config: VllmConfig):
+     }
+ 
+ 
++def synchronize_attention_impl_kv_cache_layout(
++    attn_layers: Mapping[str, AttentionLayerBase],
++    resolved_layout: str | None,
++) -> None:
++    """Give every attention implementation the allocated cache layout.
++
++    A speculative model can own a CacheConfig copy so its cache dtype differs
++    from the target model. The engine resolves one physical layout for all
++    cache groups, while dtype remains specific to each model-owned copy.
++    """
++    if resolved_layout is None:
++        return
++    for layer in attn_layers.values():
++        impl_cache_config = getattr(getattr(layer, "impl", None), "cache_config", None)
++        if impl_cache_config is not None:
++            impl_cache_config.kv_cache_layout = resolved_layout
++
++
+ def init_attn_backend(
+     kv_cache_config: KVCacheConfig,
+     vllm_config: VllmConfig,
+@@ -99,6 +117,10 @@ def init_attn_backend(
+         layer_type = cast(type[Any], AttentionLayerBase)
+         attn_layers = get_layers_from_vllm_config(vllm_config, layer_type, layer_names)
+ 
++        synchronize_attention_impl_kv_cache_layout(
++            attn_layers, vllm_config.cache_config.kv_cache_layout
++        )
++
+         group_map: dict[tuple[tuple[str, str], KVCacheSpec, int], AttentionGroup] = {}
+         group_order: list[tuple[tuple[str, str], KVCacheSpec, int]] = []
+ 
+diff --git a/vllm/v1/worker/gpu/cudagraph_utils.py b/vllm/v1/worker/gpu/cudagraph_utils.py
+index 6203b443104eaa9566cf9f98a1e4e4c8e9074a38..e17d1e787b7a752176e385f7078898ffb44787c8 100644
+--- a/vllm/v1/worker/gpu/cudagraph_utils.py
++++ b/vllm/v1/worker/gpu/cudagraph_utils.py
+@@ -38,6 +38,7 @@ from vllm.v1.worker.gpu.cp_utils import prepare_dcp_local_seq_lens
+ from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers
+ from vllm.v1.worker.gpu.model_states.interface import ModelState
+ from vllm.v1.worker.utils import AttentionGroup, unbind_kv_cache
++from vllm.v1.worker.workspace import collect_cuda_graph_capture_resources
+ 
+ if TYPE_CHECKING:
+     from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+@@ -133,6 +134,7 @@ class CudaGraphManager:
+         self._lora_dispatch_map, self._max_lora_case = self._build_lora_dispatch_map()
+ 
+         self.graphs: dict[BatchExecutionDescriptor, torch.cuda.CUDAGraph] = {}
++        self.graph_capture_resources: dict[BatchExecutionDescriptor, list[Any]] = {}
+         self.pool = current_platform.get_global_graph_pool() if cudagraph_mode else None
+ 
+         self._graphs_captured = False
+@@ -377,18 +379,20 @@ class CudaGraphManager:
+                         if self._capture_mem_samples is not None:
+                             torch.accelerator.synchronize()
+                             free_before = torch.accelerator.get_memory_info()[0]
+-                        with torch.cuda.graph(graph, self.pool):
++                        with (
++                            collect_cuda_graph_capture_resources() as resources,
++                            torch.cuda.graph(graph, self.pool),
++                        ):
+                             forward_fn(CUDAGraphMode.NONE)
+-                            # Join offloader's copy stream after forward to avoid
+-                            # unjoined stream error. The last layer's start_prefetch
+-                            # forks copy_stream, but wait_prefetch only happens in
+-                            # the next forward pass.
++                            # Join the offloader copy stream because the last layer
++                            # can leave a prefetch pending at capture end.
+                             get_offloader().join_after_forward()
+                         if self._capture_mem_samples is not None:
+                             torch.accelerator.synchronize()
+                             free_after = torch.accelerator.get_memory_info()[0]
+                             self._capture_mem_samples.append(free_before - free_after)
+                         self.graphs[desc] = graph
++                        self.graph_capture_resources[desc] = resources
+                         compilation_counter.num_cudagraph_captured += 1
+         self._graphs_captured = True
+ 
+@@ -817,6 +821,7 @@ def profile_cudagraph_memory(runner: "GPUModelRunner") -> int:
+         BreakableCUDAGraphWrapper.clear_all_graphs()
+         for graph_manager in graph_managers:
+             graph_manager.graphs.clear()
++            graph_manager.graph_capture_resources.clear()
+             graph_manager._graphs_captured = False
+             graph_manager.pool = original_manager_pools[id(graph_manager)]
+         live_wrappers = list(CUDAGraphWrapper._all_instances) + list(
+diff --git a/vllm/v1/worker/workspace.py b/vllm/v1/worker/workspace.py
+index 39b3b10349c3b829ba189d12e398cfc6ac679378..e98a05c99e4e03ec334074bdd7b18782916f3421 100644
+--- a/vllm/v1/worker/workspace.py
++++ b/vllm/v1/worker/workspace.py
+@@ -8,6 +8,7 @@ from contextlib import contextmanager
+ from contextvars import ContextVar
+ from itertools import accumulate
+ from math import prod
++from typing import Any
+ 
+ import torch
+ 
+@@ -30,6 +31,9 @@ _GiB = 1024**3
+ # Global workspace manager instance
+ _manager: "WorkspaceManager | None" = None
+ _workspace_lane: ContextVar[int] = ContextVar("vllm_workspace_lane", default=0)
++_cuda_graph_capture_resources: ContextVar[list[Any] | None] = ContextVar(
++    "vllm_cuda_graph_capture_resources", default=None
++)
+ 
+ 
+ @contextmanager
+@@ -44,6 +48,40 @@ def use_workspace_lane(lane: int) -> Iterator[None]:
+         _workspace_lane.reset(token)
+ 
+ 
++@contextmanager
++def collect_cuda_graph_capture_resources() -> Iterator[list[Any]]:
++    """Collect objects whose storage is referenced by one CUDA graph.
++
++    A CUDA graph records device pointers, but it does not retain the Python
++    objects that own those allocations. Callers that allocate custom-op output
++    or scratch tensors during capture can register their owner with
++    :func:`retain_cuda_graph_capture_resource`. The graph manager keeps the
++    returned list alive for exactly as long as the captured graph.
++    """
++    resources: list[Any] = []
++    token = _cuda_graph_capture_resources.set(resources)
++    try:
++        yield resources
++    finally:
++        _cuda_graph_capture_resources.reset(token)
++
++
++def retain_cuda_graph_capture_resource(resource: Any) -> bool:
++    """Retain an object whose storage is referenced by a CUDA graph.
++
++    Args:
++        resource: Python owner that must remain alive while the graph exists.
++
++    Returns:
++        ``True`` when a capture resource collector retained the object.
++    """
++    resources = _cuda_graph_capture_resources.get()
++    if resources is None:
++        return False
++    resources.append(resource)
++    return True
++
++
+ class WorkspaceManager:
+     """Manager for workspace allocation.
+ 

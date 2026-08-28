@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "glm53-flash-nvfp4-dflash2-mxfp8-vllm",
+  "repository": "https://github.com/local-inference-lab/vllm.git",
+  "base_ref": "refs/heads/dev/jovian-judgement",
+  "pull_requests": [
+    {
+      "number": 491,
+      "head": "b77333ca8824897ff6ddf96a62208ea406c555a9",
+      "title": "Optimize GLM-5.3 B12X and DFlash2 MXFP8 serving"
+    }
+  ],
+  "source_patches": [],
+  "source_evidence": [
+    {
+      "role": "GLM-5.3-Flash target model and DFlash2 MXFP8 serving integration",
+      "repository": "https://github.com/local-inference-lab/vllm.git",
+      "branch": "dev/jovian-judgement",
+      "commit": "015dcd423d6aabf843c8ad69074ff67d35c2a395",
+      "resolution": "The composed vLLM tree executes GLM-5.3 packed C4 prefill through DeepGEMM, routes decode-sized multipath hyperconnection and KDA operations through B12X, retains CUDA-graph-owned B12X resources, loads serialized ModelOpt MXFP8 DFlash2 projections without an online conversion, preserves the draft model's attention-specific KV cache format, and loads multimodal processor artifacts from the target checkpoint revision."
+    }
+  ]
+}

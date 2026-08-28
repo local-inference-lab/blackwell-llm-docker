@@ -1,0 +1,32 @@
+{
+  "base": {
+    "commit": "2fcf23a0ce269be27b2e03fece73d46e90e6aeea",
+    "ref": "refs/heads/master",
+    "repository": "https://github.com/local-inference-lab/b12x.git"
+  },
+  "composition": null,
+  "composition_strategy": "merge",
+  "manifest": {
+    "sha256": "d0033f0f350aed46326862b13f67e027b27cc614bcab7c96f36ee01926dd9e01"
+  },
+  "name": "glm53-flash-nvfp4-dflash2-mxfp8-b12x",
+  "pull_requests": [
+    {
+      "commits": [
+        "dd8cf60505e0363ab9d6ef6b2116c3a37216a2f1"
+      ],
+      "disposition": "merged",
+      "head": "dd8cf60505e0363ab9d6ef6b2116c3a37216a2f1",
+      "number": 250,
+      "ref": "refs/pull/250/head",
+      "title": "test(moe): qualify GLM-5.3 TP4 graph replay"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "c53df70226775cf3c0b076dab23d8d37788e1d779aab16422151db7d26c48193",
+    "tree": "fdbb504ccf5842ae7bb7089caa01fc076a7043c0"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

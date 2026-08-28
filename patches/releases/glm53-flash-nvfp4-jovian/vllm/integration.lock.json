@@ -1,0 +1,32 @@
+{
+  "base": {
+    "commit": "015dcd423d6aabf843c8ad69074ff67d35c2a395",
+    "ref": "refs/heads/dev/jovian-judgement",
+    "repository": "https://github.com/local-inference-lab/vllm.git"
+  },
+  "composition": null,
+  "composition_strategy": "merge",
+  "manifest": {
+    "sha256": "56a488f716dd878c78857bc2645928ae33c27d5d87e49677b447952dda3475e0"
+  },
+  "name": "glm53-flash-nvfp4-dflash2-mxfp8-vllm",
+  "pull_requests": [
+    {
+      "commits": [
+        "b77333ca8824897ff6ddf96a62208ea406c555a9"
+      ],
+      "disposition": "merged",
+      "head": "b77333ca8824897ff6ddf96a62208ea406c555a9",
+      "number": 491,
+      "ref": "refs/pull/491/head",
+      "title": "Optimize GLM-5.3 B12X and DFlash2 MXFP8 serving"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "4c87a33d1b90d0ce5273b248d4a501b7d2376f8ef074f274360ee9f6967c21d9",
+    "tree": "82bbab85cebf48b735b5898062ceca89826b3913"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}
