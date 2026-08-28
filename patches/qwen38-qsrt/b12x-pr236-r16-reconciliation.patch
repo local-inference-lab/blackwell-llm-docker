@@ -1,0 +1,237 @@
+diff --git a/b12x/gemm/trellis_linear/__init__.py b/b12x/gemm/trellis_linear/__init__.py
+--- a/b12x/gemm/trellis_linear/__init__.py
++++ b/b12x/gemm/trellis_linear/__init__.py
+@@ -9,7 +9,8 @@ matrices plus BF16 rank-16 additive factors. For paired projections, the
+ gate/up factors share one projection launch and one output launch.
+ Callers allocate stable capacity with :func:`make_buffers` or
+ :func:`make_pair_buffers` and obtain allocation-free exact-row views with
+-:func:`view_buffers` or :func:`view_pair_buffers`.
++:func:`view_buffers` or :func:`view_pair_buffers`. The unpaired K6/MCG
++small-row path uses caller-owned ``rotated_f16`` and ``c_tmp`` storage.
+ """
+ 
+ from __future__ import annotations
+@@ -32,6 +33,7 @@ __all__ = [
+         "prepare_additive_weight",
+         "prepare_additive_pair",
+         "prepare_pair_weight",
++        "k6_mcg_small_m_scratch_elements",
+         "make_buffers",
+         "make_pair_buffers",
+         "run",
+@@ -72,6 +74,7 @@ else:
+         PreparedWeight,
+         clear_caches,
+         is_supported,
++        k6_mcg_small_m_scratch_elements,
+         make_buffers,
+         make_pair_buffers,
+         prepare_additive_pair,
+diff --git a/b12x/gemm/trellis_linear/api.py b/b12x/gemm/trellis_linear/api.py
+--- a/b12x/gemm/trellis_linear/api.py
++++ b/b12x/gemm/trellis_linear/api.py
+@@ -2,7 +2,7 @@
+ 
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from typing import Optional
+ 
+ import torch
+@@ -22,6 +22,10 @@ from b12x.gemm.trellis_dequant import (
+     prepare_trellis256_pair_dense_weight,
+ )
+ from . import META
++from ._k6_mcg_cute import (
++    k6_mcg_small_m_scratch_elements as k6_mcg_small_m_scratch_elements,
++    plan_k6_mcg_small_m,
++)
+ from ._low_rank import (
+     clear_low_rank_caches,
+     run_low_rank_additive,
+@@ -118,9 +122,7 @@ def view_buffers(buffers: Buffers, *, size_m: int) -> Buffers:
+     def rows(name: str, tensor: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+         if tensor is None:
+             return None
+-        if not compiling and (
+-            tensor.ndim != 2 or int(tensor.shape[0]) != capacity
+-        ):
++        if not compiling and (tensor.ndim != 2 or int(tensor.shape[0]) != capacity):
+             raise ValueError(
+                 f"dense Trellis {name} does not share the {capacity}-row capacity"
+             )
+@@ -391,8 +395,8 @@ def prepare_weight(
+     params_dtype: torch.dtype = torch.float16,
+     dummy_scale: Optional[torch.Tensor] = None,
+ ) -> PreparedWeight:
+-    """Validate one native EXL3 dense weight and retain zero-copy views."""
+-    return prepare_trellis256_dense_weight(
++    """Validate a native EXL3 weight and bind eligible serving launches."""
++    weight = prepare_trellis256_dense_weight(
+         trellis,
+         suh,
+         svh,
+@@ -402,6 +406,10 @@ def prepare_weight(
+         params_dtype=params_dtype,
+         dummy_scale=dummy_scale,
+     )
++    launch = plan_k6_mcg_small_m(weight)
++    if launch is None:
++        return weight
++    return replace(weight, k6_mcg_small_m_launch=launch)
+ 
+ 
+ def prepare_pair_weight(
+@@ -615,7 +623,10 @@ def is_supported(
+ 
+ 
+ def clear_caches() -> None:
+-    """Clear compiled W4A16 and additive low-rank specializations."""
++    """Clear compiled dense Trellis and additive specializations."""
++    from ._k6_mcg_cute import clear_k6_mcg_small_m_cache
++
++    clear_k6_mcg_small_m_cache()
+     clear_w4a16_kernel_cache()
+     clear_low_rank_caches()
+ 
+diff --git a/b12x/moe/_shared/kernels/w4a16/kernel.py b/b12x/moe/_shared/kernels/w4a16/kernel.py
+--- a/b12x/moe/_shared/kernels/w4a16/kernel.py
++++ b/b12x/moe/_shared/kernels/w4a16/kernel.py
+@@ -771,6 +771,9 @@ class _W4A16GroupedGemmKernel:
+             swiglu_beta=swiglu_beta,
+             w13_layout=w13_layout,
+             compile_time_phase=compile_time_phase,
++            # Fused direct launches have a compile-time route-table extent.
++            # FC2-only uses runtime M and sanitizes each route inside FC2.
++            stage_inactive_routes=int(compile_time_phase) != 2,
+         )
+ 
+ 
+@@ -3783,7 +3786,10 @@ class _W4A16GroupedGemmKernel:
+             for jj in cutlass.range_constexpr(4):
+                 local_n16 = Int32(4) * w_n + Int32(jj)
+                 tile_base = Int32(0)
+-                if cutlass.const_expr(int(low_bits) == int(high_bits)):
++                # CuTe must specialize the payload width before evaluating the
++                # device-side row predicate, so these equal bodies cannot be
++                # combined into one Python boolean expression.
++                if cutlass.const_expr(int(low_bits) == int(high_bits)):  # noqa: SIM114
+                     tile_base = kt_base_u32 + local_n16 * Int32(8 * low_bits)
+                     wa[jj], wb[jj] = self._load_trellis256_pair_tile_windows(
+                         b_region, tile_base, lane, low_bits
+@@ -8504,12 +8510,13 @@ def _run_w4a16_small_m_direct(
+         dummy(cutlass.BFloat16),
+         barrier_fake,
+         barrier_fake,
++        Int32(num_experts),
+         Int32(m),
+         Int32(kernel.grid_x),
+         current_cuda_stream(),
+         compile_spec=KernelCompileSpec.from_facts(
+             "moe.w4a16.small_m_direct",
+-            2,
++            3,
+             ("device_index", None if device is None else int(device.index or 0)),
+             ("m", int(m)),
+             ("hidden_size", int(hidden_size)),
+@@ -8641,12 +8648,13 @@ def _run_w4a16_fc2_direct(
+         dummy(cutlass.BFloat16),
+         barrier_fake,
+         barrier_fake,
++        Int32(expert_capacity),
+         Int32(2),
+         Int32(kernel.grid_x),
+         current_cuda_stream(),
+         compile_spec=KernelCompileSpec.from_facts(
+             "moe.w4a16.fc2_direct",
+-            4,
++            5,
+             ("device_index", int(device.index or 0)),
+             ("hidden_size", int(hidden_size)),
+             ("intermediate_size", int(intermediate_size)),
+@@ -9863,6 +9871,7 @@ def _run_fused_small_m(
+         ptr(cutlass.BFloat16, output),
+         barrier_count,
+         barrier_epoch,
++        Int32(num_experts),
+         Int32(m),
+         Int32(direct_launch.grid_x),
+         cuda.CUstream(stream_int),
+@@ -10010,6 +10019,7 @@ def _run_fused_fc2(
+         ptr(cutlass.BFloat16, output),
+         barrier_count,
+         barrier_epoch,
++        Int32(num_experts),
+         Int32(m),
+         Int32(launch.grid_x),
+         cuda.CUstream(stream_int),
+@@ -11655,6 +11665,48 @@ def _run_unpaired_trellis256(
+     ):
+         raise ValueError("c_tmp must be at least 16-byte aligned")
+ 
++    # Weight preparation binds the cooperative launch only for an unpaired
++    # FP16 K6/MCG payload. Runtime admission therefore checks dynamic input and
++    # call controls without resolving a kernel or duplicating weight policy.
++    small_m_launch = getattr(prepared_dense, "k6_mcg_small_m_launch", None)
++    if (
++        small_m_launch is not None
++        and hadamard_128 is None
++        and _moe_block_size in (None, 64)
++        and _force_tile_config is None
++    ):
++        from b12x.gemm.trellis_linear._k6_mcg_cute import (
++            k6_mcg_small_m_scratch_elements,
++            run_k6_mcg_small_m,
++        )
++
++        if small_m_launch.accepts_input(x):
++            rotated_f16 = _trellis_dense_buffer(
++                "rotated_f16",
++                rotated_f16,
++                shape=(m, size_k),
++                dtype=torch.float16,
++                device=x.device,
++            )
++            if c_tmp is None:
++                if torch.cuda.is_current_stream_capturing():
++                    raise RuntimeError(
++                        "Trellis dense c_tmp is not initialized for CUDA graph "
++                        "capture; provide caller-owned storage"
++                    )
++                c_tmp = torch.empty(
++                    (k6_mcg_small_m_scratch_elements(size_k, size_n),),
++                    dtype=torch.float32,
++                    device=x.device,
++                )
++            return run_k6_mcg_small_m(
++                x,
++                prepared_dense,
++                output=output,
++                rotated=rotated_f16,
++                c_tmp=c_tmp,
++            )
++
+     gemm_output = _trellis_dense_buffer(
+         "gemm_output",
+         gemm_output,
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -10,11 +10,11 @@ license-files = ["LICENSE"]
+ dependencies = [
+   "torch>=2.12.0",
+   "cuda-python",
+-  "nvidia-cutlass-dsl==4.6.0",
+-  "nvidia-cutlass-dsl-libs-base==4.6.0",
+-  "nvidia-cutlass-dsl-libs-core==4.6.0",
+-  "nvidia-cutlass-dsl-libs-cu12==4.6.0",
+-  "nvidia-cutlass-dsl-libs-cu13==4.6.0",
++  "nvidia-cutlass-dsl==4.6.2",
++  "nvidia-cutlass-dsl-libs-base==4.6.2",
++  "nvidia-cutlass-dsl-libs-core==4.6.2",
++  "nvidia-cutlass-dsl-libs-cu12==4.6.2",
++  "nvidia-cutlass-dsl-libs-cu13==4.6.2",
+   "apache-tvm-ffi>=0.1.6,!=0.1.8,!=0.1.8.post0,<0.2",
+   "rich>=13",
+   "transformers>=4.51",
