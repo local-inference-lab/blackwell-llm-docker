@@ -5,14 +5,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${repo_root}"
 
-release_root=patches/releases/kimi-k3-production-lmcache-sampler-overlay
+release_root=patches/releases/kimi-k3-qsrt-tp8-safety
 vllm_lock="${release_root}/vllm/integration.lock.json"
 b12x_lock="${release_root}/b12x/integration.lock.json"
 lmcache_lock="${release_root}/lmcache/integration.lock.json"
 base_image="${BASE_IMAGE:-voipmonitor/vllm@sha256:01b973d1ae132882bcc1bf62ea232f6aabe649dd4a89b961d81f3c41cc53f971}"
 release_name="${RELEASE_NAME:-kimi-k3-production-dspark-lmcache}"
 release_date="${RELEASE_DATE:-20260819}"
-revision="${REVISION:-source-overlay}"
+revision="${REVISION:-qsrt-tp8-safety}"
 
 for path in \
   "${vllm_lock}" \

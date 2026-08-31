@@ -1,1 +1,2 @@
 patches/releases/**/integration.patch -whitespace
+manifests/**/patches/*.patch -whitespace

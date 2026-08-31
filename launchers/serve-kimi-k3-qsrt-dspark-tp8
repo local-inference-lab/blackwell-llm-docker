@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# TP8/DCP8 QSRT-K2 profile with a 1,536-token recurrent scheduler boundary.
+set -euo pipefail
+
+export TP_SIZE="${TP_SIZE:-8}"
+export DCP_SIZE="${DCP_SIZE:-8}"
+export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-Kimi-K3}"
+export MAX_MODEL_LEN="${MAX_MODEL_LEN:-512000}"
+export KV_CACHE_MEMORY_BYTES="${KV_CACHE_MEMORY_BYTES:-2348810240}"
+export MAX_NUM_SEQS="${MAX_NUM_SEQS:-2}"
+export DSPARK_SPECULATIVE_TOKENS="${DSPARK_SPECULATIVE_TOKENS:-3}"
+export MAX_NUM_SCHEDULED_TOKENS="${MAX_NUM_SCHEDULED_TOKENS:-1536}"
+export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-1540}"
+export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.985}"
+
+launcher="${KIMI_K3_QSRT_DSPARK_LAUNCHER:-/usr/local/bin/serve-kimi-k3-qsrt-dspark}"
+if [[ ! -x "${launcher}" ]]; then
+  sibling="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/serve-kimi-k3-qsrt-dspark"
+  if [[ -x "${sibling}" ]]; then
+    launcher="${sibling}"
+  fi
+fi
+
+exec "${launcher}" "$@"
