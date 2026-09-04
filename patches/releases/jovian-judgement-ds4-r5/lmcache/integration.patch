@@ -1,5 +1,5 @@
 diff --git a/csrc/mp_mem_kernels.cu b/csrc/mp_mem_kernels.cu
-index a9ff0ccb6ae2881b7e25272eec45dee05aea0e5f..0c693182211b784dc37d323ee804a84570236d7c 100644
+index a9ff0ccb6ae2881b7e25272eec45dee05aea0e5f..ebfb4113cad7e6c6817af559cc922570ef83b601 100644
 --- a/csrc/mp_mem_kernels.cu
 +++ b/csrc/mp_mem_kernels.cu
 @@ -2,14 +2,17 @@
@@ -22,7 +22,7 @@ index a9ff0ccb6ae2881b7e25272eec45dee05aea0e5f..0c693182211b784dc37d323ee804a845
   * 3. Within a thread block, we do the loop over the BS (i.e., number of tokens
   * in the block) dimension.
   * 4. The grid will take over (2, NB, NL) dimensions. No matter what the actual
-@@ -360,7 +363,17 @@ void multi_layer_block_kv_transfer_templated(
+@@ -360,7 +363,16 @@ void multi_layer_block_kv_transfer_templated(
    // --- Grid and block dimensions ---
    int elements_per_head = shape_desc.hs * shape_desc.element_size /
                            static_cast<int>(sizeof(ScalarType));
@@ -36,8 +36,7 @@ index a9ff0ccb6ae2881b7e25272eec45dee05aea0e5f..0c693182211b784dc37d323ee804a845
 +  // full 32-thread row per head is not always a legal launch configuration.
 +  // warp_copy already walks the head payload with blockDim.x as its stride;
 +  // reducing the row width therefore preserves coverage and ordering.
-+  int thread_dim_x =
-+      std::min({elements_per_head, 32, 1024 / shape_desc.nh});
++  int thread_dim_x = std::min({elements_per_head, 32, 1024 / shape_desc.nh});
    int thread_dim_y = shape_desc.nh;
  
    dim3 block(thread_dim_x, thread_dim_y);

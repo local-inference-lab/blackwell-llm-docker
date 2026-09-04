@@ -7,7 +7,7 @@
   "composition": null,
   "composition_strategy": "merge",
   "manifest": {
-    "sha256": "9e3324eb80a478a094fe7464f83e78f622fe6eaf23eb528c92f29f58ed0d028f"
+    "sha256": "777c4df1703641fb19339f698e8b8ec5bdf985e3a856f539c753b875dbc37fbf"
   },
   "name": "infernal-invocation-lmcache",
   "pull_requests": [
@@ -143,10 +143,10 @@
     },
     {
       "commits": [
-        "e8601867f7f561968f88f47dfe9c07a0b74ddc0c"
+        "273ed7f7fafa6ce0155a17deec7fa11a9894df7b"
       ],
       "disposition": "merged",
-      "head": "e8601867f7f561968f88f47dfe9c07a0b74ddc0c",
+      "head": "273ed7f7fafa6ce0155a17deec7fa11a9894df7b",
       "number": 44,
       "ref": "refs/pull/44/head",
       "title": "Support engine-driven hybrid KV transfers"
@@ -154,8 +154,8 @@
   ],
   "result": {
     "patch": "integration.patch",
-    "patch_sha256": "3b49b9e09f59a28f48062a88da2c673c20b60837bfc736d5e1e595ceca94a846",
-    "tree": "77cded42d34b196a205f3da4a864040d6dda0318"
+    "patch_sha256": "6a563aedc38d94502cfb086abab37cb71cecc6d51a2db67b0656874026c30de7",
+    "tree": "62144a7f113d45fc27470d665b0b58a9f45679ee"
   },
   "schema_version": 1,
   "source_patches": []
