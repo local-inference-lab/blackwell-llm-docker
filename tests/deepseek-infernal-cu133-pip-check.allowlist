@@ -1,7 +1,7 @@
-lmcache 0.5.2+glm52dcp.5 has requirement opentelemetry-api<=1.40.0,>=1.20.0, but you have opentelemetry-api 1.44.0.
-lmcache 0.5.2+glm52dcp.5 has requirement opentelemetry-exporter-prometheus<=0.61b0,>=0.50b0, but you have opentelemetry-exporter-prometheus 0.65b0.
-lmcache 0.5.2+glm52dcp.5 has requirement prometheus_client<=0.24.1,>=0.18.0, but you have prometheus-client 0.26.0.
-lmcache 0.5.2+glm52dcp.5 requires awscrt, which is not installed.
-lmcache 0.5.2+glm52dcp.5 requires cufile-python, which is not installed.
-lmcache 0.5.2+glm52dcp.5 requires google-api-core, which is not installed.
-lmcache 0.5.2+glm52dcp.5 requires google-cloud-bigtable, which is not installed.
+lmcache 0.5.2+glm52dcp.6 has requirement opentelemetry-api<=1.40.0,>=1.20.0, but you have opentelemetry-api 1.44.0.
+lmcache 0.5.2+glm52dcp.6 has requirement opentelemetry-exporter-prometheus<=0.61b0,>=0.50b0, but you have opentelemetry-exporter-prometheus 0.65b0.
+lmcache 0.5.2+glm52dcp.6 has requirement prometheus_client<=0.24.1,>=0.18.0, but you have prometheus-client 0.26.0.
+lmcache 0.5.2+glm52dcp.6 requires awscrt, which is not installed.
+lmcache 0.5.2+glm52dcp.6 requires cufile-python, which is not installed.
+lmcache 0.5.2+glm52dcp.6 requires google-api-core, which is not installed.
+lmcache 0.5.2+glm52dcp.6 requires google-cloud-bigtable, which is not installed.
