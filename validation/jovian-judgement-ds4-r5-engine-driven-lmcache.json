@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "status": "qualified",
+  "purpose": "Qualification receipt for asynchronous engine-driven LMCache transfer with DeepSeek V4 hybrid KV groups",
+  "image": "voipmonitor/vllm:jovian-judgement-vllm08e1c7d-b12xd0c4487-fi803c466-cu133-torch213-20260904-r5",
+  "image_id": "sha256:8d3a16b1973ceb574bb4dd6aab31156b128b941b37fafbcab3a0b6eb6eda9a05",
+  "registry_digest": "sha256:3c3831dfd6f103c8542ab80c7f1dccbb2110f88493cab1ef6d42fcf6c4d710bf",
+  "image_size_bytes": 34615336283,
+  "validated_at": "2026-09-04T12:09:41Z",
+  "source_composition": {
+    "docker": {
+      "repository": "https://github.com/local-inference-lab/blackwell-llm-docker.git",
+      "commit_used_by_image": "238cda9af370b207d187ac9ccd654185c08f8885"
+    },
+    "vllm": {
+      "repository": "https://github.com/local-inference-lab/vllm.git",
+      "base_ref": "dev/jovian-judgement",
+      "base_commit": "a50ebee1d2460d22386b54e79f46236376e2b486",
+      "tree": "08e1c7de14c4754facf53d26f0888f649a478ff4",
+      "pull_requests": {
+        "628": "cbb66bdff1763c174ebc794a7f968930e956580f",
+        "630": "5b6fb80f5c868b62da2c01c3f52861b34c84d8ac",
+        "634": "6b3e5aa0be9a55bbdd256da256d8e86e870b21af"
+      }
+    },
+    "b12x": {
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "base_ref": "master",
+      "base_commit": "9ae41c5cb9935d740456479954b0089f80bd2ef2",
+      "tree": "d0c4487adefa7dacd661d194fd4234ef61830796",
+      "pull_requests": [
+        246,
+        301,
+        302,
+        306
+      ]
+    },
+    "lmcache": {
+      "repository": "https://github.com/local-inference-lab/LMCache.git",
+      "base_ref": "release/v0.5.2-glm52-dcp-base",
+      "base_commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+      "tree": "62144a7f113d45fc27470d665b0b58a9f45679ee",
+      "pull_request": 44,
+      "pull_request_head": "273ed7f7fafa6ce0155a17deec7fa11a9894df7b"
+    },
+    "flashinfer": "803c4664f4771ddc418f20a57f752469a237a825"
+  },
+  "runtime_packages": {
+    "vllm": "0.26.1rc0+jovian.judgement.cu133.r5.vllm08e1c7d.b12xd0c4487",
+    "b12x": "1.3.0",
+    "torch": "2.13.0",
+    "cuda": "13.3",
+    "nccl": "2.31.2",
+    "flashinfer": "0.6.18+cu133",
+    "lmcache": "0.5.2+glm52dcp.6",
+    "xgrammar": "0.2.5"
+  },
+  "text_profile": {
+    "checkpoint": "deepseek-ai/DeepSeek-V4-Flash-0731@9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+    "hardware": "Two NVIDIA RTX PRO 6000 Blackwell GPUs connected through one PCIe switch",
+    "parallelism": "TP2/DCP1",
+    "speculative_decoding": "fixed probabilistic DSpark K5",
+    "attention_backend": "B12X",
+    "moe_backend": "B12X W4A8",
+    "dense_backend": "DGLIN FP8",
+    "kv_cache": "FP8 compressed MLA",
+    "load_format": "InstantTensor BUFFERED",
+    "cuda_graphs": "FULL_AND_PIECEWISE",
+    "max_cuda_graph_rows": 48,
+    "max_num_seqs": 8,
+    "max_num_batched_tokens": 4096,
+    "max_model_len": 1048576,
+    "gpu_memory_utilization": 0.97,
+    "lmcache_mode": "ram",
+    "lmcache_transfer": "engine_driven",
+    "lmcache_transport": "shared memory",
+    "lmcache_l1_gib": 8
+  },
+  "text_memory": {
+    "gpu_kv_cache_tokens": 1252661,
+    "gpu_kv_cache_gib_per_rank": 8.31,
+    "standalone_lmcache_cuda_contexts": 0,
+    "minimum_free_mib_during_one_million_token_request": {
+      "gpu_0": 681,
+      "gpu_1": 683
+    }
+  },
+  "controlled_transfer_comparison": {
+    "conditions": "Identical TP2 fixed-K5 model and scheduler contract with warmed compiled kernels",
+    "results_seconds": [
+      {
+        "transfer": "LMCache disabled",
+        "cold_32768": 2.372,
+        "cold_131072": 9.8363,
+        "cold_1000000": 165.0609,
+        "replay_1000000": null
+      },
+      {
+        "transfer": "LMCache-driven direct",
+        "cold_32768": null,
+        "cold_131072": null,
+        "cold_1000000": 176.5586,
+        "replay_1000000": 1.4167
+      },
+      {
+        "transfer": "Engine-driven pickle",
+        "cold_32768": null,
+        "cold_131072": null,
+        "cold_1000000": 250.003,
+        "replay_1000000": 1.507
+      },
+      {
+        "transfer": "Engine-driven SHM synchronous hybrid gather",
+        "cold_32768": 2.833,
+        "cold_131072": 13.4792,
+        "cold_1000000": 183.5659,
+        "replay_1000000": 1.2795
+      },
+      {
+        "transfer": "Engine-driven SHM asynchronous hybrid gather",
+        "cold_32768": 2.3931,
+        "cold_131072": 9.9727,
+        "cold_1000000": 165.6598,
+        "replay_1000000": 1.1892
+      }
+    ],
+    "conclusion": "Asynchronous SHM storage removes synchronous hybrid-group serialization; one-million-token cold latency is 0.36 percent above the no-LMCache path in this comparison."
+  },
+  "exact_image_text_results": {
+    "first_uncovered_jit_request": {
+      "prompt_tokens": 1000000,
+      "elapsed_seconds": 177.520,
+      "inference_time_compilations_observed": 4,
+      "conclusion": "This result includes first-use kernel compilation and is not the steady-state cold-cache measurement."
+    },
+    "steady_engine_driven": {
+      "prompt_token_id": 1001,
+      "prompt_tokens": 1000000,
+      "cold_elapsed_seconds": 166.8081319,
+      "cold_cached_tokens": 0,
+      "replay_elapsed_seconds": 1.1480258,
+      "replay_cached_tokens": 999424,
+      "cold_output": "\u90e8",
+      "replay_output": "\u90e8"
+    },
+    "steady_lmcache_disabled": {
+      "prompt_token_id": 1002,
+      "prompt_tokens": 1000000,
+      "cold_elapsed_seconds": 165.1741177,
+      "cached_tokens": 0
+    },
+    "engine_driven_cold_overhead_percent": 0.989268,
+    "service_healthy_after": true
+  },
+  "capacity_pressure": {
+    "gpu_kv_pool_tokens": 162026,
+    "requests": "Two distinct concurrent 130816-token prompts",
+    "cold_outputs_match_replay": true,
+    "concurrent_replay_cached_tokens": [
+      106496,
+      130560
+    ],
+    "l1_staging_allocation_failures": 39,
+    "isolated_replay_cached_tokens": 130560,
+    "conclusion": "When L1 staging cannot hold both restores concurrently, LMCache returns the largest available prefix and vLLM recomputes the suffix without output corruption."
+  },
+  "vision_profile": {
+    "checkpoint": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp@6821d6ad3681a4b137b066b76094fa82ebd0a380",
+    "parallelism": "TP2/DCP1",
+    "speculative_decoding": "fixed probabilistic DSpark K3",
+    "registered_hybrid_kv_groups": 8,
+    "gpu_kv_cache_tokens": 1228734,
+    "gpu_memory_utilization": 0.97,
+    "max_model_len": 1048576,
+    "cuda_graphs": "FULL_AND_PIECEWISE",
+    "text_smoke": {
+      "prompt_tokens": 4188,
+      "replay_cached_prompt_tokens": 4096,
+      "cold_elapsed_seconds": 3.6295856,
+      "replay_elapsed_seconds": 0.2453649,
+      "outputs_match": true
+    },
+    "image_smoke": {
+      "prompt_tokens": 2115,
+      "multimodal_tokens": 115,
+      "cold_created_cache_tokens": 2048,
+      "replay_cached_prompt_tokens": 2048,
+      "cold_elapsed_seconds": 0.7317604,
+      "replay_elapsed_seconds": 0.5028594,
+      "cold_answer": "The image is split vertically into a red left half and a green right half.",
+      "replay_answer": "The image is split vertically into two solid colors, with red on the left and green on the right.",
+      "semantic_result": "Both responses correctly identify the supplied red and green image regions."
+    },
+    "service_healthy_after": true
+  },
+  "limitations": [
+    "The memory envelope applies to 96 GiB GPUs with the recorded TP2 graph and scheduler configurations.",
+    "Shared-memory transport is qualified; pickle transport remains a compatibility path and is not recommended for DeepSeek V4.",
+    "An LMCache hit may restore a shorter prefix when the configured L1 staging tier is exhausted; vLLM recomputes the uncached suffix.",
+    "External cache storage is opt-in. GPU KV storage remains the default when LMCACHE_MODE is off.",
+    "Native vLLM filesystem KV offload is outside this serving contract."
+  ]
+}
