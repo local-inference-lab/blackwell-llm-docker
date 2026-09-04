@@ -32,14 +32,14 @@ jq -e '
   .composition_strategy == "cherry_pick" and
   .base.ref == "refs/heads/dev/jovian-judgement" and
   .base.commit == "a50ebee1d2460d22386b54e79f46236376e2b486" and
-  .result.tree == "2841848bcddb79391abb8fb275e9fd9991ffb43d" and
+  .result.tree == "d6f9e777bdf23304ace1ce3b311935390009a149" and
   [.pull_requests[].number] == [628, 630, 634] and
   .pull_requests[0].head ==
     "cbb66bdff1763c174ebc794a7f968930e956580f" and
   .pull_requests[1].head ==
     "5b6fb80f5c868b62da2c01c3f52861b34c84d8ac" and
   .pull_requests[2].head ==
-    "2a7f5f203ac8737412cdb726c2750395880cdf45"
+    "19f6d7b0f75ee3cf77e13795523886b37bbf5b06"
 ' "${composition_root}/vllm/integration.lock.json" >/dev/null
 
 jq -e '
@@ -79,7 +79,7 @@ grep -Fxq 'release=jovian-judgement-deepseek-v4-flash-cu133-torch213' \
   <<<"${output}"
 grep -Fxq 'revision=r3' <<<"${output}"
 grep -Fxq 'vllm_ref=dev/jovian-judgement' <<<"${output}"
-grep -Fxq 'vllm_tree=2841848bcddb79391abb8fb275e9fd9991ffb43d' \
+grep -Fxq 'vllm_tree=d6f9e777bdf23304ace1ce3b311935390009a149' \
   <<<"${output}"
 grep -Fxq 'b12x_tree=283a63ee552d38e6a2ffa8a9ec2859ddcb227201' \
   <<<"${output}"
@@ -109,7 +109,7 @@ grep -Fq 'LMCACHE_MODE: "off"' <<<"${config}"
 grep -Fq 'LMCACHE_TRANSFER_MODE: auto' <<<"${config}"
 grep -Fq 'LOAD_FORMAT: instanttensor' <<<"${config}"
 grep -Fq 'INSTANTTENSOR_BACKEND: BUFFERED' <<<"${config}"
-grep -Fq 'jovian-judgement-vllm2841848-b12x283a63e-fi803c466' <<<"${config}"
+grep -Fq 'jovian-judgement-vllmd6f9e77-b12x283a63e-fi803c466' <<<"${config}"
 ! grep -Fq 'KV_OFFLOADING_SIZE:' <<<"${config}"
 ! grep -Fq 'NATIVE_L2_' <<<"${config}"
 

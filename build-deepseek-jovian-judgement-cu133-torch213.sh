@@ -281,7 +281,7 @@ vision_lmcache_output="$(
     -e MAX_NUM_SEQS=4 -e TP_SIZE=2 -e GRAPH=auto "${image}" 2>&1
 )"
 grep -Fq -- '--max-model-len 900000' <<<"${vision_lmcache_output}"
-grep -Fq -- '--gpu-memory-utilization 0.95' <<<"${vision_lmcache_output}"
+grep -Fq -- '--gpu-memory-utilization 0.951' <<<"${vision_lmcache_output}"
 
 docker run --rm --entrypoint /opt/venv/bin/python "${image}" -c \
   'import importlib, os, pathlib, torch; ext = importlib.import_module("exllamav3_ext"); assert hasattr(ext, "exl3_gemm"); assert pathlib.Path(os.environ["VLLM_EXL3_ENCODER_SOURCE"], "modules/quant/exl3_lib/quantize.py").is_file()'

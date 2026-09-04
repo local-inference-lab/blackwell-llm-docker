@@ -7,7 +7,7 @@
   "composition": null,
   "composition_strategy": "cherry_pick",
   "manifest": {
-    "sha256": "60fbf2f6581c3d1e6f687a6cecc0fa95f3664a6f9ed0d95ab566f1839ea26101"
+    "sha256": "63c91ebd84ad3eb667b9d33785d6e7c8b24b05a7785d3443d333e67727b56d37"
   },
   "name": "jovian-judgement-deepseek-v4-flash-vllm",
   "pull_requests": [
@@ -38,10 +38,11 @@
         "dc8e95286df1ba7c6049944113752a38850d221f",
         "b4a12435021c58a689bc828e5076abc08f07bc78",
         "20df5b260100579257532ff0aa9f30ec872e85e6",
-        "2a7f5f203ac8737412cdb726c2750395880cdf45"
+        "2a7f5f203ac8737412cdb726c2750395880cdf45",
+        "19f6d7b0f75ee3cf77e13795523886b37bbf5b06"
       ],
       "disposition": "cherry_picked",
-      "head": "2a7f5f203ac8737412cdb726c2750395880cdf45",
+      "head": "19f6d7b0f75ee3cf77e13795523886b37bbf5b06",
       "number": 634,
       "ref": "refs/pull/634/head",
       "title": "Add DeepSeek-V4-Flash-Vision-Exp support"
@@ -49,8 +50,8 @@
   ],
   "result": {
     "patch": "integration.patch",
-    "patch_sha256": "4bebc9b68c2fdc63378dc00bfd288198bf49f6e06900920143d6e9a5770b2d3a",
-    "tree": "2841848bcddb79391abb8fb275e9fd9991ffb43d"
+    "patch_sha256": "fe3ad226b28b56bdf6a7ec762fbd20816061bc762da42caf9b507865b62bf445",
+    "tree": "d6f9e777bdf23304ace1ce3b311935390009a149"
   },
   "schema_version": 1,
   "source_patches": []

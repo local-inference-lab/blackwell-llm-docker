@@ -4,12 +4,12 @@
 # the deepest checkpoint-supported DSpark mode. GPU KV storage is the default.
 # GPU-only serving selects 1,048,576 tokens at 0.975 GPU memory utilization.
 # Set LMCACHE_MODE=ram to enable optional external RAM caching; direct transfer
-# selects 900,000 tokens at 0.95 to reserve memory for lazy CUDA transfer
+# selects 900,000 tokens at 0.951 to reserve memory for lazy CUDA transfer
 # buffers. Explicit MAX_MODEL_LEN and GPU_MEMORY_UTILIZATION values override
 # both profiles.
 services:
   ds4-vision:
-    image: ${IMAGE:-voipmonitor/vllm:jovian-judgement-vllm2841848-b12x283a63e-fi803c466-cu133-torch213-20260904-r3}
+    image: ${IMAGE:-voipmonitor/vllm:jovian-judgement-vllmd6f9e77-b12x283a63e-fi803c466-cu133-torch213-20260904-r3}
     container_name: ${NAME:-ds4-vision-jovian-judgement-r3}
     entrypoint:
       - /usr/local/bin/lmcache-mp-wrapper.sh

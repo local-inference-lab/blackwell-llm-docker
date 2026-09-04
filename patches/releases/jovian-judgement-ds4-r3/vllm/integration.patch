@@ -426,7 +426,7 @@ index a696b02ede8cfd87652223187ea65d2d98374b1d..3f15d387dee260625872effcc268c8e2
  | `Ernie4_5_VLMoeForConditionalGeneration` | Ernie4.5-VL | T + I<sup>+</sup>/ V<sup>+</sup> | `baidu/ERNIE-4.5-VL-28B-A3B-PT`, `baidu/ERNIE-4.5-VL-424B-A47B-PT` | | ✅︎ |
  | `Exaone4_5_ForConditionalGeneration` | EXAONE-4.5 | T + I<sup>E+</sup> | `LGAI-EXAONE/EXAONE-4.5-33B`, etc. | ✅︎ | ✅︎ |
 diff --git a/serve-ds4-flash.sh b/serve-ds4-flash.sh
-index e0f0dd787d10ee38dd8f3e5cef9b4caaa2a05455..3c963604b71a667d24713cdc8b7e9777f6d3f6be 100755
+index e0f0dd787d10ee38dd8f3e5cef9b4caaa2a05455..d05ff48278402d6a7796cf1a092b6b548104f95d 100755
 --- a/serve-ds4-flash.sh
 +++ b/serve-ds4-flash.sh
 @@ -68,8 +68,10 @@ esac
@@ -522,7 +522,7 @@ index e0f0dd787d10ee38dd8f3e5cef9b4caaa2a05455..3c963604b71a667d24713cdc8b7e9777
 +  && -n "${MAX_MODEL_LEN:-}" \
 +  && "${max_model_len}" -gt 900000 \
 +  && -z "${GPU_MEMORY_UTILIZATION:-}" ]]; then
-+  echo "Vision direct LMCache with MAX_MODEL_LEN above 900000 requires an explicit GPU_MEMORY_UTILIZATION override; the qualified 96 GiB default is MAX_MODEL_LEN=900000 with GPU_MEMORY_UTILIZATION=0.95" >&2
++  echo "Vision direct LMCache with MAX_MODEL_LEN above 900000 requires an explicit GPU_MEMORY_UTILIZATION override; the qualified 96 GiB default is MAX_MODEL_LEN=900000 with GPU_MEMORY_UTILIZATION=0.951" >&2
 +  exit 2
 +fi
  if [[ -n "${kv_offloading_size}" \
@@ -567,7 +567,7 @@ index e0f0dd787d10ee38dd8f3e5cef9b4caaa2a05455..3c963604b71a667d24713cdc8b7e9777
 +    # Direct LMCache transfer opens one CUDA IPC client per TP rank after the
 +    # vLLM memory estimate. The TP2 profile reserves enough physical memory for
 +    # those late allocations and an uncached 810k-token plus ten-image overlap.
-+    gpu_memory_utilization=0.95
++    gpu_memory_utilization=0.951
 +  elif [[ "${model_variant}" == "vision" ]]; then
 +    gpu_memory_utilization=0.975
 +  elif [[ "${mode}" == "dspark" ]]; then
@@ -1106,7 +1106,7 @@ index 81ccbf63a42d85ec64f06d6533ff1007f1381001..dd708e19ea7c39098edbea3701e2ffec
      assert model_cls is not None
 diff --git a/tests/scripts/test_serve_ds4_flash.sh b/tests/scripts/test_serve_ds4_flash.sh
 new file mode 100755
-index 0000000000000000000000000000000000000000..44ca20287e50899e85d3502ca4d9adbc429876a9
+index 0000000000000000000000000000000000000000..1326e6ea41a3b04cb5aa9582117e34af635256ca
 --- /dev/null
 +++ b/tests/scripts/test_serve_ds4_flash.sh
 @@ -0,0 +1,68 @@
@@ -1152,7 +1152,7 @@ index 0000000000000000000000000000000000000000..44ca20287e50899e85d3502ca4d9adbc
 +assert_contains "${text_output}" '--max-model-len 131072'
 +
 +lmcache_output="$(capture LMCACHE_MODE=ram)"
-+assert_contains "${lmcache_output}" '--gpu-memory-utilization 0.95'
++assert_contains "${lmcache_output}" '--gpu-memory-utilization 0.951'
 +assert_contains "${lmcache_output}" '--max-model-len 900000'
 +
 +engine_driven_output="$(capture \

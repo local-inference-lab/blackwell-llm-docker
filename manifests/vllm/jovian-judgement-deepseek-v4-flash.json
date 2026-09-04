@@ -24,13 +24,14 @@
     },
     {
       "number": 634,
-      "head": "2a7f5f203ac8737412cdb726c2750395880cdf45",
+      "head": "19f6d7b0f75ee3cf77e13795523886b37bbf5b06",
       "commits": [
         "8d0ad7e7ef45f6745b4b51985a104f7ff7f5dee2",
         "dc8e95286df1ba7c6049944113752a38850d221f",
         "b4a12435021c58a689bc828e5076abc08f07bc78",
         "20df5b260100579257532ff0aa9f30ec872e85e6",
-        "2a7f5f203ac8737412cdb726c2750395880cdf45"
+        "2a7f5f203ac8737412cdb726c2750395880cdf45",
+        "19f6d7b0f75ee3cf77e13795523886b37bbf5b06"
       ],
       "title": "Add DeepSeek-V4-Flash-Vision-Exp support"
     }
