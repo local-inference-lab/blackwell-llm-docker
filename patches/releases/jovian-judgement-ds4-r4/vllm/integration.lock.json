@@ -1,0 +1,59 @@
+{
+  "base": {
+    "commit": "a50ebee1d2460d22386b54e79f46236376e2b486",
+    "ref": "refs/heads/dev/jovian-judgement",
+    "repository": "https://github.com/local-inference-lab/vllm.git"
+  },
+  "composition": null,
+  "composition_strategy": "cherry_pick",
+  "manifest": {
+    "sha256": "df0191ee223263568e4b08c90f5dd265f123b24855f08320e137359d49e63fff"
+  },
+  "name": "jovian-judgement-deepseek-v4-flash-vllm",
+  "pull_requests": [
+    {
+      "commits": [
+        "f3078d12515311f0824283510147749c832cccd0",
+        "cbb66bdff1763c174ebc794a7f968930e956580f"
+      ],
+      "disposition": "cherry_picked",
+      "head": "cbb66bdff1763c174ebc794a7f968930e956580f",
+      "number": 628,
+      "ref": "refs/pull/628/head",
+      "title": "Register speculative CUDA graph row counts during B12X warmup"
+    },
+    {
+      "commits": [
+        "5b6fb80f5c868b62da2c01c3f52861b34c84d8ac"
+      ],
+      "disposition": "cherry_picked",
+      "head": "5b6fb80f5c868b62da2c01c3f52861b34c84d8ac",
+      "number": 630,
+      "ref": "refs/pull/630/head",
+      "title": "Clear custom all-reduce selectors in NCCL mode"
+    },
+    {
+      "commits": [
+        "8d0ad7e7ef45f6745b4b51985a104f7ff7f5dee2",
+        "dc8e95286df1ba7c6049944113752a38850d221f",
+        "b4a12435021c58a689bc828e5076abc08f07bc78",
+        "20df5b260100579257532ff0aa9f30ec872e85e6",
+        "2a7f5f203ac8737412cdb726c2750395880cdf45",
+        "19f6d7b0f75ee3cf77e13795523886b37bbf5b06",
+        "c79cf4f9a1d9119031de3d926997b6241f16a542"
+      ],
+      "disposition": "cherry_picked",
+      "head": "c79cf4f9a1d9119031de3d926997b6241f16a542",
+      "number": 634,
+      "ref": "refs/pull/634/head",
+      "title": "Add DeepSeek-V4-Flash-Vision-Exp support"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "e0037bcabc487894bd96a05413cdf1eb081c13ff654e54e11d5c2290dd446c8c",
+    "tree": "075caea7bf032731baeca337a9ee882ab8967c20"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

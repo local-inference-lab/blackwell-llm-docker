@@ -9,8 +9,8 @@ cd "${repo_root}"
 
 release_name=${RELEASE_NAME:-jovian-judgement-deepseek-v4-flash-cu133-torch213}
 release_date=${RELEASE_DATE:-20260904}
-revision=${REVISION:-r3}
-composition_root=${COMPOSITION_ROOT:-patches/releases/jovian-judgement-ds4-r3}
+revision=${REVISION:-r4}
+composition_root=${COMPOSITION_ROOT:-patches/releases/jovian-judgement-ds4-r4}
 base_image=${BASE_IMAGE:-voipmonitor/vllm@sha256:03b67e53dda73c3fa317d4cb529ad38a220c51c7365ee8d54c16e5063fcc54e2}
 runtime_foundation=${RUNTIME_FOUNDATION:-1}
 runtime_foundation_image=${RUNTIME_FOUNDATION_IMAGE:-${base_image}}
@@ -282,6 +282,30 @@ vision_lmcache_output="$(
 )"
 grep -Fq -- '--max-model-len 900000' <<<"${vision_lmcache_output}"
 grep -Fq -- '--gpu-memory-utilization 0.951' <<<"${vision_lmcache_output}"
+
+text_lmcache_output="$(
+  docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
+    -e DRY_RUN=1 -e MODE=dspark -e DSPARK_TOKENS=5 \
+    -e LMCACHE_MODE=disk -e MAX_MODEL_LEN=1048576 \
+    -e MAX_NUM_SEQS=8 -e TP_SIZE=2 -e GRAPH=auto "${image}" 2>&1
+)"
+grep -Fq -- '--gpu-memory-utilization 0.965' <<<"${text_lmcache_output}"
+grep -Fq 'direct_lmcache=1 lmcache_memory_profile=qualified' \
+  <<<"${text_lmcache_output}"
+
+if text_unsafe_output="$(
+  docker run --rm --entrypoint /usr/local/bin/serve-ds4-flash.sh \
+    -e DRY_RUN=1 -e MODE=dspark -e DSPARK_TOKENS=5 \
+    -e LMCACHE_MODE=disk -e MAX_MODEL_LEN=1048576 \
+    -e GPU_MEMORY_UTILIZATION=0.975 \
+    -e MAX_NUM_SEQS=8 -e TP_SIZE=2 -e GRAPH=auto "${image}" 2>&1
+)"; then
+  printf 'Text direct LMCache accepted an unqualified memory profile:\n%s\n' \
+    "${text_unsafe_output}" >&2
+  exit 1
+fi
+grep -Fq 'requires GPU_MEMORY_UTILIZATION at or below 0.965' \
+  <<<"${text_unsafe_output}"
 
 docker run --rm --entrypoint /opt/venv/bin/python "${image}" -c \
   'import importlib, os, pathlib, torch; ext = importlib.import_module("exllamav3_ext"); assert hasattr(ext, "exl3_gemm"); assert pathlib.Path(os.environ["VLLM_EXL3_ENCODER_SOURCE"], "modules/quant/exl3_lib/quantize.py").is_file()'

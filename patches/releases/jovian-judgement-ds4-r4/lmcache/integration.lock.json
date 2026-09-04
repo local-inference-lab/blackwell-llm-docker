@@ -1,0 +1,162 @@
+{
+  "base": {
+    "commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+    "ref": "refs/heads/release/v0.5.2-glm52-dcp-base",
+    "repository": "https://github.com/local-inference-lab/LMCache.git"
+  },
+  "composition": null,
+  "composition_strategy": "merge",
+  "manifest": {
+    "sha256": "bc7ac89db25db14312bbdb62a9e783334e368e769763aa7ed717fc3edf1fa566"
+  },
+  "name": "infernal-invocation-lmcache",
+  "pull_requests": [
+    {
+      "commits": [
+        "7b7583aef55e98ba05a6c199e71601d78552e794"
+      ],
+      "disposition": "already_in_base",
+      "head": "7b7583aef55e98ba05a6c199e71601d78552e794",
+      "number": 7,
+      "ref": "refs/pull/7/head",
+      "title": "Return bounded LMCache MP RPC handler errors"
+    },
+    {
+      "commits": [
+        "31c4175d2134518e5b43fe8f4a7d072df6043a13"
+      ],
+      "disposition": "already_in_base",
+      "head": "31c4175d2134518e5b43fe8f4a7d072df6043a13",
+      "number": 8,
+      "ref": "refs/pull/8/head",
+      "title": "Recover failed MP retrieves by recomputing invalid blocks"
+    },
+    {
+      "commits": [
+        "c3b73de74d855f6263deea8b6c6c4dde87e6e5b9"
+      ],
+      "disposition": "already_in_base",
+      "head": "c3b73de74d855f6263deea8b6c6c4dde87e6e5b9",
+      "number": 9,
+      "ref": "refs/pull/9/head",
+      "title": "Restore the largest exact L1 prefix after allocation failure"
+    },
+    {
+      "commits": [
+        "59186798bb5859b7add7bcac81dff9f2fd4037ab"
+      ],
+      "disposition": "already_in_base",
+      "head": "59186798bb5859b7add7bcac81dff9f2fd4037ab",
+      "number": 10,
+      "ref": "refs/pull/10/head",
+      "title": "Protect native lookup keys from concurrent deletion"
+    },
+    {
+      "commits": [
+        "2cee5a2c1ef7e80028e94b1bc4bfbfc02e2c2a8d"
+      ],
+      "disposition": "already_in_base",
+      "head": "2cee5a2c1ef7e80028e94b1bc4bfbfc02e2c2a8d",
+      "number": 11,
+      "ref": "refs/pull/11/head",
+      "title": "Log bounded prefetch failure key samples"
+    },
+    {
+      "commits": [
+        "baf1345106ebe568a116a35fdcee36bfec73da57"
+      ],
+      "disposition": "already_in_base",
+      "head": "baf1345106ebe568a116a35fdcee36bfec73da57",
+      "number": 12,
+      "ref": "refs/pull/12/head",
+      "title": "Return native per-key store results"
+    },
+    {
+      "commits": [
+        "d4dce69bf90362953cf9ac9a86cccc186b3219dc"
+      ],
+      "disposition": "already_in_base",
+      "head": "d4dce69bf90362953cf9ac9a86cccc186b3219dc",
+      "number": 13,
+      "ref": "refs/pull/13/head",
+      "title": "Enforce native filesystem O_DIRECT alignment"
+    },
+    {
+      "commits": [
+        "502b3c60f2e61625d6e32a31d0d725eedc620792"
+      ],
+      "disposition": "already_in_base",
+      "head": "502b3c60f2e61625d6e32a31d0d725eedc620792",
+      "number": 14,
+      "ref": "refs/pull/14/head",
+      "title": "Read colon-delimited and pipe-delimited native filesystem object-group keys"
+    },
+    {
+      "commits": [
+        "7729a9c75f2c29f14a27ea1e84ee6970950197ce"
+      ],
+      "disposition": "already_in_base",
+      "head": "7729a9c75f2c29f14a27ea1e84ee6970950197ce",
+      "number": 15,
+      "ref": "refs/pull/15/head",
+      "title": "Make native stores durable and capacity-bounded"
+    },
+    {
+      "commits": [
+        "e6c2708fe8ae8a96d3c66e83bf4b548c734fbb13"
+      ],
+      "disposition": "already_in_base",
+      "head": "e6c2708fe8ae8a96d3c66e83bf4b548c734fbb13",
+      "number": 16,
+      "ref": "refs/pull/16/head",
+      "title": "Restore native filesystem capacity accounting after restart"
+    },
+    {
+      "commits": [
+        "f9639e2094f70955a1145bfd7219b6fdd39ee143"
+      ],
+      "disposition": "already_in_base",
+      "head": "f9639e2094f70955a1145bfd7219b6fdd39ee143",
+      "number": 17,
+      "ref": "refs/pull/17/head",
+      "title": "Add bounded L1 writeback to durable storage"
+    },
+    {
+      "commits": [
+        "084e0797f03db22d94484f8344e3e23417e3333e"
+      ],
+      "disposition": "already_in_base",
+      "head": "084e0797f03db22d94484f8344e3e23417e3333e",
+      "number": 22,
+      "ref": "refs/pull/22/head",
+      "title": "Preserve hybrid object-group layouts during L2 prefetch"
+    },
+    {
+      "commits": [
+        "1bbe09a1a183e48218f500947b89cc38bb64eb13"
+      ],
+      "disposition": "already_in_base",
+      "head": "1bbe09a1a183e48218f500947b89cc38bb64eb13",
+      "number": 23,
+      "ref": "refs/pull/23/head",
+      "title": "Publish filesystem cache objects from writer-owned inodes"
+    },
+    {
+      "commits": [
+        "97ede799d6605ca1bd5285582df4e74a3d3c7b0d"
+      ],
+      "disposition": "merged",
+      "head": "97ede799d6605ca1bd5285582df4e74a3d3c7b0d",
+      "number": 44,
+      "ref": "refs/pull/44/head",
+      "title": "Transfer interleaved 64-head cache pages"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "557757277a03e8af787f3988e1ec481cf929c209c07a9adbf81630a9d9420de6",
+    "tree": "eb4c227f68a4e1c45d6b8edf6b4934e18f6d1f8b"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

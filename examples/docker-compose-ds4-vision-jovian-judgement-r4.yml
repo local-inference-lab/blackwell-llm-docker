@@ -1,0 +1,63 @@
+# DeepSeek-V4-Flash-Vision-Exp fixed probabilistic DSpark K3 profile.
+#
+# GPU KV storage is the default. Direct LMCache transfer selects a 900,000-token
+# limit at 0.951 GPU memory utilization on 96 GiB TP2 GPUs. Engine-driven
+# LMCache and GPU-only serving retain the 1,048,576-token limit at 0.975.
+services:
+  ds4-vision:
+    image: ${IMAGE:-voipmonitor/vllm:jovian-judgement-vllm075caea-b12xd0c4487-fi803c466-cu133-torch213-20260904-r4}
+    container_name: ${NAME:-ds4-vision-jovian-judgement-r4}
+    entrypoint:
+      - /usr/local/bin/lmcache-mp-wrapper.sh
+      - /usr/local/bin/serve-ds4-flash.sh
+    network_mode: host
+    ipc: host
+    init: true
+    shm_size: ${SHM_SIZE:-32gb}
+    gpus: all
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 1048576
+        hard: 1048576
+      stack: 67108864
+    environment:
+      CUDA_VISIBLE_DEVICES: ${GPUS:-0,1}
+      GLOO_SOCKET_IFNAME: ${GLOO_SOCKET_IFNAME:-lo}
+      NCCL_SOCKET_IFNAME: ${NCCL_SOCKET_IFNAME:-lo}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
+      PORT: ${PORT:-8000}
+      MODEL: ${MODEL:-deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}
+      MODEL_REVISION: ${MODEL_REVISION:-6821d6ad3681a4b137b066b76094fa82ebd0a380}
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-DeepSeek-V4-Flash-Vision-Exp}
+      DS4_MODEL_VARIANT: vision
+      MODE: ${MODE:-dspark}
+      BACKEND: ${BACKEND:-b12x-a8-dglin}
+      TP_SIZE: ${TP_SIZE:-2}
+      DCP_SIZE: ${DCP_SIZE:-1}
+      ALLREDUCE_MODE: ${ALLREDUCE_MODE:-auto}
+      DSPARK_DEPTH_MODE: ${DSPARK_DEPTH_MODE:-fixed}
+      DSPARK_TOKENS: ${DSPARK_TOKENS:-3}
+      DRAFT_SAMPLE_METHOD: ${DRAFT_SAMPLE_METHOD:-probabilistic}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-4}
+      GRAPH: ${GRAPH:-auto}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-}
+      MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-4096}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-}
+      LMCACHE_MODE: ${LMCACHE_MODE:-off}
+      LMCACHE_TRANSFER_MODE: ${LMCACHE_TRANSFER_MODE:-auto}
+      LMCACHE_L1_GB: ${LMCACHE_L1_GB:-8}
+      LMCACHE_L1_INIT_GB: ${LMCACHE_L1_INIT_GB:-2}
+      LMCACHE_HTTP_PORT: ${LMCACHE_HTTP_PORT:-8099}
+      LOAD_FORMAT: ${LOAD_FORMAT:-instanttensor}
+      INSTANTTENSOR_BACKEND: ${INSTANTTENSOR_BACKEND:-BUFFERED}
+      PYTHONHASHSEED: ${PYTHONHASHSEED:-0}
+      EXTRA_VLLM_ARGS: ${EXTRA_VLLM_ARGS:-}
+    volumes:
+      - ${HF_CACHE:-/root/.cache/huggingface}:/root/.cache/huggingface
+      - ${MODEL_ROOT:-/root/models}:/root/models:ro
+      - ${JIT_CACHE:-./cache/jovian-judgement-ds4-vision-r4}:/cache
+      - ${CONTAINER_TMP:-./cache/jovian-judgement-ds4-vision-r4/tmp}:/container-tmp
