@@ -42,7 +42,7 @@ ARG LMCACHE_INTEGRATION_LOCK_SHA256
 ARG LMCACHE_PRS
 ARG LMCACHE_UPSTREAM_BASE
 ARG LMCACHE_MERGE_HEADS
-ARG LMCACHE_BUILD_VERSION=0.5.2+glm52dcp.5
+ARG LMCACHE_BUILD_VERSION=0.5.2+glm52dcp.6
 ARG INSTANTTENSOR_REPO=https://github.com/voipmonitor/InstantTensor.git
 ARG INSTANTTENSOR_COMMIT=49b4010afc1cae0441e71fe0b0bffc24fa05e932
 ARG FLASHINFER_WHEEL_IMAGE
@@ -552,7 +552,8 @@ LABEL org.opencontainers.image.title="Source-locked CUDA 13.3 PyTorch 2.13 infer
 
 ENV NCCL_VERSION=2.31.2 \
     NCCL_NET_PLUGIN=none \
-    NCCL_TUNER_PLUGIN=none
+    NCCL_TUNER_PLUGIN=none \
+    LMCACHE_AUTO_TRANSFER_MODE=engine_driven
 
 WORKDIR /
 ENTRYPOINT ["/usr/local/bin/lmcache-mp-wrapper.sh", "/usr/local/bin/serve-ds4-flash.sh"]

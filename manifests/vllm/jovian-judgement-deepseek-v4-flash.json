@@ -24,7 +24,7 @@
     },
     {
       "number": 634,
-      "head": "c79cf4f9a1d9119031de3d926997b6241f16a542",
+      "head": "6b3e5aa0be9a55bbdd256da256d8e86e870b21af",
       "commits": [
         "8d0ad7e7ef45f6745b4b51985a104f7ff7f5dee2",
         "dc8e95286df1ba7c6049944113752a38850d221f",
@@ -32,9 +32,10 @@
         "20df5b260100579257532ff0aa9f30ec872e85e6",
         "2a7f5f203ac8737412cdb726c2750395880cdf45",
         "19f6d7b0f75ee3cf77e13795523886b37bbf5b06",
-        "c79cf4f9a1d9119031de3d926997b6241f16a542"
+        "c79cf4f9a1d9119031de3d926997b6241f16a542",
+        "6b3e5aa0be9a55bbdd256da256d8e86e870b21af"
       ],
-      "title": "Add DeepSeek-V4-Flash-Vision-Exp support"
+      "title": "Add DeepSeek V4 Vision and qualified LMCache profiles"
     }
   ],
   "source_patches": []

@@ -84,6 +84,22 @@ case "${lmcache_transfer_mode}" in
     exit 2
     ;;
 esac
+lmcache_auto_transfer_mode="${LMCACHE_AUTO_TRANSFER_MODE:-auto}"
+lmcache_auto_transfer_mode="${lmcache_auto_transfer_mode,,}"
+case "${lmcache_auto_transfer_mode}" in
+  auto|lmcache_driven|engine_driven) ;;
+  *)
+    echo "ERROR: LMCACHE_AUTO_TRANSFER_MODE must be auto, lmcache_driven, or engine_driven; got ${lmcache_auto_transfer_mode}" >&2
+    exit 2
+    ;;
+esac
+if [[ "${lmcache_transfer_mode}" == "auto" \
+  && "${lmcache_auto_transfer_mode}" != "auto" ]]; then
+  lmcache_transfer_mode="${lmcache_auto_transfer_mode}"
+fi
+# The downstream model launcher must classify the same effective transport
+# that the cache server and vLLM connector receive.
+export LMCACHE_TRANSFER_MODE="${lmcache_transfer_mode}"
 
 lmcache_kv_load_failure_policy="${LMCACHE_KV_LOAD_FAILURE_POLICY:-recompute}"
 lmcache_kv_load_failure_policy="${lmcache_kv_load_failure_policy,,}"

@@ -1,0 +1,72 @@
+{
+  "base": {
+    "commit": "9ae41c5cb9935d740456479954b0089f80bd2ef2",
+    "ref": "refs/heads/master",
+    "repository": "https://github.com/local-inference-lab/b12x.git"
+  },
+  "composition": null,
+  "composition_strategy": "cherry_pick",
+  "manifest": {
+    "sha256": "208ad1bed94d30285b9f4876f1d9fc5a762bc8427074b091bb398baa36d9288c"
+  },
+  "name": "jovian-judgement-deepseek-v4-flash-b12x",
+  "pull_requests": [
+    {
+      "commits": [
+        "bc8bf029b1ef3363d220b14e037c218ec03e85d9",
+        "e6bf8496e0077b8da230f0bccbda7ce6ad8a9323",
+        "f9b039b94c72779ea4d3b62864a930c882611e9e",
+        "b184292a1e0f5c3516f5971730fddea2944112a8",
+        "37d800547ca4666556b58a6b162f5cfa37c1037e",
+        "37dc7f8036f602adc1edac47464876d2a9c61d71",
+        "2a2baaf3979c1f47f8fd139aab5c6eeea35003e4",
+        "ea76030d6c2353d8cf35522b4eeedfa29e7aca67"
+      ],
+      "disposition": "cherry_picked",
+      "head": "ea76030d6c2353d8cf35522b4eeedfa29e7aca67",
+      "number": 246,
+      "ref": "refs/pull/246/head",
+      "title": "Make TP2 graph peer-push generation-safe"
+    },
+    {
+      "commits": [
+        "8ee356972e09f9a896b3c8ff3df6440a9a458299",
+        "f8a7b9c4070754ed4399c71fc4306d8970711e1c"
+      ],
+      "disposition": "cherry_picked",
+      "head": "f8a7b9c4070754ed4399c71fc4306d8970711e1c",
+      "number": 302,
+      "ref": "refs/pull/302/head",
+      "title": "Use a valid W4A8 MoE profiling oracle"
+    },
+    {
+      "commits": [
+        "49e598f62816a0451077d6c3c117b583cc79ca29",
+        "91ada9ae69d6ae317bdb2208d24df58b40365af8",
+        "223f88c23601689057d07700bedc650eac521526"
+      ],
+      "disposition": "cherry_picked",
+      "head": "223f88c23601689057d07700bedc650eac521526",
+      "number": 301,
+      "ref": "refs/pull/301/head",
+      "title": "Support FP8 DeepSeek V4 dual-cache prefill"
+    },
+    {
+      "commits": [
+        "3f6896dcd3ad221fb2ecb4737384131305d7c0ef"
+      ],
+      "disposition": "cherry_picked",
+      "head": "3f6896dcd3ad221fb2ecb4737384131305d7c0ef",
+      "number": 306,
+      "ref": "refs/pull/306/head",
+      "title": "Support DeepSeek V4 Vision mHC RMS epsilon"
+    }
+  ],
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "2cf8b72dce4e45feecaf80c19cbc542fa5af00b7cc8e941fc034e16aca98758f",
+    "tree": "d0c4487adefa7dacd661d194fd4234ef61830796"
+  },
+  "schema_version": 1,
+  "source_patches": []
+}

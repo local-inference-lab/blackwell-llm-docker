@@ -51,6 +51,10 @@ if [[ -n "${LMCACHE_TEST_MODEL_CUDA_ENV:-}" ]]; then
   printf '%s\n' "${CUDA_VISIBLE_DEVICES-<unset>}" \
     >"${LMCACHE_TEST_MODEL_CUDA_ENV}"
 fi
+if [[ -n "${LMCACHE_TEST_MODEL_TRANSFER_MODE:-}" ]]; then
+  printf '%s\n' "${LMCACHE_TRANSFER_MODE-<unset>}" \
+    >"${LMCACHE_TEST_MODEL_TRANSFER_MODE}"
+fi
 if [[ "${LMCACHE_TEST_MODEL_HANDLE_TERM:-0}" == 1 ]]; then
   trap 'exit 0' INT TERM HUP
   sleep "${LMCACHE_TEST_MODEL_SLEEP:-0}" &
@@ -109,6 +113,28 @@ grep -Fq -- '"lmcache.mp.mq_timeout":60.0' "${tmp_root}/ram-model.args"
 grep -Fq -- '"lmcache.mp.heartbeat_interval":10.0' \
   "${tmp_root}/ram-model.args"
 grep -Fxq 'expandable_segments:False' "${tmp_root}/ram-model.env"
+
+# An image may resolve the public auto mode to a qualified transport. The
+# server, connector configuration, and downstream model launcher must all use
+# the same resolved value.
+PATH="${tmp_root}/bin:${PATH}" \
+LMCACHE_MODE=ram \
+LMCACHE_AUTO_TRANSFER_MODE=engine_driven \
+LMCACHE_L1_GB=2 \
+LMCACHE_LOG="${tmp_root}/auto-engine.log" \
+LMCACHE_TEST_SERVER_ARGS="${tmp_root}/auto-engine-server.args" \
+LMCACHE_TEST_SERVER_ENV="${tmp_root}/auto-engine-server.env" \
+LMCACHE_TEST_MODEL_ARGS="${tmp_root}/auto-engine-model.args" \
+LMCACHE_TEST_MODEL_TRANSFER_MODE="${tmp_root}/auto-engine-model.env" \
+CUDA_VISIBLE_DEVICES=0,1 \
+bash "${lmcache_wrapper}" \
+  "${tmp_root}/model-server" auto-engine-driven
+grep -Fq -- '--supported-transfer-mode engine_driven' \
+  "${tmp_root}/auto-engine-server.args"
+grep -Fq -- '"lmcache.mp.mp_transfer_mode":"engine_driven"' \
+  "${tmp_root}/auto-engine-model.args"
+grep -Fxq 'engine_driven' "${tmp_root}/auto-engine-model.env"
+sed -n '1p' "${tmp_root}/auto-engine-server.env" | grep -Fxq ''
 
 # Engine-driven transfers keep the standalone server CPU-only. GPU visibility
 # remains unchanged for the model process that performs gather/scatter work.
