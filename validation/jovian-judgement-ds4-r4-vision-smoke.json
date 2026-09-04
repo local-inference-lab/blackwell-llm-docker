@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "status": "qualified",
+  "purpose": "Runtime smoke receipt for DeepSeek-V4-Flash-Vision-Exp TP2 fixed-DSpark text and two-image inference",
+  "image": "voipmonitor/vllm:jovian-judgement-vllm075caea-b12xd0c4487-fi803c466-cu133-torch213-20260904-r4",
+  "image_id": "sha256:c2d49a67c624082a6ed94dba2bf2c37d8596976f8d9e6602ffd8635592820fb1",
+  "registry_digest": "sha256:74f74eff0fe36b74334a5aaead7fa65c5a14fc4bd415bd26877415d5277e970c",
+  "validated_at": "2026-09-04T09:10:00Z",
+  "docker_source_commit": "572c13490b6efbb20f5bb2563309095eacf91810",
+  "vllm_tree": "075caea7bf032731baeca337a9ee882ab8967c20",
+  "b12x_tree": "d0c4487adefa7dacd661d194fd4234ef61830796",
+  "checkpoint": {
+    "repository": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+    "revision": "6821d6ad3681a4b137b066b76094fa82ebd0a380"
+  },
+  "configuration": {
+    "gpu_ids": [
+      0,
+      1
+    ],
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 97887 MiB",
+    "parallelism": "TP2/DCP1",
+    "speculative_decoding": "fixed probabilistic DSpark K3",
+    "attention_backend": "B12X",
+    "moe_backend": "B12X W4A8",
+    "dense_backend": "DGLIN FP8",
+    "kv_cache": "FP8 compressed MLA",
+    "load_format": "InstantTensor BUFFERED",
+    "cuda_graphs": "FULL_AND_PIECEWISE",
+    "max_cuda_graph_rows": 16,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 4096,
+    "max_model_len": 1048576,
+    "gpu_memory_utilization": 0.975,
+    "host_kv_storage": "disabled"
+  },
+  "results": {
+    "model_loading": "pass: target and DSpark weights loaded incrementally",
+    "cuda_graphs": "pass: PIECEWISE target, FULL target, and FULL DSpark capture completed",
+    "gpu_kv_cache_tokens": 1291930,
+    "text_request": {
+      "http_status": 200,
+      "elapsed_seconds": 1.50483681098558,
+      "prompt_tokens": 92,
+      "completion_tokens": 36,
+      "finish_reason": "stop",
+      "content": "r4 vision text passed"
+    },
+    "two_image_request": {
+      "http_status": 200,
+      "elapsed_seconds": 1.7662482699379325,
+      "prompt_tokens": 537,
+      "completion_tokens": 441,
+      "finish_reason": "stop",
+      "content_sha256": "5c767478d353760f03d8c711c5a673aaef1acbc7a1f0bc0a8c3b10017a1aa4d1",
+      "semantic_result": "identified the first image as carrots with edible roots and the second image as corn with edible kernels"
+    },
+    "server_healthy_after": true,
+    "runtime_error_scan": "pass: no traceback, CUDA allocation failure, illegal access, or HTTP failure"
+  },
+  "limitations": [
+    "This receipt is a runtime and semantic smoke test, not a throughput or task-quality benchmark.",
+    "Direct-LMCache Vision pressure is covered by the separate 900,000-token memory qualification documented in the serving specification."
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "status": "qualified",
+  "purpose": "Qualification receipt for the one-million-token DeepSeek-V4-Flash-0731 TP2 fixed-DSpark direct-LMCache memory contract",
+  "image": "voipmonitor/vllm:jovian-judgement-vllm075caea-b12xd0c4487-fi803c466-cu133-torch213-20260904-r4",
+  "image_id": "sha256:c2d49a67c624082a6ed94dba2bf2c37d8596976f8d9e6602ffd8635592820fb1",
+  "registry_digest": "sha256:74f74eff0fe36b74334a5aaead7fa65c5a14fc4bd415bd26877415d5277e970c",
+  "image_size_bytes": 34614573173,
+  "validated_at": "2026-09-04T09:00:15Z",
+  "source_composition": {
+    "docker": {
+      "repository": "https://github.com/local-inference-lab/blackwell-llm-docker.git",
+      "commit": "572c13490b6efbb20f5bb2563309095eacf91810"
+    },
+    "vllm": {
+      "repository": "https://github.com/local-inference-lab/vllm.git",
+      "base_ref": "dev/jovian-judgement",
+      "base_commit": "a50ebee1d2460d22386b54e79f46236376e2b486",
+      "tree": "075caea7bf032731baeca337a9ee882ab8967c20",
+      "pull_requests": [
+        628,
+        630,
+        634
+      ]
+    },
+    "b12x": {
+      "repository": "https://github.com/local-inference-lab/b12x.git",
+      "base_ref": "master",
+      "base_commit": "9ae41c5cb9935d740456479954b0089f80bd2ef2",
+      "tree": "d0c4487adefa7dacd661d194fd4234ef61830796",
+      "pull_requests": [
+        246,
+        302,
+        301,
+        306
+      ]
+    },
+    "lmcache": {
+      "repository": "https://github.com/local-inference-lab/LMCache.git",
+      "base_ref": "release/v0.5.2-glm52-dcp-base",
+      "base_commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+      "tree": "eb4c227f68a4e1c45d6b8edf6b4934e18f6d1f8b",
+      "pull_request": 44
+    },
+    "flashinfer": "803c4664f4771ddc418f20a57f752469a237a825",
+    "instanttensor": "49b4010afc1cae0441e71fe0b0bffc24fa05e932",
+    "nccl": "fb6f40999a2a9e63104d4ae4a84118bce61528f8"
+  },
+  "runtime_packages": {
+    "vllm": "0.26.1rc0+jovian.judgement.cu133.r4.vllm075caea.b12xd0c4487",
+    "b12x": "1.3.0",
+    "torch": "2.13.0",
+    "cuda": "13.3",
+    "nccl": "2.31.2",
+    "flashinfer": "0.6.18+cu133",
+    "instanttensor": "0.1.9",
+    "lmcache": "0.5.2+glm52dcp.5",
+    "xgrammar": "0.2.5"
+  },
+  "checkpoint": {
+    "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
+  },
+  "validation_environment": {
+    "host": "aiserver",
+    "gpu_ids_used": [
+      0,
+      1
+    ],
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 97887 MiB",
+    "topology": "Two GPUs connected through a PCIe switch on a sixteen-GPU host",
+    "parallelism": "TP2/DCP1",
+    "speculative_decoding": "fixed probabilistic DSpark K5",
+    "attention_backend": "B12X",
+    "moe_backend": "B12X W4A8",
+    "dense_backend": "DGLIN FP8",
+    "kv_cache": "FP8 compressed MLA",
+    "load_format": "InstantTensor BUFFERED",
+    "cuda_graphs": "FULL_AND_PIECEWISE",
+    "max_cuda_graph_rows": 48,
+    "max_num_seqs": 8,
+    "max_num_batched_tokens": 4096,
+    "max_model_len": 1048576,
+    "gpu_memory_utilization": 0.965,
+    "lmcache_mode": "disk",
+    "lmcache_transfer_mode": "auto",
+    "lmcache_l1_gib": 8,
+    "lmcache_l2_gib": 32
+  },
+  "memory": {
+    "gpu_kv_cache_tokens": 1181020,
+    "gpu_kv_cache_gib_per_rank": 7.84,
+    "standalone_lmcache_startup_mib": {
+      "gpu_0": 550,
+      "gpu_1": 0
+    },
+    "standalone_lmcache_after_registration_mib": {
+      "gpu_0": 708,
+      "gpu_1": 708
+    },
+    "minimum_free_mib_during_request": {
+      "gpu_0": 425,
+      "gpu_1": 431
+    }
+  },
+  "request": {
+    "endpoint": "/v1/completions",
+    "prompt_token_id": 1000,
+    "prompt_tokens": 1000000,
+    "max_tokens": 1,
+    "temperature": 0,
+    "body_bytes": 5000091,
+    "body_sha256": "041077f8dfab97867d486567bded6214f71584a23e65bc2317bcc1dd0491e3aa"
+  },
+  "results": {
+    "uncached": {
+      "http_status": 200,
+      "elapsed_seconds": 176.55863598303404,
+      "cached_prompt_tokens": 0,
+      "generated_text": " в",
+      "finish_reason": "length"
+    },
+    "replay": {
+      "http_status": 200,
+      "elapsed_seconds": 1.4166664810618386,
+      "cached_prompt_tokens": 999424,
+      "generated_text": " в",
+      "finish_reason": "length"
+    },
+    "vllm_healthy_after": true,
+    "lmcache_healthy_after": true,
+    "runtime_error_scan": "pass: no traceback, CUDA allocation failure, illegal access, or HTTP failure"
+  },
+  "rejected_profile": {
+    "gpu_memory_utilization": 0.975,
+    "gpu_kv_cache_tokens": 1338517,
+    "free_memory_mib_before_failed_allocation": "47-51",
+    "failed_allocation_mib": 128,
+    "launcher_behavior": "reject before model loading unless LMCACHE_ALLOW_UNQUALIFIED_MEMORY_PROFILE=1"
+  },
+  "limitations": [
+    "The qualified memory envelope applies to 96 GiB GPUs with the recorded TP2 fixed-K5 graph and scheduler configuration.",
+    "The direct-LMCache server owns a CUDA context and transport resources independently of vLLM's GPU memory profiler.",
+    "LMCACHE_L1_GB controls host RAM capacity and does not reduce the direct-transfer CUDA context footprint.",
+    "The receipt validates one deterministic one-million-token request and replay; it is not a throughput or model-quality benchmark."
+  ]
+}
