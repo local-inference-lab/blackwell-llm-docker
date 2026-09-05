@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-08-29",
+  "source": {
+    "repository": "https://github.com/vllm-project/FlashKDA.git",
+    "ref": "refs/heads/dev",
+    "commit": "ee0be888cd0e972f9409bf53756f8c38c6652173",
+    "base_tree": "0930ae5e073254fd9312351550d6738a2064ba7b",
+    "result_tree": "6851531e95decd57c28f166fa6ce8aa381a1aa04",
+    "patch_sha256": "2119fdd721decd873cdbbbe5263f624e21b8b2e83cede36d9f19e75377895951",
+    "cutlass_commit": "5c149f52a436782210263fb2f19b354443a61c6a"
+  },
+  "build": {
+    "cuda_toolkit": "13.3.73",
+    "pytorch": "2.13.0",
+    "cuda_arch": "sm_120a",
+    "generic_binary_sha256": "5d2466074b29005bc149e9da942e8e33f342af54f031e8055daa9d1daeecbde3",
+    "generic_binary_bytes": 5547024,
+    "production_binary_sha256": "c0b440ab87e6cfec16b23138f95a67d8fe9142836c040a56c41a574dc7d27ed1",
+    "production_image_digest": "sha256:087276f1ec791909e71055d655eeadb3b35c246e46f2be21af9d210aa970a60b"
+  },
+  "root_cause": {
+    "symbol": "__cuda_syscall_cp_async_bulk_unicast",
+    "old_first_call_driver_delta_bytes": 3925868544,
+    "k1_only_driver_delta_bytes": 127926272,
+    "checkpoint_abi_caused_delta": false,
+    "vsplit_specific": false
+  },
+  "kernel_validation": {
+    "syscall_symbol_present": false,
+    "stack_bytes": 0,
+    "local_bytes": 0,
+    "racecheck_errors": 0,
+    "racecheck_warnings": 0,
+    "reference_cases": [
+      {
+        "name": "vsplit",
+        "tokens": 97,
+        "sequences": 1,
+        "checkpoint": true,
+        "max_relative_rmse": 0.005136
+      },
+      {
+        "name": "default",
+        "tokens": 164,
+        "sequences": 8,
+        "checkpoint": true,
+        "max_relative_rmse": 0.004703
+      },
+      {
+        "name": "production_chunk",
+        "tokens": 3080,
+        "sequences": 1,
+        "checkpoint_offset": 3072,
+        "max_relative_rmse": 0.005526
+      }
+    ],
+    "warm_checkpoint_gpu_ms_per_call": 0.1283,
+    "old_bulk_copy_gpu_ms_per_call": 0.1354
+  },
+  "live_profile": {
+    "tensor_parallel_size": 8,
+    "decode_context_parallel_size": 8,
+    "max_model_len": 320000,
+    "kv_cache_bytes_per_rank": 1879048192,
+    "kv_capacity_tokens": 625777,
+    "max_num_batched_tokens": 3080,
+    "max_num_scheduled_tokens": 3080,
+    "normal_output": "pass",
+    "json_schema": "pass",
+    "concurrency_4": "pass",
+    "disconnect_prompt_tokens": 18001,
+    "disconnect_timeout_seconds": 1.2,
+    "first_idle_observation_seconds": 0.08,
+    "immediate_retry_seconds": 1.52,
+    "cold_16k_prompt_tokens": 16104,
+    "cold_16k_seconds": 21.0,
+    "cached_16k_seconds": 6.56,
+    "cold_32k_prompt_tokens": 32092,
+    "cold_32k_seconds": 36.2766,
+    "cold_32k_prompt_tokens_per_second": 884.648,
+    "request_errors": 0,
+    "corrupted_requests": 0,
+    "container_restarts": 0,
+    "container_oom_killed": false
+  },
+  "rejected_profile": {
+    "max_model_len": 372000,
+    "kv_cache_bytes_per_rank": 2147483648,
+    "first_flashkda_request_completed": true,
+    "allocation_warning_request_bytes": 264241152,
+    "allocation_warning_free_bytes": 263585792,
+    "reason": "insufficient rank-0 physical memory margin"
+  },
+  "repository_validation": {
+    "focused_source_lock_tests_passed": 4,
+    "full_python_tests_passed": 35,
+    "shell_syntax": "pass",
+    "ruff_check": "pass",
+    "ruff_format_check": "pass",
+    "docker_build_check": "pass",
+    "patch_result_tree_reproduced": true
+  }
+}

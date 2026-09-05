@@ -203,8 +203,14 @@ Status: **implemented**. The build script
 recorded by
 `patches/releases/kimi-k3-infernal-invocation-runtime-r1/vllm/integration.lock.json`
 with the B12X Git tree recorded by
-`patches/releases/kimi-k3-hh-runtime-r1/b12x/integration.lock.json`. The image
-uses CUDA 13.3, PyTorch 2.13.0, NCCL 2.31.2, and InstantTensor 0.1.9.
+`patches/releases/kimi-k3-hh-runtime-r1/b12x/integration.lock.json` and the
+FlashKDA Git tree recorded by
+`patches/releases/flashkda-sm120-tensormap-r1/flashkda/integration.lock.json`.
+The image uses CUDA 13.3, PyTorch 2.13.0, NCCL 2.31.2, and InstantTensor 0.1.9.
+The FlashKDA source lock replaces the SM120 bulk-copy syscall fallback with
+native TensorMap workspace loads while leaving SM90 and SM100 on their native
+bulk-copy path. Root-cause analysis and GPU qualification are in
+`docs/kimi-k3-flashkda-sm120-runtime.md`.
 
 The image contains these serving interfaces:
 
