@@ -73,6 +73,8 @@ def main() -> None:
         "runtime.base.image": "voipmonitor/vllm@sha256:93ac5228f1cbde2182ca294d8b479259144742af2756a49ff207dd245429bf43",
         "runtime.cuda.version": "13.3",
         "runtime.pytorch.version": "2.13.0",
+        "runtime.liburing.version": "2.5",
+        "runtime.liburing.package.version": "2.5-1build1",
         "runtime.rootfs.layers": "2",
         "runtime.cudagraph.mode": "FULL_AND_PIECEWISE",
         "runtime.moe-backend.default": "b12x",

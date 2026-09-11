@@ -27,6 +27,16 @@ verify /flashinfer-wheels/flashinfer_jit_cache-0.6.18+cu133-cp39-abi3-manylinux_
 test "$(cat /flashkda-artifacts/flashkda-base.commit)" = "$(value flashkda.base.commit)"
 test "$(awk '{print $1}' /flashkda-artifacts/flashkda-patch.sha256)" = "$(value flashkda.patch.sha256)"
 
+# B12X disk-backed Engram requires the io_uring library and build headers.
+# Install both inside the source layer; keep the CUDA runtime foundation intact.
+readonly uring_package_version=$(value runtime.liburing.package.version)
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    "liburing2=${uring_package_version}" "liburing-dev=${uring_package_version}"
+test "$(pkg-config --modversion liburing)" = "$(value runtime.liburing.version)"
+test "$(dpkg-query -W -f='${Version}' liburing-dev)" = "$uring_package_version"
+test "$(dpkg-query -W -f='${Version}' liburing2)" = "$uring_package_version"
+
 for name in vllm b12x lmcache; do
     if [[ $name == lmcache ]]; then destination=/opt/lmcache/source; else destination=/opt/glm53-flash/$name; fi
     bash /build-inputs/install_source_bundle.sh "/source-bundles/$name.bundle" \
@@ -103,6 +113,8 @@ from lmcache.integration.vllm.recurrent_checkpoint_connector import LMCacheRecur
 assert (torch.__version__, torch.version.cuda, torch._C._GLIBCXX_USE_CXX11_ABI) == ("2.13.0", "13.3", True)
 print("LMCache wheel:", metadata.version("lmcache"))
 print("Source imports:", vllm.__file__, b12x.__file__)
+from b12x.loader._native import load as load_checkpoint_helper
+assert load_checkpoint_helper().ABI_VERSION == 1
 assert Path(vllm.__file__).resolve() == Path("/opt/glm53-flash/vllm/vllm/__init__.py")
 assert Path(b12x.__file__).resolve() == Path("/opt/glm53-flash/b12x/b12x/__init__.py")
 schema = str(torch.ops._C.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert.default._schema)

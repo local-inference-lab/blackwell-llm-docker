@@ -122,6 +122,11 @@ def image_labels(
         labels[f"local-inference.{name}.branch"] = "image-source"
     if "vllm.version" in lock:
         labels["local-inference.vllm.version"] = lock["vllm.version"]
+    for key in ("version", "package.version"):
+        if f"runtime.liburing.{key}" in lock:
+            labels[f"local-inference.liburing.{key}"] = lock[
+                f"runtime.liburing.{key}"
+            ]
     for key in ("base.commit", "patch.sha256", "extension.sha256"):
         labels[f"local-inference.flashkda.{key}"] = lock[f"flashkda.{key}"]
     if "flashinfer.commit" in lock:
