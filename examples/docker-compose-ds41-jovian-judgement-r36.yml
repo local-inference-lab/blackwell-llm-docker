@@ -1,0 +1,48 @@
+name: ds41-jovian-judgement
+
+services:
+  ds41:
+    image: ${DS41_IMAGE:-localinferencelab/vllm:jovian-judgement-community-20260912-r36}
+    container_name: ${DS41_CONTAINER:-ds41-jovian-judgement}
+    entrypoint: ["/usr/local/bin/serve-ds41-jovian.sh"]
+    init: true
+    network_mode: host
+    ipc: host
+    shm_size: 32gb
+    restart: "no"
+    security_opt: ["seccomp=unconfined"]
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+      stack: 67108864
+    environment:
+      MODEL_PATH: /model
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8000}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      TP_SIZE: "4"
+      DCP_SIZE: "1"
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-131072}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-4}
+      MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-4096}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.95}
+      ENGRAM_TABLE_MEMORY: ${ENGRAM_TABLE_MEMORY:-disk}
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ${DS41_MODEL_DIR:-./models/DeepSeek-V4.1-Flash}
+        target: /model
+        read_only: true
+        bind:
+          create_host_path: false
+      - ds41-cache:/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU0:-0}", "${GPU1:-1}", "${GPU2:-2}", "${GPU3:-3}"]
+              capabilities: [gpu]
+
+volumes:
+  ds41-cache:

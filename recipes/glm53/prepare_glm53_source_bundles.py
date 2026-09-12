@@ -171,6 +171,7 @@ def main() -> None:
         "install_glm53_source_locked.sh",
         "install_vllm_source_version.py",
         "serve-ds4-jovian.sh",
+        "serve-ds41-jovian.sh",
         "Dockerfile.jovian-stable-native",
         "build_jovian_stable_native.py",
         "serve-glm53-flash-nvfp4-dflash2.sh",
