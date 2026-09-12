@@ -16,6 +16,57 @@ WRAPPERS = (
 )
 
 
+@pytest.mark.parametrize("semantic", [False, True])
+def test_semantic_model_budget_is_independent_of_storage_object_size(semantic):
+    source = (RECIPE / "serve-glm53-flash-lmcache-cache-complete.sh").read_text()
+    source = source.replace("/opt/venv/bin/python", shlex.quote(sys.executable))
+    configuration, separator, _ = source.partition('"${lmcache_server_command[@]}" &')
+    assert separator
+    identity = (
+        json.dumps(
+            {
+                "target_revision": "a" * 40,
+                "source_revision": "b" * 40,
+                "draft_revision": "a" * 40,
+            }
+        )
+        if semantic
+        else ""
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            configuration
+            + '\nprintf "%s\\n" "${MAX_NUM_BATCHED_TOKENS}" "${vllm_extra_args[@]}"',
+        ],
+        env={
+            "PATH": os.environ["PATH"],
+            "LMCACHE_ENABLED": "1",
+            "LMCACHE_L2_ENABLED": "0",
+            "LMCACHE_MIN_SHM_GIB": "1",
+            "LMCACHE_TRANSFER_MODE": "engine_driven",
+            "LMCACHE_CHUNK_SIZE": "4096",
+            "LMCACHE_TARGET_TOKEN_BUDGET": "3072",
+            "LMCACHE_CHECKPOINT_IDENTITY": identity,
+            "SPECULATOR": "mtp",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if semantic:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            "3072",
+            "--max-num-scheduled-tokens",
+            "3072",
+        ]
+    else:
+        assert result.returncode == 2
+        assert "Aligned LMCache requires matching" in result.stderr
+
+
 def render(wrapper, host=None, dtype=None, settings=None, cwd=None):
     source = (RECIPE / wrapper).read_text()
     # Use the test environment's interpreter for JSON validation; no LMCache

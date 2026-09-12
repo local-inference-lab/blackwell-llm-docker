@@ -131,8 +131,8 @@ dcp=${DCP:-1}
 require_positive_integer TP "${tp}"
 require_positive_integer DCP "${dcp}"
 case "${tp}" in
-  4 | 8) ;;
-  *) fail "The cache-complete launcher supports TP=4 or TP=8; got ${tp}" ;;
+  2 | 4 | 8) ;;
+  *) fail "The cache-complete launcher supports TP=2, TP=4 or TP=8; got ${tp}" ;;
 esac
 if ((tp % dcp != 0)); then
   fail "DCP must divide TP; got TP=${tp} DCP=${dcp}"
@@ -342,8 +342,12 @@ case "${cache_mode}" in
     target_token_budget=${LMCACHE_TARGET_TOKEN_BUDGET:-4096}
     require_positive_integer LMCACHE_CHUNK_SIZE "${lmcache_chunk_size}"
     require_positive_integer LMCACHE_TARGET_TOKEN_BUDGET "${target_token_budget}"
-    if [[ ${lmcache_chunk_size} != "${target_token_budget}" ]]; then
-      fail "LMCACHE_CHUNK_SIZE and LMCACHE_TARGET_TOKEN_BUDGET must match; got ${lmcache_chunk_size} and ${target_token_budget}"
+    # Semantic bundles carry an exact recurrent endpoint independently of the
+    # storage-object size. Aligned transfers require one complete object per
+    # target budget to retain their recurrent-boundary contract.
+    if [[ ${checkpoint_policy} != request_boundaries &&
+      ${lmcache_chunk_size} != "${target_token_budget}" ]]; then
+      fail "Aligned LMCache requires matching LMCACHE_CHUNK_SIZE and LMCACHE_TARGET_TOKEN_BUDGET; got ${lmcache_chunk_size} and ${target_token_budget}"
     fi
     if [[ ${target_block_size} != auto ]] &&
       ((lmcache_chunk_size % (target_block_size * dcp) != 0)); then
@@ -398,6 +402,8 @@ if [[ ${CACHE_CONFIG_DRY_RUN:-0} == 1 ]]; then
   if [[ ${cache_mode} == lmcache ]]; then
     printf 'RECURRENT_CHECKPOINT_POLICY=%q\n' "${checkpoint_policy}"
     printf 'LMCACHE_TRANSFER_MODE=%q\n' "${LMCACHE_TRANSFER_MODE}"
+    printf 'LMCACHE_CHUNK_SIZE=%q\nLMCACHE_TARGET_TOKEN_BUDGET=%q\n' \
+      "${LMCACHE_CHUNK_SIZE}" "${LMCACHE_TARGET_TOKEN_BUDGET}"
     printf 'GPU_MEMORY_UTILIZATION=%q\n' \
       "${GPU_MEMORY_UTILIZATION:-launcher-default}"
     printf 'LMCACHE_L2_PATH=%q\n' "${LMCACHE_L2_PATH:-disabled}"

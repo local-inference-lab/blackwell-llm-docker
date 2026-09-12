@@ -173,8 +173,10 @@ if [[ ${lmcache_kv_cache_dtype} == nvfp4_ds_mla && \
   printf 'nvfp4_ds_mla storage requires the same vLLM cache dtype\n' >&2
   exit 2
 fi
-if [[ ${chunk_size} != "${target_token_budget}" ]]; then
-  printf 'LMCACHE_CHUNK_SIZE and LMCACHE_TARGET_TOKEN_BUDGET must match; got %s and %s\n' \
+# Immutable semantic bundles include their own recurrent endpoint, so their
+# storage geometry does not require an equally sized model forward.
+if [[ -z ${checkpoint_identity} && ${chunk_size} != "${target_token_budget}" ]]; then
+  printf 'Aligned LMCache requires matching LMCACHE_CHUNK_SIZE and LMCACHE_TARGET_TOKEN_BUDGET; got %s and %s\n' \
     "${chunk_size}" "${target_token_budget}" >&2
   exit 2
 fi

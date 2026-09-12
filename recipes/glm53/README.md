@@ -128,6 +128,13 @@ uv run --no-project --with pytest python -m pytest -q tests/test_build_contract.
 
 ## Serving contract
 
+### GLM Spark on two GPUs
+
+The [Spark TP2 serving contract](glm-spark-tp2.md) describes profiled KV
+allocation, native vision and worker-owned LMCache copies for TP2/DCP2 MTP3.
+Automatic context capacity depends on measured GPU memory, not a fixed
+one-million-token promise. Qualification identifies the tested model and image.
+
 ### GLM cache HTTP binding
 
 Status: **implemented**. `LMCACHE_HTTP_HOST` selects the LMCache HTTP bind

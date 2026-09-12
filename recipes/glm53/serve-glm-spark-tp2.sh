@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# GPU-local GLM Spark profile qualified on two 96 GiB RTX PRO 6000 GPUs.
+# GLM Spark profile for two 96 GiB RTX PRO 6000 GPUs.
 # The scheduler launcher owns vLLM argument rendering and CLI precedence.
 export MODEL=${MODEL:-local-inference-lab/GLM-5.3-Flash-NVFP4-Spark}
 export SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-GLM-5.3-Flash-NVFP4-Spark}
@@ -9,7 +9,8 @@ export HOST=${HOST:-0.0.0.0} PORT=${PORT:-8000}
 export TP=${TP:-2} DCP=${DCP:-2} SPECULATOR=${SPECULATOR:-mtp}
 export NUM_SPECULATIVE_TOKENS=${NUM_SPECULATIVE_TOKENS:-3}
 export MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-3072}
-export MAX_NUM_SEQS=${MAX_NUM_SEQS:-4} MAX_MODEL_LEN=${MAX_MODEL_LEN:-1048576}
+export MAX_NUM_SEQS=${MAX_NUM_SEQS:-4} MAX_MODEL_LEN=${MAX_MODEL_LEN:--1}
+export GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.985}
 export CUDAGRAPH_MODE=${CUDAGRAPH_MODE:-FULL_AND_PIECEWISE}
 export MAX_CUDAGRAPH_CAPTURE_SIZE=${MAX_CUDAGRAPH_CAPTURE_SIZE:-16}
 export CUDAGRAPH_CAPTURE_SIZES=${CUDAGRAPH_CAPTURE_SIZES:-'1 2 4 8 12 16'}
@@ -31,14 +32,47 @@ if [[ ${TP} != 2 || ${DCP} != 2 || ${SPECULATOR} != mtp ]]; then
   echo 'This experimental entrypoint requires TP=2, DCP=2 and SPECULATOR=mtp. Other profiles are not qualified.' >&2
   exit 2
 fi
-if [[ ${CACHE_MODE:-vram} != vram ]]; then
-  echo 'This TP2 profile qualifies GPU-local cache only, not LMCache.' >&2
+target_budget_default=${MAX_NUM_BATCHED_TOKENS}
+budget_value_pending=0
+for argument in "$@"; do
+  if ((budget_value_pending)); then
+    target_budget_default=${argument}
+    budget_value_pending=0
+    continue
+  fi
+  case ${argument} in
+    --max-num-batched-tokens) budget_value_pending=1 ;;
+    --max-num-batched-tokens=*) target_budget_default=${argument#*=} ;;
+  esac
+done
+if ((budget_value_pending)); then
+  echo '--max-num-batched-tokens requires a value' >&2
   exit 2
 fi
+cache_mode=${CACHE_MODE:-vram}
+case ${cache_mode} in
+  vram) ;;
+  lmcache)
+    export LMCACHE_TRANSFER_MODE=${LMCACHE_TRANSFER_MODE:-engine_driven}
+    export LMCACHE_TARGET_TOKEN_BUDGET=${LMCACHE_TARGET_TOKEN_BUDGET:-${target_budget_default}}
+    # Two DCP shards cover a 4,096-token transfer object. Attention-page
+    # geometry is independent of the 3,072-token model scheduling budget.
+    export GLM53_TARGET_BLOCK_SIZE=${GLM53_TARGET_BLOCK_SIZE:-2048}
+    if [[ ${LMCACHE_TRANSFER_MODE} != engine_driven ]]; then
+      echo 'Spark TP2 LMCache requires engine_driven transport so the sidecar does not consume GPU memory.' >&2
+      exit 2
+    fi
+    ;;
+  *) echo 'This TP2 profile supports CACHE_MODE=vram or lmcache.' >&2; exit 2 ;;
+esac
 if [[ $# == 1 && ($1 == --help || $1 == -h) ]]; then
-  printf '%s\n' 'GLM Spark TP2/DCP2 experimental profile: MTP3, FP8 KV, vision, 1M context, batch 3072, four request slots.
+  printf '%s\n' 'GLM Spark TP2/DCP2 experimental profile: MTP3, FP8 KV, vision, batch 3072, four request slots.
 MODEL accepts a Hugging Face repository or a mounted checkpoint. PORT defaults to 8000; HOST defaults to 0.0.0.0.
-KV_CACHE_MEMORY_BYTES defaults to 4294967296 per GPU. Explicit vLLM CLI options take precedence.
+KV_CACHE_MEMORY_BYTES=auto uses vLLM memory profiling; an explicit byte budget bypasses automatic sizing.
+MAX_MODEL_LEN=-1 fits the context to the measured KV pool, up to the checkpoint limit. An explicit context length must fit.
+CACHE_MODE=lmcache selects worker-owned engine_driven copies and a CPU-only sidecar; FP8 KV precision is preserved.
+LMCACHE_L1_SIZE_GB controls the preallocated pinned host pool (default 64 GiB); it is not a lazy-growth limit.
+Explicit vLLM CLI options take precedence, except cache layout options owned by the LMCache launcher.
 DRY_RUN=1 prints the complete command without loading weights. VRAM overclocking is never applied by this launcher.'
   exit 0
 fi
@@ -51,7 +85,12 @@ has_option() {
   return 1
 }
 args=("$@")
-has_option --kv-cache-memory-bytes "$@" || args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES:-4294967296}")
+if ! has_option --kv-cache-memory-bytes "$@" && [[ ${KV_CACHE_MEMORY_BYTES:-auto} != auto ]]; then
+  args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+fi
 has_option --limit-mm-per-prompt "$@" || args+=(--limit-mm-per-prompt '{"image":1,"video":0}')
 has_option --recurrent-checkpoint-policy "$@" || args+=(--recurrent-checkpoint-policy request_boundaries)
+if [[ ${cache_mode} == lmcache ]]; then
+  exec /usr/local/bin/serve-glm53-flash-cache-complete.sh "${args[@]}"
+fi
 exec /usr/local/bin/serve-glm53-flash-nvfp4-dflash2.sh "${args[@]}"

@@ -25,6 +25,9 @@ def launch(tmp_path):
         )
     )
     scheduler.chmod(0o755)
+    cache = tmp_path / "cache.sh"
+    cache.write_text((RECIPE / "serve-glm53-flash-cache-complete.sh").read_text())
+    cache.chmod(0o755)
     wrapper = tmp_path / "tp2.sh"
     wrapper.write_text(
         (RECIPE / "serve-glm-spark-tp2.sh")
@@ -32,6 +35,10 @@ def launch(tmp_path):
         .replace(
             "/usr/local/bin/serve-glm53-flash-nvfp4-dflash2.sh",
             shlex.quote(str(scheduler)),
+        )
+        .replace(
+            "/usr/local/bin/serve-glm53-flash-cache-complete.sh",
+            shlex.quote(str(cache)),
         )
     )
 
@@ -59,10 +66,9 @@ def test_capacity_profile_and_b12x_defaults(launch):
         "--port": "8000",
         "--tensor-parallel-size": "2",
         "--decode-context-parallel-size": "2",
-        "--max-model-len": "1048576",
+        "--max-model-len": "-1",
         "--max-num-batched-tokens": "3072",
         "--max-num-seqs": "4",
-        "--kv-cache-memory-bytes": "4294967296",
         "--kv-cache-dtype": "fp8_ds_mla",
         "--moe-backend": "b12x",
         "--linear-backend": "b12x",
@@ -73,6 +79,7 @@ def test_capacity_profile_and_b12x_defaults(launch):
         assert args.count(flag) == 1
         assert args[args.index(flag) + 1] == value
     assert "local-inference-lab/GLM-5.3-Flash-NVFP4-Spark" in args
+    assert "--kv-cache-memory-bytes" not in args
     import json
 
     spec = json.loads(args[args.index("--speculative-config") + 1])
@@ -99,7 +106,7 @@ def test_explicit_cli_defaults_are_not_duplicated(launch, equals):
 
 @pytest.mark.parametrize(
     "environment",
-    [{"TP": "4"}, {"DCP": "1"}, {"SPECULATOR": "dflash"}, {"CACHE_MODE": "lmcache"}],
+    [{"TP": "4"}, {"DCP": "1"}, {"SPECULATOR": "dflash"}, {"CACHE_MODE": "native"}],
 )
 def test_unqualified_profiles_fail_with_a_clear_message(launch, environment):
     result = launch(environment)
@@ -112,6 +119,56 @@ def test_help_describes_portable_profile_and_no_clock_mutation(launch):
     assert result.returncode == 0
     assert "0.0.0.0" in result.stdout
     assert "overclocking is never applied" in result.stdout
+
+
+@pytest.mark.parametrize("budget", ["auto", "4294967296", "3758096384"])
+def test_explicit_memory_budget_or_profiled_allocation(launch, budget):
+    args = rendered(launch({"KV_CACHE_MEMORY_BYTES": budget}))
+    if budget == "auto":
+        assert "--kv-cache-memory-bytes" not in args
+    else:
+        assert args.count("--kv-cache-memory-bytes") == 1
+        assert args[args.index("--kv-cache-memory-bytes") + 1] == budget
+
+
+def test_lmcache_preserves_fp8_and_uses_request_boundary_engine_transport(launch):
+    result = launch({"CACHE_MODE": "lmcache", "CACHE_CONFIG_DRY_RUN": "1"})
+    assert result.returncode == 0, result.stderr
+    for setting in (
+        "TP=2",
+        "DCP=2",
+        "KV_CACHE_QUANT=fp8_ds_mla",
+        "RECURRENT_CHECKPOINT_POLICY=request_boundaries",
+        "LMCACHE_TRANSFER_MODE=engine_driven",
+        "SPECULATIVE_DEPTH=3",
+        "LMCACHE_CHUNK_SIZE=4096",
+        "LMCACHE_TARGET_TOKEN_BUDGET=3072",
+        "VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE=2048",
+    ):
+        assert setting in result.stdout.splitlines()
+    assert "--kv-cache-memory-bytes" not in result.stdout
+
+
+@pytest.mark.parametrize("equals", [False, True])
+def test_lmcache_cli_batch_budget_does_not_grow_during_delegation(launch, equals):
+    args = (
+        ["--max-num-batched-tokens=2048"]
+        if equals
+        else ["--max-num-batched-tokens", "2048"]
+    )
+    result = launch(
+        {"CACHE_MODE": "lmcache", "CACHE_CONFIG_DRY_RUN": "1"}, arguments=args
+    )
+    assert result.returncode == 0, result.stderr
+    assert "LMCACHE_TARGET_TOKEN_BUDGET=2048" in result.stdout.splitlines()
+    assert "LMCACHE_CHUNK_SIZE=4096" in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize("transport", ["auto", "lmcache_driven"])
+def test_tp2_rejects_sidecar_gpu_transport(launch, transport):
+    result = launch({"CACHE_MODE": "lmcache", "LMCACHE_TRANSFER_MODE": transport})
+    assert result.returncode == 2
+    assert "requires engine_driven" in result.stderr
 
 
 def test_specialization_adds_no_filesystem_layer():

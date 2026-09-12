@@ -6,8 +6,8 @@ FROM ${SOURCE_IMAGE}
 ENV MODEL=local-inference-lab/GLM-5.3-Flash-NVFP4-Spark \
     SERVED_MODEL_NAME=GLM-5.3-Flash-NVFP4-Spark \
     HOST=0.0.0.0 PORT=8000 TP=2 DCP=2 SPECULATOR=mtp NUM_SPECULATIVE_TOKENS=3 \
-    CACHE_MODE=vram KV_CACHE_DTYPE=fp8_ds_mla KV_CACHE_MEMORY_BYTES=4294967296 \
-    LOAD_FORMAT=safetensors MAX_MODEL_LEN=1048576 MAX_NUM_SEQS=4 \
+    CACHE_MODE=vram KV_CACHE_DTYPE=fp8_ds_mla KV_CACHE_MEMORY_BYTES=auto \
+    LOAD_FORMAT=safetensors MAX_MODEL_LEN=-1 MAX_NUM_SEQS=4 \
     MAX_NUM_BATCHED_TOKENS=3072 OMP_NUM_THREADS=1 \
     CUDAGRAPH_MODE=FULL_AND_PIECEWISE MAX_CUDAGRAPH_CAPTURE_SIZE=16 \
     CUDAGRAPH_CAPTURE_SIZES="1 2 4 8 12 16" \
@@ -23,8 +23,8 @@ ENV MODEL=local-inference-lab/GLM-5.3-Flash-NVFP4-Spark \
     VLLM_HOST_IP=127.0.0.1 \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,large_segment_size_mb:12
 LABEL local-inference.status="experimental" \
-    local-inference.qualification.scope="GLM Spark TP2/DCP2 MTP3 FP8 GPU-local cache with vision; other modes not qualified" \
-    local-inference.qualification.hardware="2x RTX PRO 6000 Workstation 96 GiB; measured with VRAM +6000" \
-    org.opencontainers.image.description="Experimental GLM Spark TP2/DCP2 MTP3 serving with native vision and a 1M-context memory profile"
+    local-inference.qualification.scope="GLM Spark TP2/DCP2 MTP3 FP8 profiled KV; GPU-local vision and engine-driven RAM/filesystem checkpoint restore" \
+    local-inference.qualification.hardware="2x RTX PRO 6000 Workstation; stock clock offsets; context capacity depends on available memory" \
+    org.opencontainers.image.description="Experimental GLM Spark TP2/DCP2 MTP3 serving with native vision and memory-profiled context capacity"
 ENTRYPOINT ["/usr/local/bin/serve-glm-spark-tp2.sh"]
 CMD []
