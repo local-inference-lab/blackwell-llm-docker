@@ -87,6 +87,15 @@ def test_deployment_moe_backend_is_declared_in_image_and_lock(lock):
     assert "VLLM_DEFAULT_MOE_BACKEND=b12x" in dockerfile
 
 
+def test_disk_engram_dependency_identity_replaces_inherited_version(lock):
+    lock["runtime.liburing.version"] = "2.5"
+    lock["runtime.liburing.package.version"] = "2.5-1build1"
+    inherited = {"local-inference.liburing.version": "unrelated-version"}
+    overrides = labels.image_labels(lock, inherited, "b" * 64)
+    assert overrides["local-inference.liburing.version"] == "2.5"
+    assert overrides["local-inference.liburing.package.version"] == "2.5-1build1"
+
+
 def test_source_repository_labels_use_manifest_not_inferred_ownership(lock):
     lock["vllm.repository"] = "https://github.com/voipmonitor/vllm.git"
     overrides = labels.image_labels(lock, {}, "b" * 64)

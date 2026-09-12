@@ -62,7 +62,7 @@ def image_labels(
     labels.update(
         {
             "org.opencontainers.image.title": "Jovian Judgement community serving",
-            "org.opencontainers.image.description": "GLM-5.3-Flash, Qwen3.8-Flash-Next and DeepSeek-V4-Flash serving; complete Git sources and model-specific launch profiles",
+            "org.opencontainers.image.description": "GLM-5.3-Flash, Qwen3.8-Flash-Next, DeepSeek-V4-Flash and DeepSeek-V4.1-Flash serving; complete Git sources and model-specific launch profiles",
             "org.opencontainers.image.version": lock["release.version"],
             "org.opencontainers.image.source": "https://github.com/local-inference-lab/blackwell-llm-docker",
             "org.opencontainers.image.revision": lock["vllm.commit"],
@@ -122,6 +122,9 @@ def image_labels(
         labels[f"local-inference.{name}.branch"] = "image-source"
     if "vllm.version" in lock:
         labels["local-inference.vllm.version"] = lock["vllm.version"]
+    for key in ("version", "package.version"):
+        if f"runtime.liburing.{key}" in lock:
+            labels[f"local-inference.liburing.{key}"] = lock[f"runtime.liburing.{key}"]
     for key in ("base.commit", "patch.sha256", "extension.sha256"):
         labels[f"local-inference.flashkda.{key}"] = lock[f"flashkda.{key}"]
     if "flashinfer.commit" in lock:
@@ -148,6 +151,12 @@ def image_labels(
             "vllm.native.extension.sha256"
         ]
         labels["local-inference.ds4.entrypoint"] = "/usr/local/bin/serve-ds4-jovian.sh"
+        labels["local-inference.ds41.entrypoint"] = (
+            "/usr/local/bin/serve-ds41-jovian.sh"
+        )
+        labels["local-inference.ds41.engram-table-memory"] = (
+            "disk; opt-in mapped pinned RAM"
+        )
         labels["local-inference.ds4.target-backends"] = (
             "attention:B12X,moe:B12X-W4A8,linear:DeepGEMM"
         )
