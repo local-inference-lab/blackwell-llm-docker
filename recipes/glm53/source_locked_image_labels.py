@@ -84,7 +84,9 @@ def image_labels(
                 "runtime.moe-backend.default", "auto"
             ),
             "local-inference.runtime.default.gpu-local.target-page-tokens": "2048",
-            "local-inference.runtime.default.recurrent-checkpoint-policy": "auto",
+            "local-inference.runtime.default.recurrent-checkpoint-policy": lock.get(
+                "runtime.recurrent-checkpoint-policy", "auto"
+            ),
             "local-inference.runtime.lmcache-transfer": lock[
                 "runtime.lmcache.transfer"
             ],
@@ -124,9 +126,7 @@ def image_labels(
         labels["local-inference.vllm.version"] = lock["vllm.version"]
     for key in ("version", "package.version"):
         if f"runtime.liburing.{key}" in lock:
-            labels[f"local-inference.liburing.{key}"] = lock[
-                f"runtime.liburing.{key}"
-            ]
+            labels[f"local-inference.liburing.{key}"] = lock[f"runtime.liburing.{key}"]
     for key in ("base.commit", "patch.sha256", "extension.sha256"):
         labels[f"local-inference.flashkda.{key}"] = lock[f"flashkda.{key}"]
     if "flashinfer.commit" in lock:
@@ -155,6 +155,17 @@ def image_labels(
         labels["local-inference.ds4.entrypoint"] = "/usr/local/bin/serve-ds4-jovian.sh"
         labels["local-inference.ds4.target-backends"] = (
             "attention:B12X,moe:B12X-W4A8,linear:DeepGEMM"
+        )
+    if lock.get("runtime.serving.profile") == "glm-spark-tp2":
+        labels.update(
+            {
+                "org.opencontainers.image.title": "Jovian Judgement GLM Spark TP2 serving",
+                "org.opencontainers.image.description": "GLM Spark TP2/DCP2 MTP3 with GPU-local FP8 cache and native vision",
+                "local-inference.glm53.mtp-backends": "attention:B12X,moe:B12X; private NVFP4 vocabulary head",
+                "local-inference.backend.gdn.prefill": "B12X",
+                "local-inference.draft.update-policy": "built-in MTP from the target checkpoint",
+                "local-inference.runtime.serving.profile": "glm-spark-tp2",
+            }
         )
     return labels
 

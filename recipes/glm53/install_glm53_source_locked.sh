@@ -93,6 +93,7 @@ install -Dm755 /build-inputs/serve-glm53-flash-nvfp4-dflash2-scheduler-qos.sh /u
 install -Dm755 /build-inputs/serve-glm53-flash-lmcache.sh /usr/local/bin/serve-glm53-flash-lmcache.sh
 install -Dm755 /build-inputs/serve-glm53-flash-lmcache-cache-complete.sh /usr/local/libexec/serve-glm53-flash-lmcache-cache-complete.sh
 install -Dm755 /build-inputs/serve-glm53-flash-cache-complete.sh /usr/local/bin/serve-glm53-flash.sh
+install -Dm755 /build-inputs/serve-glm-spark-tp2.sh /usr/local/bin/serve-glm-spark-tp2.sh
 install -Dm755 /build-inputs/glm53_checkpoint_identity.py /usr/local/libexec/glm53_checkpoint_identity.py
 install -Dm644 "$lock" /opt/glm53-flash/source.lock
 # BuildKit has no NVIDIA driver mount. The stable extension links the driver

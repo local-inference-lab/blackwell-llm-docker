@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+ARG SOURCE_IMAGE
+FROM ${SOURCE_IMAGE}
+
+# Metadata-only specialization: retain both source-locked filesystem layers.
+ENV MODEL=local-inference-lab/GLM-5.3-Flash-NVFP4-Spark \
+    SERVED_MODEL_NAME=GLM-5.3-Flash-NVFP4-Spark \
+    HOST=0.0.0.0 PORT=8000 TP=2 DCP=2 SPECULATOR=mtp NUM_SPECULATIVE_TOKENS=3 \
+    CACHE_MODE=vram KV_CACHE_DTYPE=fp8_ds_mla KV_CACHE_MEMORY_BYTES=4294967296 \
+    LOAD_FORMAT=safetensors MAX_MODEL_LEN=1048576 MAX_NUM_SEQS=4 \
+    MAX_NUM_BATCHED_TOKENS=3072 OMP_NUM_THREADS=1 \
+    CUDAGRAPH_MODE=FULL_AND_PIECEWISE MAX_CUDAGRAPH_CAPTURE_SIZE=16 \
+    CUDAGRAPH_CAPTURE_SIZES="1 2 4 8 12 16" \
+    GPU_MEMORY_UTILIZATION=0.985 \
+    MOE_BACKEND=b12x LINEAR_BACKEND=b12x MTP_MOE_BACKEND=b12x \
+    VLLM_B12X_MOE_FP4_FORCE_A16=0 VLLM_LM_HEAD_A16=1 \
+    VLLM_GLM53_MTP_DRAFT_HEAD=nvfp4 VLLM_MTP_NVFP4_LM_HEAD=0 \
+    VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE=2048 VLLM_GLM53_SPLIT_MAMBA_BLOCK_SIZE=auto \
+    GLM53_KDA_PREFILL_BACKEND=b12x DCP_CKV_GATHER=auto \
+    VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=65536 \
+    NCCL_MIN_NCHANNELS=2 NCCL_MAX_NCHANNELS=2 NCCL_BUFFSIZE=1048576 \
+    NCCL_NET_PLUGIN=none NCCL_SOCKET_IFNAME=lo GLOO_SOCKET_IFNAME=lo \
+    VLLM_HOST_IP=127.0.0.1 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,large_segment_size_mb:12
+LABEL local-inference.status="experimental" \
+    local-inference.qualification.scope="GLM Spark TP2/DCP2 MTP3 FP8 GPU-local cache with vision; other modes not qualified" \
+    local-inference.qualification.hardware="2x RTX PRO 6000 Workstation 96 GiB; measured with VRAM +6000" \
+    org.opencontainers.image.description="Experimental GLM Spark TP2/DCP2 MTP3 serving with native vision and a 1M-context memory profile"
+ENTRYPOINT ["/usr/local/bin/serve-glm-spark-tp2.sh"]
+CMD []

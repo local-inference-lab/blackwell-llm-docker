@@ -79,6 +79,18 @@ def test_unchanged_dependency_labels_are_preserved_by_inheritance(lock):
         assert overrides[f"local-inference.{name}.commit"] == lock[f"{name}.commit"]
 
 
+def test_tp2_labels_describe_the_packaged_backends_and_policy(lock):
+    lock["runtime.serving.profile"] = "glm-spark-tp2"
+    lock["runtime.recurrent-checkpoint-policy"] = "request_boundaries"
+    overrides = labels.image_labels(lock, {}, "b" * 64)
+    assert "moe:B12X" in overrides["local-inference.glm53.mtp-backends"]
+    assert overrides["local-inference.backend.gdn.prefill"] == "B12X"
+    assert (
+        overrides["local-inference.runtime.default.recurrent-checkpoint-policy"]
+        == "request_boundaries"
+    )
+
+
 def test_deployment_moe_backend_is_declared_in_image_and_lock(lock):
     lock["runtime.moe-backend.default"] = "b12x"
     overrides = labels.image_labels(lock, {}, "b" * 64)

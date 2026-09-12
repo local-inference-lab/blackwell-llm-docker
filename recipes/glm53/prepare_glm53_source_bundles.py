@@ -51,6 +51,9 @@ def main() -> None:
     )
     parser.add_argument("--release-version", default="source-locked")
     parser.add_argument(
+        "--serving-profile", choices=("glm53", "glm-spark-tp2"), default="glm53"
+    )
+    parser.add_argument(
         "--lmcache-native-mode",
         choices=("reuse-all", "cpu-rebuild-cuda-reuse"),
         default="reuse-all",
@@ -91,6 +94,21 @@ def main() -> None:
         "draft.repository": "local-inference-lab/GLM-5.3-Flash-DFlash2",
         "draft.quantization": "MXFP8",
     }
+    if args.serving_profile == "glm-spark-tp2":
+        lock.update(
+            {
+                "runtime.serving.profile": "glm-spark-tp2",
+                "runtime.scheduler.max-num-batched-tokens": "3072",
+                "runtime.nccl.channels": "2",
+                "runtime.nccl.buffer.bytes": "1048576",
+                "runtime.recurrent-checkpoint-policy": "request_boundaries",
+                "runtime.lmcache.transfer": "not qualified for TP2",
+                "runtime.lmcache.checkpoints": "not qualified for TP2",
+                "model.repository": "local-inference-lab/GLM-5.3-Flash-NVFP4-Spark",
+                "draft.repository": "built-in MTP; no separate checkpoint",
+                "draft.quantization": "checkpoint mixed precision; private NVFP4 vocabulary head",
+            }
+        )
     for name, root in roots.items():
         revision = git(root, "rev-parse", "HEAD")
         lock[f"{name}.repository"] = repository_url(
@@ -178,6 +196,8 @@ def main() -> None:
         "serve-glm53-flash-lmcache.sh",
         "serve-glm53-flash-lmcache-cache-complete.sh",
         "serve-glm53-flash-cache-complete.sh",
+        "serve-glm-spark-tp2.sh",
+        "Dockerfile.glm-spark-tp2",
         "glm53_checkpoint_identity.py",
         "glm53-r18-lmcache-runtime-requirements.txt",
     )
