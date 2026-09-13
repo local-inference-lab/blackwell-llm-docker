@@ -102,8 +102,11 @@ def main() -> None:
                 "runtime.nccl.channels": "2",
                 "runtime.nccl.buffer.bytes": "1048576",
                 "runtime.recurrent-checkpoint-policy": "request_boundaries",
-                "runtime.lmcache.transfer": "not qualified for TP2",
-                "runtime.lmcache.checkpoints": "not qualified for TP2",
+                "runtime.lmcache.transfer": "engine-driven asynchronous shared memory; CPU-only sidecar",
+                "runtime.lmcache.checkpoints": "atomic request-boundary text bundles; exact multimodal endpoint restore unsupported",
+                "runtime.context.max-model-len": "1048576",
+                "runtime.kv-cache.bytes-per-rank": "4294967296",
+                "runtime.cublas.workspace-config": ":4096:1",
                 "model.repository": "local-inference-lab/GLM-5.3-Flash-NVFP4-Spark",
                 "draft.repository": "built-in MTP; no separate checkpoint",
                 "draft.quantization": "checkpoint mixed precision; private NVFP4 vocabulary head",
@@ -177,6 +180,14 @@ def main() -> None:
         "9d08679e4ba3cc7c49c5f8035268b7958e9c4d8c7a5e8cd842211da46007809f"
     )
     docker = Path(__file__).resolve().parent
+    recipe_root = docker.parents[1]
+    if git(recipe_root, "status", "--porcelain"):
+        raise ValueError("Recipe must have a clean committed source tree")
+    lock["recipe.repository"] = repository_url(
+        git(recipe_root, "remote", "get-url", "origin")
+    )
+    lock["recipe.commit"] = git(recipe_root, "rev-parse", "HEAD")
+    lock["recipe.tree"] = git(recipe_root, "rev-parse", "HEAD^{tree}")
     lmcache_launcher = docker.parents[1] / "launchers/lmcache-mp-wrapper.sh"
     shutil.copy2(lmcache_launcher, args.output / "lmcache-mp-wrapper.sh")
     lock["launcher.lmcache.sha256"] = digest(lmcache_launcher)

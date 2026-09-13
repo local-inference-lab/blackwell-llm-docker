@@ -160,13 +160,16 @@ def image_labels(
         labels.update(
             {
                 "org.opencontainers.image.title": "Jovian Judgement GLM Spark TP2 serving",
-                "org.opencontainers.image.description": "GLM Spark TP2/DCP2 MTP3 with GPU-local FP8 cache and native vision",
+                "org.opencontainers.image.description": "GLM Spark TP2/DCP2 MTP3 with FP8 cache, native vision and optional CPU-sidecar LMCache",
                 "local-inference.glm53.mtp-backends": "attention:B12X,moe:B12X; private NVFP4 vocabulary head",
                 "local-inference.backend.gdn.prefill": "B12X",
                 "local-inference.draft.update-policy": "built-in MTP from the target checkpoint",
                 "local-inference.runtime.serving.profile": "glm-spark-tp2",
             }
         )
+    for key in ("repository", "commit", "tree"):
+        if f"recipe.{key}" in lock:
+            labels[f"local-inference.recipe.{key}"] = lock[f"recipe.{key}"]
     return labels
 
 

@@ -99,6 +99,15 @@ def test_deployment_moe_backend_is_declared_in_image_and_lock(lock):
     assert "VLLM_DEFAULT_MOE_BACKEND=b12x" in dockerfile
 
 
+def test_recipe_provenance_is_separate_from_component_provenance(lock):
+    for key in ("repository", "commit", "tree"):
+        lock[f"recipe.{key}"] = f"recipe-{key}"
+    overrides = labels.image_labels(lock, {}, "b" * 64)
+    for key in ("repository", "commit", "tree"):
+        assert overrides[f"local-inference.recipe.{key}"] == f"recipe-{key}"
+    assert overrides["org.opencontainers.image.revision"] == lock["vllm.commit"]
+
+
 def test_disk_engram_dependency_identity_replaces_inherited_version(lock):
     lock["runtime.liburing.version"] = "2.5"
     lock["runtime.liburing.package.version"] = "2.5-1build1"
