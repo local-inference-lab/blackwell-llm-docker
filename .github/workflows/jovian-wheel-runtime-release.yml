@@ -1,0 +1,126 @@
+name: Jovian CUDA 13.3 wheel foundation
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - jovian-cu133-foundation-stable-*
+    paths:
+      - .github/workflows/jovian-wheel-runtime-release.yml
+      - tools/jovian_wheel_runtime/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jovian-cu133-foundation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-beta:
+    if: github.repository == 'local-inference-lab/blackwell-llm-docker' && github.ref_type == 'branch'
+    runs-on: [self-hosted, lil-wheel-builder]
+    timeout-minutes: 180
+    steps:
+      - name: Check out the exact foundation contract
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and verify the foundation wheels
+        env:
+          BUILDX_BUILDER: lil-flashinfer-cu133-sm120
+        run: tools/jovian_wheel_runtime/build_foundation_bundle.sh
+
+      - name: Publish or verify the immutable beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          output=tools/jovian_wheel_runtime/dist/foundation
+          tag="jovian-cu133-foundation-beta-${GITHUB_SHA}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            mkdir existing-release
+            gh release download "${tag}" --dir existing-release
+            python tools/jovian_wheel_runtime/verify_release_assets.py \
+              --directory existing-release \
+              --source-commit "${GITHUB_SHA}" \
+              --beta-tag "${tag}"
+            echo "Immutable release ${tag} satisfies the foundation contract."
+            exit 0
+          fi
+          gh release create "${tag}" \
+            --target "${GITHUB_SHA}" \
+            --prerelease \
+            --title "Jovian CUDA 13.3 wheel foundation beta ${GITHUB_SHA:0:12}" \
+            --notes "Research-only Python foundation for the declared CUDA 13.3 serving ABI." \
+            "${output}"/bundle/wheels/*.whl \
+            "${output}"/bundle/extraction.json \
+            "${output}"/bundle/foundation.lock \
+            "${output}"/bundle/install_foundation.sh \
+            "${output}"/bundle/manifest.json \
+            "${output}"/bundle/repack-provenance.json \
+            "${output}"/bundle/requirements-foundation.txt \
+            "${output}"/bundle/requirements-github.txt \
+            "${output}"/bundle/SHA256SUMS \
+            "${output}"/jovian-cu133-foundation.tar.zst \
+            "${output}"/jovian-cu133-foundation.tar.zst.sha256
+
+  promote-stable:
+    if: github.repository == 'local-inference-lab/blackwell-llm-docker' && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the tagged release verifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Promote the wheel bytes produced for the tagged contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          beta_tag="jovian-cu133-foundation-beta-${GITHUB_SHA}"
+          stable_tag="${GITHUB_REF_NAME}"
+          mkdir assets
+          gh release download "${beta_tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir assets
+          python tools/jovian_wheel_runtime/verify_release_assets.py \
+            --directory assets \
+            --source-commit "${GITHUB_SHA}" \
+            --beta-tag "${beta_tag}"
+          if gh release view "${stable_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            mkdir existing-stable-release
+            gh release download "${stable_tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --dir existing-stable-release
+            python tools/jovian_wheel_runtime/verify_release_assets.py \
+              --directory existing-stable-release \
+              --source-commit "${GITHUB_SHA}" \
+              --beta-tag "${beta_tag}" \
+              --promotion
+            echo "Immutable stable release ${stable_tag} satisfies the foundation contract."
+            exit 0
+          fi
+          jq -n \
+            --arg status qualified \
+            --arg source_release "${beta_tag}" \
+            --arg source_commit "${GITHUB_SHA}" \
+            --arg source_manifest_sha256 "$(sha256sum assets/manifest.json | awk '{print $1}')" \
+            '{schema: "local-inference-foundation-promotion/v1", status: $status,
+              source_release: $source_release, source_commit: $source_commit,
+              source_manifest_sha256: $source_manifest_sha256,
+              invariant: "Wheel files and wheel SHA-256 digests are unchanged from the source beta release."}' \
+            > assets/stable-promotion.json
+          gh release create "${stable_tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "Jovian CUDA 13.3 wheel foundation stable ${GITHUB_SHA:0:12}" \
+            --notes "Qualified promotion of ${beta_tag}. Wheel bytes were not rebuilt." \
+            assets/*
