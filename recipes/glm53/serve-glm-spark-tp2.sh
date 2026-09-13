@@ -95,6 +95,6 @@ fi
 has_option --limit-mm-per-prompt "$@" || args+=(--limit-mm-per-prompt '{"image":1,"video":0}')
 has_option --recurrent-checkpoint-policy "$@" || args+=(--recurrent-checkpoint-policy request_boundaries)
 if [[ ${cache_mode} == lmcache ]]; then
-  exec /usr/local/bin/serve-glm53-flash-cache-complete.sh "${args[@]}"
+  exec /usr/local/bin/serve-glm53-flash.sh "${args[@]}"
 fi
 exec /usr/local/bin/serve-glm53-flash-nvfp4-dflash2.sh "${args[@]}"

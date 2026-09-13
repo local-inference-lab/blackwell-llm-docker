@@ -42,7 +42,7 @@ def launch(tmp_path):
             shlex.quote(str(scheduler)),
         )
         .replace(
-            "/usr/local/bin/serve-glm53-flash-cache-complete.sh",
+            "/usr/local/bin/serve-glm53-flash.sh",
             shlex.quote(str(cache)),
         )
     )
@@ -57,6 +57,16 @@ def launch(tmp_path):
         )
 
     return run
+
+
+def test_lmcache_dispatch_targets_the_installed_entrypoint():
+    wrapper = (RECIPE / "serve-glm-spark-tp2.sh").read_text()
+    installer = (RECIPE / "install_glm53_source_locked.sh").read_text()
+    assert 'exec /usr/local/bin/serve-glm53-flash.sh "${args[@]}"' in wrapper
+    assert (
+        "install -Dm755 /build-inputs/serve-glm53-flash-cache-complete.sh "
+        "/usr/local/bin/serve-glm53-flash.sh"
+    ) in installer
 
 
 def rendered(result):
