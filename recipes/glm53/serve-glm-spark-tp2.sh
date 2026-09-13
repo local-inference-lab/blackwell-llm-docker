@@ -9,7 +9,8 @@ export HOST=${HOST:-0.0.0.0} PORT=${PORT:-8000}
 export TP=${TP:-2} DCP=${DCP:-2} SPECULATOR=${SPECULATOR:-mtp}
 export NUM_SPECULATIVE_TOKENS=${NUM_SPECULATIVE_TOKENS:-3}
 export MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-3072}
-export MAX_NUM_SEQS=${MAX_NUM_SEQS:-4} MAX_MODEL_LEN=${MAX_MODEL_LEN:--1}
+export MAX_NUM_SEQS=${MAX_NUM_SEQS:-4} MAX_MODEL_LEN=${MAX_MODEL_LEN:-1048576}
+export KV_CACHE_MEMORY_BYTES=${KV_CACHE_MEMORY_BYTES:-4294967296}
 export GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.985}
 export CUDAGRAPH_MODE=${CUDAGRAPH_MODE:-FULL_AND_PIECEWISE}
 export MAX_CUDAGRAPH_CAPTURE_SIZE=${MAX_CUDAGRAPH_CAPTURE_SIZE:-16}
@@ -26,6 +27,8 @@ export NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-2}
 export NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-2}
 export NCCL_BUFFSIZE=${NCCL_BUFFSIZE:-1048576}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+# Limit per-handle cuBLAS scratch without reducing KV capacity or precision.
+export CUBLAS_WORKSPACE_CONFIG=${CUBLAS_WORKSPACE_CONFIG:-:4096:1}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,large_segment_size_mb:12}
 
 if [[ ${TP} != 2 || ${DCP} != 2 || ${SPECULATOR} != mtp ]]; then
@@ -68,8 +71,9 @@ esac
 if [[ $# == 1 && ($1 == --help || $1 == -h) ]]; then
   printf '%s\n' 'GLM Spark TP2/DCP2 experimental profile: MTP3, FP8 KV, vision, batch 3072, four request slots.
 MODEL accepts a Hugging Face repository or a mounted checkpoint. PORT defaults to 8000; HOST defaults to 0.0.0.0.
-KV_CACHE_MEMORY_BYTES=auto uses vLLM memory profiling; an explicit byte budget bypasses automatic sizing.
-MAX_MODEL_LEN=-1 fits the context to the measured KV pool, up to the checkpoint limit. An explicit context length must fit.
+The default requests MAX_MODEL_LEN=1048576 with KV_CACHE_MEMORY_BYTES=4294967296 per GPU; it does not silently shorten the context.
+CUBLAS_WORKSPACE_CONFIG=:4096:1 limits cuBLAS scratch to 4 MiB per handle. Explicit environment settings are preserved.
+KV_CACHE_MEMORY_BYTES=auto enables profiled sizing. MAX_MODEL_LEN=-1 additionally permits a shorter context; both are opt-in.
 CACHE_MODE=lmcache selects worker-owned engine_driven copies and a CPU-only sidecar; FP8 KV precision is preserved.
 LMCACHE_L1_SIZE_GB controls the preallocated pinned host pool (default 64 GiB); it is not a lazy-growth limit.
 Explicit vLLM CLI options take precedence, except cache layout options owned by the LMCache launcher.
@@ -85,7 +89,7 @@ has_option() {
   return 1
 }
 args=("$@")
-if ! has_option --kv-cache-memory-bytes "$@" && [[ ${KV_CACHE_MEMORY_BYTES:-auto} != auto ]]; then
+if ! has_option --kv-cache-memory-bytes "$@" && [[ ${KV_CACHE_MEMORY_BYTES} != auto ]]; then
   args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 fi
 has_option --limit-mm-per-prompt "$@" || args+=(--limit-mm-per-prompt '{"image":1,"video":0}')

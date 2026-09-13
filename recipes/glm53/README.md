@@ -130,10 +130,11 @@ uv run --no-project --with pytest python -m pytest -q tests/test_build_contract.
 
 ### GLM Spark on two GPUs
 
-The [Spark TP2 serving contract](glm-spark-tp2.md) describes profiled KV
-allocation, native vision and worker-owned LMCache copies for TP2/DCP2 MTP3.
-Automatic context capacity depends on measured GPU memory, not a fixed
-one-million-token promise. Qualification identifies the tested model and image.
+The [Spark TP2 serving contract](glm-spark-tp2.md) describes an explicit
+1,048,576-token context, bounded cuBLAS workspace, native vision and worker-owned
+LMCache copies for TP2/DCP2 MTP3. Automatic KV sizing and context shortening
+are separate opt-in controls. Qualification identifies the tested model,
+hardware and image; the fixed memory budget is not a guarantee for every host.
 
 ### GLM cache HTTP binding
 

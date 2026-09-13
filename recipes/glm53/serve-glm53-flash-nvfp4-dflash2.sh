@@ -28,10 +28,14 @@ max_model_len=${MAX_MODEL_LEN:-1048576}
 max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-4096}
 prefill_schedule_interval=${PREFILL_SCHEDULE_INTERVAL:-8}
 prefill_interval_from_cli=0
+model_len_from_cli=0
 chat_defaults_from_cli=0
 generation_defaults_from_cli=0
 for argument in "$@"; do
   case "${argument}" in
+    --max-model-len | --max-model-len=*)
+      model_len_from_cli=1
+      ;;
     --prefill-schedule-interval | --prefill-schedule-interval=*)
       prefill_interval_from_cli=1
       ;;
@@ -230,7 +234,6 @@ cmd=(
   --cp-kv-cache-interleave-size "${cp_kv_cache_interleave_size}"
   --dcp-kv-cache-interleave-size "${cp_kv_cache_interleave_size}"
   --max-num-seqs "${max_num_seqs}"
-  --max-model-len "${max_model_len}"
   --max-num-batched-tokens "${max_num_batched_tokens}"
   --max-cudagraph-capture-size "${max_cudagraph_capture_size}"
   --gpu-memory-utilization "${gpu_memory_utilization}"
@@ -253,6 +256,10 @@ cmd=(
   --compilation-config
   "{\"cudagraph_mode\":\"${cudagraph_mode}\"}"
 )
+
+if ((model_len_from_cli == 0)); then
+  cmd+=(--max-model-len "${max_model_len}")
+fi
 
 if ((chat_defaults_from_cli == 0)); then
   # Preserve reasoning at its original assistant turn for agent continuations.
