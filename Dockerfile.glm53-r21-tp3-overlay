@@ -1,0 +1,172 @@
+# syntax=docker/dockerfile:1.7
+
+FROM voipmonitor/vllm:jovian-judgement-community-20260904-r21@sha256:f096012c508f9bc12e8c4e617b8ed19da3a2cecb525e9479904e848730f0c8ac
+
+ARG RUNTIME_COMMIT=
+ARG VLLM_REPO=https://github.com/local-inference-lab/vllm.git
+ARG VLLM_REF=refs/pull/547/head
+ARG VLLM_COMMIT=e96b18dbb8c19230591e79e0ed056b12947b2ea1
+ARG VLLM_TREE=31e73a43eb8a03e932f03c51341df2c73c60f3d4
+ARG VLLM_PACKAGE_VERSION=0.26.1rc0+glm53.flash.nvfp4.luke.clean.r1.vllme75bcfd.b12x58a046f
+ARG B12X_REPO=https://github.com/local-inference-lab/b12x.git
+ARG B12X_REF=refs/pull/265/head
+ARG B12X_COMMIT=6d47b10eddf408799796650baf3e802bd56bf844
+ARG B12X_TREE=afdd4b4cc589fddb079f1661d91e932f9d99b8c5
+ARG GENERIC_CACHE_FINGERPRINT=cu133-torch213-glm53-r21-vllme96b18db-b12x6d47b10e-cache-complete
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN set -eu; \
+    [[ ${RUNTIME_COMMIT} =~ ^[0-9a-f]{40}$ ]]; \
+    test "${VLLM_REPO}" = \
+      'https://github.com/local-inference-lab/vllm.git'; \
+    test "${VLLM_REF}" = 'refs/pull/547/head'; \
+    test "${VLLM_COMMIT}" = \
+      'e96b18dbb8c19230591e79e0ed056b12947b2ea1'; \
+    test "${VLLM_TREE}" = \
+      '31e73a43eb8a03e932f03c51341df2c73c60f3d4'; \
+    test "${VLLM_PACKAGE_VERSION}" = \
+      '0.26.1rc0+glm53.flash.nvfp4.luke.clean.r1.vllme75bcfd.b12x58a046f'; \
+    test "${B12X_REPO}" = \
+      'https://github.com/local-inference-lab/b12x.git'; \
+    test "${B12X_REF}" = 'refs/pull/265/head'; \
+    test "${B12X_COMMIT}" = \
+      '6d47b10eddf408799796650baf3e802bd56bf844'; \
+    test "${B12X_TREE}" = \
+      'afdd4b4cc589fddb079f1661d91e932f9d99b8c5'; \
+    test "${GENERIC_CACHE_FINGERPRINT}" = \
+      'cu133-torch213-glm53-r21-vllme96b18db-b12x6d47b10e-cache-complete'; \
+    git -C /opt/glm53-flash/vllm fetch --depth=1 \
+      "${VLLM_REPO}" "${VLLM_REF}"; \
+    test "$(git -C /opt/glm53-flash/vllm rev-parse FETCH_HEAD)" = \
+      "${VLLM_COMMIT}"; \
+    git -C /opt/glm53-flash/vllm checkout --detach --force "${VLLM_COMMIT}"; \
+    test "$(git -C /opt/glm53-flash/vllm rev-parse 'HEAD^{tree}')" = \
+      "${VLLM_TREE}"; \
+    git -C /opt/glm53-flash/vllm diff --quiet HEAD --; \
+    git -C /opt/glm53-flash/b12x fetch --depth=1 \
+      "${B12X_REPO}" "${B12X_REF}"; \
+    test "$(git -C /opt/glm53-flash/b12x rev-parse FETCH_HEAD)" = \
+      "${B12X_COMMIT}"; \
+    git -C /opt/glm53-flash/b12x checkout --detach --force "${B12X_COMMIT}"; \
+    test "$(git -C /opt/glm53-flash/b12x rev-parse 'HEAD^{tree}')" = \
+      "${B12X_TREE}"; \
+    git -C /opt/glm53-flash/b12x diff --quiet HEAD --
+ENV LOCAL_INFERENCE_CACHE_FINGERPRINT=${GENERIC_CACHE_FINGERPRINT} \
+    XDG_CACHE_HOME=/cache/jit/${GENERIC_CACHE_FINGERPRINT} \
+    VLLM_CACHE_ROOT=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/vllm \
+    VLLM_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/vllm \
+    TRITON_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/triton \
+    TORCH_EXTENSIONS_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/torch-extensions \
+    TORCHINDUCTOR_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/torchinductor \
+    VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/flashinfer-autotune \
+    FLASHINFER_WORKSPACE_BASE=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/flashinfer \
+    TVM_FFI_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/tvm-ffi \
+    TVM_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/tvm \
+    TILELANG_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/tilelang \
+    CUTE_DSL_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/cute-dsl \
+    B12X_CUTE_COMPILE_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/b12x/cute \
+    B12X_COMPILE_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/b12x/compile \
+    SPARKINFER_COMPILE_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/b12x/compile \
+    DG_JIT_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/deep-gemm \
+    MM_SPARSE_ATTN_AOT_CACHE=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/minfer/mm-sparse-attn \
+    MINFER_FMHA_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/minfer/fmha-sm120 \
+    NUMBA_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/numba \
+    CUDA_CACHE_PATH=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/cuda \
+    CUPY_CACHE_DIR=/cache/jit/${GENERIC_CACHE_FINGERPRINT}/cupy
+
+COPY overlays/glm53-r21/launchers/ /tmp/glm53-r21-launchers/
+COPY overlays/glm53-r21/tests/verify_glm53_flash_nvfp4_runtime.py overlays/glm53-r21/source.lock /opt/local-inference/
+
+RUN set -eux; \
+    test -x /usr/local/libexec/serve-glm53-flash-nvfp4-dflash2.sh; \
+    test -x /usr/local/libexec/serve-glm53-flash-lmcache-cache-complete.sh; \
+    install -m 0644 /opt/local-inference/source.lock /opt/glm53-flash/source.lock; \
+    rm /opt/local-inference/source.lock; \
+    echo '21fd2d6ffa3e842ee656f780a8530cce0ffb6601dfa47a5138409247ec4df0d4  /opt/glm53-flash/source.lock' | sha256sum -c -; \
+    for script in /tmp/glm53-r21-launchers/serve-*.sh; do \
+      install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; \
+      bash -n "/usr/local/bin/$(basename "${script}")"; \
+    done; \
+    echo 'a470d95227a0e9110f5f3871da5f04a180b93a671df401ef0d730c6db46a96f9  /usr/local/bin/serve-glm53-flash-tp3-r21.sh' | sha256sum -c -; \
+    echo 'a802121b32ff7b1f6f820bee2afc7f17c771dd605af23358c2762634ac9edf00  /usr/local/bin/serve-glm53-flash-nvfp4-dflash2.sh' | sha256sum -c -; \
+    echo 'd7c934808b01f8de249534738b9e642e4fcfecc8818e7a559ebafa0ecc4cc938  /usr/local/bin/serve-glm53-flash.sh' | sha256sum -c -; \
+    echo 'cfee14450faee85732081c393f8868c60b3f77fdd370cce8f93633acaa0f37de  /usr/local/bin/serve-glm53-flash-lmcache.sh' | sha256sum -c -; \
+    test -x /usr/local/libexec/serve-glm53-flash-nvfp4-dflash2.sh; \
+    test -x /usr/local/libexec/serve-glm53-flash-lmcache-cache-complete.sh; \
+    /opt/venv/bin/python \
+      /opt/local-inference/verify_glm53_flash_nvfp4_runtime.py \
+      --vllm-version "${VLLM_PACKAGE_VERSION}" \
+      --vllm-tree "${VLLM_TREE}" \
+      --b12x-tree "${B12X_TREE}"; \
+    rm -rf /tmp/glm53-r21-launchers
+
+LABEL org.opencontainers.image.title="GLM-5.3-Flash R21 TP3 runtime overlay" \
+      org.opencontainers.image.description="Strict TP3 runtime policy layered on the immutable R21 parent" \
+      org.opencontainers.image.source="https://github.com/local-inference-lab/blackwell-llm-docker" \
+      org.opencontainers.image.revision="${RUNTIME_COMMIT}" \
+      org.opencontainers.image.base.name="voipmonitor/vllm:jovian-judgement-community-20260904-r21" \
+      org.opencontainers.image.base.digest="sha256:f096012c508f9bc12e8c4e617b8ed19da3a2cecb525e9479904e848730f0c8ac" \
+      local-inference.status="research-only" \
+      local-inference.release.name="glm53-r21-tp3-overlay" \
+      local-inference.release.rootfs-format="immutable-parent-plus-four-child-layers" \
+      local-inference.release.overlay2-rootfs-layers="6" \
+      local-inference.docker.commit="${RUNTIME_COMMIT}" \
+      local-inference.runtime.parent="voipmonitor/vllm:jovian-judgement-community-20260904-r21@sha256:f096012c508f9bc12e8c4e617b8ed19da3a2cecb525e9479904e848730f0c8ac" \
+      local-inference.runtime.base-image="voipmonitor/vllm:jovian-judgement-community-20260904-r21@sha256:f096012c508f9bc12e8c4e617b8ed19da3a2cecb525e9479904e848730f0c8ac" \
+      local-inference.runtime.base-id="sha256:80f337f921ff726a3aac2e03ef7d0ff6215ec20c06b3af796fc1230a3b3bcb24" \
+      local-inference.runtime.contract="glm53-r21-tp3" \
+      local-inference.runtime.source-mode="source-locked-python-overlay-on-inherited-native-package" \
+      local-inference.runtime.source-overlay="active" \
+      local-inference.runtime.source-lock.path="/opt/glm53-flash/source.lock" \
+      local-inference.runtime.source-lock.sha256="21fd2d6ffa3e842ee656f780a8530cce0ffb6601dfa47a5138409247ec4df0d4" \
+      local-inference.runtime.launcher.sha256="d7c934808b01f8de249534738b9e642e4fcfecc8818e7a559ebafa0ecc4cc938" \
+      local-inference.runtime.model-launcher.sha256="a802121b32ff7b1f6f820bee2afc7f17c771dd605af23358c2762634ac9edf00" \
+      local-inference.runtime.lmcache-launcher.sha256="cfee14450faee85732081c393f8868c60b3f77fdd370cce8f93633acaa0f37de" \
+      local-inference.runtime.tp3-launcher.sha256="a470d95227a0e9110f5f3871da5f04a180b93a671df401ef0d730c6db46a96f9" \
+      local-inference.runtime.cache-fingerprint="${GENERIC_CACHE_FINGERPRINT}" \
+      local-inference.runtime.cache.fingerprint="${GENERIC_CACHE_FINGERPRINT}" \
+      local-inference.cache.fingerprint="${GENERIC_CACHE_FINGERPRINT}" \
+      local-inference.runtime.vllm.commit="${VLLM_COMMIT}" \
+      local-inference.runtime.vllm.required-tree="${VLLM_TREE}" \
+      local-inference.runtime.vllm.composition.commit="${VLLM_COMMIT}" \
+      local-inference.runtime.vllm.port.commit="${VLLM_COMMIT}" \
+      local-inference.vllm.base-revision="f2d77086163e899f87f54a59af216d18ffa3a2b7" \
+      local-inference.vllm.branch="${VLLM_REF}" \
+      local-inference.vllm.commit="${VLLM_COMMIT}" \
+      local-inference.vllm.composition="R21 source plus the reviewed GLM-5.3 TP3 port" \
+      local-inference.vllm.foundation.commit="f2d77086163e899f87f54a59af216d18ffa3a2b7" \
+      local-inference.vllm.integration-prs="#547" \
+      local-inference.vllm.integration.lock_sha256="21fd2d6ffa3e842ee656f780a8530cce0ffb6601dfa47a5138409247ec4df0d4" \
+      local-inference.vllm.integration.prs="#547" \
+      local-inference.vllm.integration.tree="${VLLM_TREE}" \
+      local-inference.vllm.merge-heads="not-applicable; linear port from the R21 integration base" \
+      local-inference.vllm.package-tree="${VLLM_TREE}" \
+      local-inference.vllm.repo="${VLLM_REPO}" \
+      local-inference.vllm.source-revision="${VLLM_COMMIT}" \
+      local-inference.vllm.tree="${VLLM_TREE}" \
+      local-inference.vllm.upstream-base="f2d77086163e899f87f54a59af216d18ffa3a2b7" \
+      local-inference.vllm.upstream-revision="f2d77086163e899f87f54a59af216d18ffa3a2b7" \
+      local-inference.runtime.b12x.commit="${B12X_COMMIT}" \
+      local-inference.runtime.b12x.required-tree="${B12X_TREE}" \
+      local-inference.b12x.base-revision="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
+      local-inference.b12x.branch="${B12X_REF}" \
+      local-inference.b12x.commit="${B12X_COMMIT}" \
+      local-inference.b12x.composition="R21 source plus the reviewed GLM-5.3 TP3 port" \
+      local-inference.b12x.foundation.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
+      local-inference.b12x.integration-prs="#265" \
+      local-inference.b12x.integration.lock_sha256="21fd2d6ffa3e842ee656f780a8530cce0ffb6601dfa47a5138409247ec4df0d4" \
+      local-inference.b12x.integration.prs="#265" \
+      local-inference.b12x.integration.tree="${B12X_TREE}" \
+      local-inference.b12x.merge-heads="not-applicable; linear port from the R21 integration base" \
+      local-inference.b12x.package-tree="${B12X_TREE}" \
+      local-inference.b12x.repo="${B12X_REPO}" \
+      local-inference.b12x.source-revision="${B12X_COMMIT}" \
+      local-inference.b12x.tree="${B12X_TREE}" \
+      local-inference.b12x.upstream-base="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
+      local-inference.b12x.upstream-revision="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
+      local-inference.lmcache.integration.lock_sha256="21fd2d6ffa3e842ee656f780a8530cce0ffb6601dfa47a5138409247ec4df0d4" \
+      local-inference.implementation.parallelism="TP3 overlay policy with inherited TP4 compatibility" \
+      local-inference.qualification.status="external-receipt-required" \
+      local-inference.qualification.hardware="external validation; see the qualification receipt" \
+      local-inference.qualification.parallelism="TP3 primary plus pinned TP4 compatibility" \
+      local-inference.qualification.prefill="external validation; see the qualification receipt"
