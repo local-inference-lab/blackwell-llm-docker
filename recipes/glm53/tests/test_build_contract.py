@@ -7,6 +7,40 @@ from pathlib import Path
 import pytest
 
 RECIPE = Path(__file__).resolve().parents[1]
+
+
+def test_ds4_public_entrypoints_install_the_same_canonical_wrapper(tmp_path):
+    installer = (RECIPE / "install_glm53_source_locked.sh").read_text()
+    installs = [
+        line
+        for line in installer.splitlines()
+        if line.startswith("install -Dm755 /build-inputs/serve-ds4-jovian.sh ")
+    ]
+    destinations = {line.split()[-1] for line in installs}
+    assert destinations == {
+        "/usr/local/bin/serve-ds4-jovian.sh",
+        "/usr/local/bin/serve-ds4-flash.sh",
+    }
+    # Run the actual install instructions in an isolated root, not just a
+    # text assertion. Both aliases must have executable, identical contents.
+    for command in installs:
+        subprocess.run(
+            [
+                "bash",
+                "-c",
+                command.replace("/build-inputs/", f"{RECIPE}/").replace(
+                    "/usr/local/bin/", f"{tmp_path}/"
+                ),
+            ],
+            check=True,
+        )
+    first = tmp_path / "serve-ds4-jovian.sh"
+    second = tmp_path / "serve-ds4-flash.sh"
+    assert first.read_bytes() == second.read_bytes()
+    assert first.stat().st_mode & 0o111 == 0o111
+    assert b"/opt/glm53-flash/vllm/serve-ds4-flash.sh" in first.read_bytes()
+
+
 spec = importlib.util.spec_from_file_location(
     "source_locked_image_labels", RECIPE / "source_locked_image_labels.py"
 )
