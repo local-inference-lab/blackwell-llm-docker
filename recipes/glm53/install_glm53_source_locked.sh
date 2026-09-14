@@ -90,6 +90,9 @@ ln -s /opt/glm53-flash/vllm/vllm /opt/venv/lib/python3.12/site-packages/vllm
 ln -s /opt/glm53-flash/b12x/b12x /opt/venv/lib/python3.12/site-packages/b12x
 install -Dm755 /source-bundles/lmcache-mp-wrapper.sh /usr/local/bin/lmcache-mp-wrapper.sh
 install -Dm755 /build-inputs/serve-ds4-jovian.sh /usr/local/bin/serve-ds4-jovian.sh
+# Preserve the public DS4 filename without retaining a runtime-base launcher
+# that selects removed backend names. The wrapper calls the native /opt script.
+install -Dm755 /build-inputs/serve-ds4-jovian.sh /usr/local/bin/serve-ds4-flash.sh
 install -Dm755 /build-inputs/serve-ds41-jovian.sh /usr/local/bin/serve-ds41-jovian.sh
 
 install -Dm755 /build-inputs/serve-glm53-flash-nvfp4-dflash2.sh /usr/local/libexec/serve-glm53-flash-nvfp4-dflash2.sh
