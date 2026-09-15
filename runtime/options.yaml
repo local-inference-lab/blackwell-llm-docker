@@ -1,0 +1,511 @@
+{
+  "model": {
+    "type": "string",
+    "env": [
+      "MODEL",
+      "MODEL_PATH"
+    ]
+  },
+  "served-model-name": {
+    "type": "string",
+    "env": [
+      "SERVED_MODEL_NAME"
+    ]
+  },
+  "host": {
+    "type": "string",
+    "env": [
+      "HOST"
+    ]
+  },
+  "load-format": {
+    "type": "string",
+    "env": [
+      "LOAD_FORMAT"
+    ]
+  },
+  "dtype": {
+    "type": "string",
+    "env": [
+      "DTYPE"
+    ]
+  },
+  "kv-cache-dtype": {
+    "type": "string",
+    "env": [
+      "KV_CACHE_DTYPE",
+      "KV_CACHE_QUANT"
+    ]
+  },
+  "attention-backend": {
+    "type": "string",
+    "env": [
+      "ATTENTION_BACKEND"
+    ]
+  },
+  "moe-backend": {
+    "type": "string",
+    "env": [
+      "MOE_BACKEND"
+    ]
+  },
+  "linear-backend": {
+    "type": "string",
+    "env": [
+      "LINEAR_BACKEND"
+    ]
+  },
+  "gdn-decode-kernel": {
+    "type": "string",
+    "env": [
+      "GDN_DECODE_KERNEL"
+    ]
+  },
+  "quantization": {
+    "type": "string",
+    "env": [
+      "QUANTIZATION"
+    ]
+  },
+  "mamba-cache-mode": {
+    "type": "string",
+    "env": [
+      "MAMBA_CACHE_MODE"
+    ]
+  },
+  "mamba-ssm-cache-dtype": {
+    "type": "string",
+    "env": [
+      "MAMBA_SSM_CACHE_DTYPE"
+    ]
+  },
+  "reasoning-parser": {
+    "type": "string",
+    "env": [
+      "REASONING_PARSER"
+    ]
+  },
+  "tool-call-parser": {
+    "type": "string",
+    "env": [
+      "TOOL_CALL_PARSER"
+    ]
+  },
+  "tokenizer-mode": {
+    "type": "string",
+    "env": [
+      "TOKENIZER_MODE"
+    ]
+  },
+  "generation-config": {
+    "type": "string",
+    "env": [
+      "GENERATION_CONFIG"
+    ]
+  },
+  "revision": {
+    "type": "string",
+    "env": [
+      "MODEL_REVISION"
+    ]
+  },
+  "safetensors-load-strategy": {
+    "type": "string",
+    "env": [
+      "SAFETENSORS_LOAD_STRATEGY"
+    ]
+  },
+  "jit-monitor-mode": {
+    "type": "string",
+    "env": [
+      "JIT_MONITOR_MODE"
+    ]
+  },
+  "mm-encoder-tp-mode": {
+    "type": "string",
+    "env": [
+      "MM_ENCODER_TP_MODE"
+    ]
+  },
+  "port": {
+    "type": "integer",
+    "env": [
+      "PORT"
+    ]
+  },
+  "tensor-parallel-size": {
+    "type": "integer",
+    "env": [
+      "TP",
+      "TP_SIZE"
+    ]
+  },
+  "pipeline-parallel-size": {
+    "type": "integer",
+    "env": [
+      "PIPELINE_PARALLEL_SIZE"
+    ]
+  },
+  "decode-context-parallel-size": {
+    "type": "integer",
+    "env": [
+      "DCP",
+      "DCP_SIZE"
+    ]
+  },
+  "max-num-seqs": {
+    "type": "integer",
+    "env": [
+      "MAX_NUM_SEQS"
+    ]
+  },
+  "max-num-batched-tokens": {
+    "type": "integer",
+    "env": [
+      "MAX_NUM_BATCHED_TOKENS"
+    ]
+  },
+  "block-size": {
+    "type": "integer",
+    "env": [
+      "BLOCK_SIZE"
+    ]
+  },
+  "swa-block-size": {
+    "type": "integer",
+    "env": [
+      "SWA_BLOCK_SIZE"
+    ]
+  },
+  "cp-kv-cache-interleave-size": {
+    "type": "integer",
+    "env": [
+      "CP_KV_CACHE_INTERLEAVE_SIZE"
+    ]
+  },
+  "dcp-kv-cache-interleave-size": {
+    "type": "integer",
+    "env": [
+      "DCP_KV_CACHE_INTERLEAVE_SIZE"
+    ]
+  },
+  "prefix-match-unit": {
+    "type": "integer",
+    "env": [
+      "PREFIX_MATCH_UNIT"
+    ]
+  },
+  "max-model-len": {
+    "type": "int-or-auto",
+    "env": [
+      "MAX_MODEL_LEN"
+    ]
+  },
+  "max-cudagraph-capture-size": {
+    "type": "int-or-auto",
+    "env": [
+      "MAX_CUDAGRAPH_CAPTURE_SIZE"
+    ]
+  },
+  "max-parallel-prefills": {
+    "type": "int-or-auto",
+    "env": [
+      "MAX_PARALLEL_PREFILLS"
+    ]
+  },
+  "decode-refill-target": {
+    "type": "int-or-auto",
+    "env": [
+      "DECODE_REFILL_TARGET"
+    ]
+  },
+  "prefix-cache-retention-interval": {
+    "type": "int-or-auto",
+    "env": [
+      "PREFIX_CACHE_RETENTION_INTERVAL"
+    ]
+  },
+  "gpu-memory-utilization": {
+    "type": "number",
+    "env": [
+      "GPU_MEMORY_UTILIZATION"
+    ]
+  },
+  "mm-processor-cache-gb": {
+    "type": "number",
+    "env": [
+      "MM_PROCESSOR_CACHE_GB"
+    ]
+  },
+  "prefill-compute-share": {
+    "type": "string",
+    "env": [
+      "PREFILL_COMPUTE_SHARE"
+    ]
+  },
+  "prefill-compute-half-life": {
+    "type": "string",
+    "env": [
+      "PREFILL_COMPUTE_HALF_LIFE"
+    ]
+  },
+  "prefill-schedule-interval": {
+    "type": "integer",
+    "env": [
+      "PREFILL_SCHEDULE_INTERVAL"
+    ]
+  },
+  "prefill-policy": {
+    "type": "string",
+    "env": [
+      "PREFILL_POLICY"
+    ],
+    "enum": [
+      "round-robin",
+      "decode-aware"
+    ]
+  },
+  "recurrent-checkpoint-policy": {
+    "type": "string",
+    "env": [
+      "RECURRENT_CHECKPOINT_POLICY"
+    ],
+    "enum": [
+      "auto",
+      "aligned",
+      "request_boundaries"
+    ]
+  },
+  "enable-prefix-caching": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_PREFIX_CACHING"
+    ]
+  },
+  "enable-chunked-prefill": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_CHUNKED_PREFILL"
+    ]
+  },
+  "enable-auto-tool-choice": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_AUTO_TOOL_CHOICE"
+    ]
+  },
+  "enable-flashinfer-autotune": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_FLASHINFER_AUTOTUNE"
+    ]
+  },
+  "async-scheduling": {
+    "type": "boolean",
+    "env": [
+      "ASYNC_SCHEDULING"
+    ]
+  },
+  "scheduler-reserve-full-isl": {
+    "type": "boolean",
+    "env": [
+      "SCHEDULER_RESERVE_FULL_ISL"
+    ]
+  },
+  "enable-prompt-tokens-details": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_PROMPT_TOKENS_DETAILS"
+    ]
+  },
+  "enable-force-include-usage": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_FORCE_INCLUDE_USAGE"
+    ]
+  },
+  "enable-request-id-headers": {
+    "type": "boolean",
+    "env": [
+      "ENABLE_REQUEST_ID_HEADERS"
+    ]
+  },
+  "trust-remote-code": {
+    "type": "boolean",
+    "env": [
+      "TRUST_REMOTE_CODE"
+    ]
+  },
+  "language-model-only": {
+    "type": "boolean",
+    "env": [
+      "LANGUAGE_MODEL_ONLY"
+    ]
+  },
+  "disable-custom-all-reduce": {
+    "type": "boolean",
+    "env": [
+      "DISABLE_CUSTOM_ALL_REDUCE"
+    ]
+  },
+  "compilation-config": {
+    "type": "object",
+    "env": [
+      "COMPILATION_CONFIG"
+    ]
+  },
+  "additional-config": {
+    "type": "object",
+    "env": [
+      "ADDITIONAL_CONFIG"
+    ]
+  },
+  "default-chat-template-kwargs": {
+    "type": "object",
+    "env": [
+      "DEFAULT_CHAT_TEMPLATE_KWARGS"
+    ]
+  },
+  "override-generation-config": {
+    "type": "object",
+    "env": [
+      "OVERRIDE_GENERATION_CONFIG"
+    ]
+  },
+  "speculative-config": {
+    "type": "object",
+    "env": [
+      "SPECULATIVE_CONFIG"
+    ]
+  },
+  "engram-config": {
+    "type": "object",
+    "env": [
+      "ENGRAM_CONFIG"
+    ]
+  },
+  "cudagraph-capture-sizes": {
+    "type": "integers",
+    "env": [
+      "CUDAGRAPH_CAPTURE_SIZES"
+    ]
+  },
+  "mode": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "SPECULATOR"
+    ],
+    "enum": [
+      "off",
+      "mtp",
+      "dflash2",
+      "dspark"
+    ]
+  },
+  "cache-mode": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "CACHE_MODE"
+    ],
+    "enum": [
+      "vram",
+      "lmcache",
+      "native"
+    ]
+  },
+  "target-page-size": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "GLM53_TARGET_BLOCK_SIZE",
+      "VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE"
+    ]
+  },
+  "recurrent-page-size": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "GLM53_MAMBA_BLOCK_SIZE",
+      "VLLM_GLM53_SPLIT_MAMBA_BLOCK_SIZE"
+    ]
+  },
+  "dcp-ckv-gather": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "DCP_CKV_GATHER"
+    ],
+    "enum": [
+      "auto",
+      "0",
+      "1"
+    ]
+  },
+  "draft-model": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "DFLASH_MODEL",
+      "SPEC_MODEL_PATH"
+    ]
+  },
+  "draft-revision": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "DFLASH_MODEL_REVISION"
+    ]
+  },
+  "engram-table-memory": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "ENGRAM_TABLE_MEMORY"
+    ],
+    "enum": [
+      "ram",
+      "disk"
+    ]
+  },
+  "draft-tokens": {
+    "type": "integer",
+    "control": true,
+    "env": [
+      "NUM_SPECULATIVE_TOKENS",
+      "MTP_DEPTH",
+      "MTP",
+      "DFLASH_DEPTH",
+      "DSPARK_TOKENS"
+    ]
+  },
+  "engram-disk-resident-scales": {
+    "type": "boolean",
+    "control": true,
+    "env": [
+      "ENGRAM_DISK_RESIDENT_SCALES"
+    ]
+  },
+  "engram-projection-tp": {
+    "type": "boolean",
+    "control": true,
+    "env": [
+      "ENGRAM_PROJECTION_TP"
+    ]
+  },
+  "adaptive-verification": {
+    "type": "boolean",
+    "control": true,
+    "env": [
+      "DSPARK_ADAPTIVE_VERIFICATION"
+    ]
+  },
+  "adaptive-verification-cost-scale": {
+    "type": "number",
+    "control": true,
+    "env": [
+      "DSPARK_ADAPTIVE_VERIFICATION_COST_SCALE"
+    ]
+  }
+}

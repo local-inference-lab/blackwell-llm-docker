@@ -1,0 +1,69 @@
+schema_version: 1
+kind: model
+id: qwen38-flash-next
+status: implemented
+description: Qwen3.8 Flash Next NVFP4 with CPU PLE tables and a private NVFP4 MTP vocabulary head.
+evidence:
+  - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/qwen38-flash-next/qwen38-flash-next.compose.yml
+defaults:
+  model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
+  served-model-name: Qwen3.8-Flash-Next
+  tensor-parallel-size: 1
+  mode: mtp
+  max-model-len: 262144
+  max-num-seqs: 16
+  max-num-batched-tokens: 6019
+  gpu-memory-utilization: 0.96
+  block-size: 64
+  max-cudagraph-capture-size: 64
+  compilation-config: {cudagraph_mode: FULL_AND_PIECEWISE, custom_ops: [all]}
+  mamba-cache-mode: align
+  mamba-ssm-cache-dtype: auto
+  async-scheduling: true
+  quantization: modelopt_mixed
+  moe-backend: b12x
+  linear-backend: b12x
+  gdn-decode-kernel: b12x
+  enable-flashinfer-autotune: false
+  mm-encoder-tp-mode: data
+  mm-processor-cache-gb: 0
+  language-model-only: true
+  reasoning-parser: qwen3
+  tool-call-parser: qwen3_xml
+environment:
+  B12X_DYNAMIC_SPLIT_ROUTE_COMPUTE: "1"
+  B12X_DYNAMIC_DIRECT_EXPERT_SCALES: "1"
+  B12X_DYNAMIC_SPLIT_LOW_SMEM: "1"
+  B12X_DYNAMIC_SKIP_SPLIT_BARRIER_RESET: "1"
+  B12X_DYNAMIC_SPLIT_FAST_PREPARE: "1"
+  B12X_DYNAMIC_WORK_SOURCE: "persistent_grid"
+  B12X_DYNAMIC_SPLIT_COMPUTE_MAC: "224"
+  B12X_PCIE_ONESHOT_THREADS: "512"
+  B12X_PCIE_ONESHOT_BLOCK_LIMIT: "4"
+  B12X_PCIE_ONESHOT_PDL: "1"
+  B12X_MHC_PDL: "1"
+  OMP_NUM_THREADS: "2"
+  VLLM_COMPUTE_NANS_IN_LOGITS: "0"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
+  VLLM_SSM_CONV_STATE_LAYOUT: DS
+  VLLM_PLE_CPU_OFFLOAD: "1"
+  VLLM_DISABLED_KERNELS: MarlinFP8ScaledMMLinearKernel
+  VLLM_CAUSAL_CONV1D_UPDATE_HOIST: "1"
+  VLLM_MXFP8_LM_HEAD: "0"
+  VLLM_MTP_NVFP4_LM_HEAD: "1"
+  VLLM_LM_HEAD_A16: "1"
+  VLLM_QWEN3_8_FLASH_NEXT_MTP_COMPACT: "1"
+  VLLM_GDN_SPEC_DECODE_METADATA_FASTPATH: "1"
+  VLLM_QWEN3_8_FLASH_NEXT_OVERLAP: "1"
+  VLLM_B12X_DENSE_ACTIVATION_MODE: auto
+  B12X_DYNAMIC_DETERMINISTIC_OUTPUT: "0"
+  B12X_DENSE_SPLITK_TURBO: "1"
+modes:
+  off: {}
+  mtp:
+    draft_tokens: 3
+    config: {method: mtp, moe_backend: b12x}
+cache:
+  gpu: implemented
+  external: unsupported
+  migration_contract: qwen-external-unqualified

@@ -1,0 +1,67 @@
+schema_version: 1
+kind: model
+id: ds41-flash
+status: implemented
+description: DeepSeek-V4.1-Flash with native Engram RAM or disk tables and DSpark verification.
+evidence:
+  - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/deepseek-v4.1-flash.md
+  - recipes/glm53/serve-ds41-jovian.sh
+  - local-inference-lab/vllm:serve-ds41-flash.sh
+defaults:
+  model: deepseek-ai/DeepSeek-V4.1-Flash
+  served-model-name: DeepSeek-V4.1-Flash
+  tensor-parallel-size: 4
+  mode: dspark
+  prefill-compute-share: 0.4
+  prefill-schedule-interval: 1
+  max-parallel-prefills: 1
+  max-model-len: 131072
+  max-num-seqs: 4
+  max-num-batched-tokens: 4096
+  gpu-memory-utilization: 0.95
+  block-size: 256
+  swa-block-size: 128
+  max-cudagraph-capture-size: 128
+  compilation-config: {cudagraph_mode: FULL_AND_PIECEWISE}
+  attention-backend: B12X
+  moe-backend: b12x
+  linear-backend: b12x
+  async-scheduling: true
+  scheduler-reserve-full-isl: false
+  prefill-policy: decode-aware
+  decode-refill-target: auto
+  generation-config: vllm
+  override-generation-config: {temperature: 1.0, top_p: 0.95}
+  engram-table-memory: disk
+  engram-disk-resident-scales: false
+  engram-projection-tp: false
+  adaptive-verification: true
+  adaptive-verification-cost-scale: 1.0
+  safetensors-load-strategy: lazy
+  jit-monitor-mode: error
+  tokenizer-mode: deepseek_v41
+  reasoning-parser: deepseek_v41
+  tool-call-parser: deepseek_v41
+  enable-prompt-tokens-details: true
+  enable-force-include-usage: true
+  enable-request-id-headers: true
+  default-chat-template-kwargs: {thinking: true, reasoning_effort: high}
+environment:
+  OMP_NUM_THREADS: "8"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_STANDALONE_COMPILE: "1"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+  VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD: "1024"
+modes:
+  off: {}
+  dspark:
+    draft_tokens: 7
+    config: {method: dspark, attention_backend: B12X, draft_sample_method: greedy, rejection_sample_method: standard}
+cache:
+  gpu: implemented
+  external: unsupported
+  migration_contract: ds41-cache-qualification

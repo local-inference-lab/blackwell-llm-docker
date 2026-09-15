@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vLLM runtime profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "id",
+    "status",
+    "defaults",
+    "environment"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "enum": [
+        "common",
+        "model",
+        "hardware"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "status": {
+      "enum": [
+        "implemented",
+        "qualified",
+        "research-only",
+        "unsupported"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "defaults": {
+      "type": "object"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "model_environment": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/environment"
+      }
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "draft_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpu",
+        "external",
+        "migration_contract"
+      ],
+      "properties": {
+        "gpu": {
+          "type": "string"
+        },
+        "external": {
+          "type": "string"
+        },
+        "migration_contract": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

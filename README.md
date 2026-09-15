@@ -2,6 +2,11 @@
 
 Docker images for LLM inference on NVIDIA Blackwell GPUs (SM120).
 
+The [model runtime configuration specification](runtime/README.md) defines
+declarative vLLM model/hardware profiles and CPU-tested launch resolution.
+It is an additive implementation: published model/cache launchers remain
+authoritative until the documented image and lifecycle migration gates pass.
+
 ## DeepSeek V4 Serving
 
 The Jovian Judgement r9 serving profiles use TP2 on two 96 GiB SM120 GPUs,

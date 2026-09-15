@@ -1,0 +1,33 @@
+name: Model runtime profile contracts
+
+on:
+  pull_request:
+    paths:
+      - runtime/**
+      - recipes/glm53/serve-*.sh
+      - .github/workflows/model-runtime-profiles.yml
+  push:
+    branches: [main]
+    paths:
+      - runtime/**
+      - recipes/glm53/serve-*.sh
+      - .github/workflows/model-runtime-profiles.yml
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m venv .venv-profile-tests
+          .venv-profile-tests/bin/pip install -r runtime/requirements.txt pytest ruff
+          .venv-profile-tests/bin/python -m pytest -q runtime/tests
+          .venv-profile-tests/bin/ruff check runtime
+          .venv-profile-tests/bin/ruff format --check runtime
+          bash -n runtime/lil-serve runtime/install.sh

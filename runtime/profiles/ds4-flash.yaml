@@ -1,0 +1,57 @@
+schema_version: 1
+kind: model
+id: ds4-flash
+status: implemented
+description: DeepSeek V4 text DSpark with B12X W4A8 MoE and native dense-kernel selection.
+evidence:
+  - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/ds4-jovian-community-r29.md
+  - recipes/glm53/serve-ds4-jovian.sh
+  - local-inference-lab/vllm:serve-ds4-flash.sh
+defaults:
+  model: deepseek-ai/DeepSeek-V4-Flash-0731
+  served-model-name: DeepSeek-V4-Flash-0731
+  tensor-parallel-size: 2
+  mode: dspark
+  max-model-len: -1
+  max-num-seqs: 8
+  max-num-batched-tokens: 4096
+  gpu-memory-utilization: 0.975
+  block-size: 256
+  max-cudagraph-capture-size: auto
+  compilation-config: {cudagraph_mode: FULL_AND_PIECEWISE, custom_ops: [all]}
+  attention-backend: B12X
+  moe-backend: b12x
+  trust-remote-code: true
+  prefix-cache-retention-interval: 4096
+  async-scheduling: true
+  scheduler-reserve-full-isl: false
+  enable-flashinfer-autotune: true
+  tokenizer-mode: deepseek_v4
+  reasoning-parser: deepseek_v4
+  tool-call-parser: deepseek_v4
+  enable-prompt-tokens-details: true
+  enable-force-include-usage: true
+  enable-request-id-headers: true
+  default-chat-template-kwargs: {thinking: true, reasoning_effort: high}
+  override-generation-config: {temperature: 1.0, top_p: 0.95}
+environment:
+  OMP_NUM_THREADS: "2"
+  VLLM_B12X_MOE_FP4_FORCE_A16: "0"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+  VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD: "1024"
+modes:
+  off: {}
+  mtp:
+    draft_tokens: 3
+    config: {method: mtp, draft_sample_method: probabilistic, rejection_sample_method: standard, moe_backend: b12x}
+  dspark:
+    draft_tokens: 5
+    config: {method: dspark, draft_sample_method: probabilistic, rejection_sample_method: standard}
+cache:
+  gpu: implemented
+  external: unsupported
+  migration_contract: ds4-engine-driven

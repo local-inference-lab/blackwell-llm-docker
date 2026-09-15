@@ -1,0 +1,30 @@
+schema_version: 1
+kind: hardware
+id: rtx-pro-6000-pcie
+status: implemented
+description: Single-node RTX PRO 6000 Blackwell PCIe deployment defaults; no clock changes.
+defaults: {}
+environment:
+  CUTE_DSL_ARCH: sm_120a
+  NCCL_IB_DISABLE: "1"
+  NCCL_P2P_LEVEL: SYS
+  NCCL_PROTO: LL,LL128,Simple
+  NCCL_MIN_NCHANNELS: "16"
+  NCCL_MAX_NCHANNELS: "16"
+  NCCL_BUFFSIZE: "2097152"
+  VLLM_ENABLE_PCIE_ALLREDUCE: "1"
+  VLLM_PCIE_ALLREDUCE_BACKEND: b12x
+model_environment:
+  glm53-flash:
+    VLLM_PCIE_TWOSHOT_ALLREDUCE_MAX_SIZE: 768KB
+  ds41-flash:
+    VLLM_PCIE_DMA_MIN_BYTES: 6MB
+    VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE: 96KB
+    VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE: 96KB
+    VLLM_PCIE_TWOSHOT_ALLREDUCE_MAX_SIZE: 768KB
+  ds4-flash:
+    VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE: 64KB
+  ds4-vision:
+    VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE: 64KB
+  qwen38-flash-next:
+    NCCL_CUMEM_ENABLE: "0"

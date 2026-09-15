@@ -1,0 +1,7 @@
+schema_version: 1
+kind: hardware
+id: native
+status: implemented
+description: Native vLLM and B12X hardware selection without PCIe crossover or NCCL channel overrides.
+defaults: {}
+environment: {}

@@ -1,0 +1,88 @@
+schema_version: 1
+kind: model
+id: glm53-flash
+status: implemented
+description: GLM-5.3-Flash NVFP4 target with optional MTP or MXFP8 DFlash2 proposals.
+evidence:
+  - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/glm-5.3-flash.md
+  - recipes/glm53/serve-glm53-flash-cache-complete.sh
+  - recipes/glm53/serve-glm53-flash-nvfp4-dflash2.sh
+defaults:
+  model: local-inference-lab/GLM-5.3-Flash-NVFP4
+  served-model-name: GLM-5.3-Flash-NVFP4
+  tensor-parallel-size: 4
+  mode: off
+  prefill-compute-share: 0.4
+  prefill-schedule-interval: 1
+  max-parallel-prefills: 1
+  max-model-len: 1048576
+  max-num-seqs: 32
+  max-num-batched-tokens: 4096
+  gpu-memory-utilization: 0.93
+  block-size: 256
+  target-page-size: 2048
+  recurrent-page-size: auto
+  recurrent-checkpoint-policy: request_boundaries
+  mamba-cache-mode: align
+  cp-kv-cache-interleave-size: 4
+  dcp-kv-cache-interleave-size: 4
+  dcp-ckv-gather: auto
+  attention-backend: B12X
+  moe-backend: b12x
+  linear-backend: b12x
+  quantization: modelopt_mixed
+  enable-flashinfer-autotune: false
+  max-cudagraph-capture-size: 256
+  cudagraph-capture-sizes: [1, 2, 4, 8, 16, 32, 40, 48, 64, 96, 128, 192, 256]
+  compilation-config: {cudagraph_mode: FULL_AND_PIECEWISE}
+  additional-config: {glm53_kda_decode_backend: auto, kda_prefill_backend: flashkda}
+  reasoning-parser: glm45
+  tool-call-parser: glm47
+  default-chat-template-kwargs: {reasoning_effort: high, clear_thinking: false}
+  override-generation-config: {temperature: 1.0, top_p: 0.95}
+environment:
+  B12X_DYNAMIC_SPLIT_ROUTE_COMPUTE: "1"
+  B12X_DYNAMIC_DIRECT_EXPERT_SCALES: "1"
+  B12X_DYNAMIC_SPLIT_LOW_SMEM: "1"
+  B12X_DYNAMIC_SKIP_SPLIT_BARRIER_RESET: "1"
+  B12X_DYNAMIC_SPLIT_FAST_PREPARE: "1"
+  B12X_DYNAMIC_WORK_SOURCE: "persistent_grid"
+  B12X_DYNAMIC_SPLIT_COMPUTE_MAC: "224"
+  B12X_PCIE_ONESHOT_THREADS: "512"
+  B12X_PCIE_ONESHOT_BLOCK_LIMIT: "4"
+  B12X_PCIE_ONESHOT_PDL: "1"
+  B12X_MHC_PDL: "1"
+  OMP_NUM_THREADS: "1"
+  VLLM_GLM53_L2_PREFETCH: "1"
+  VLLM_GLM53_L2_PREFETCH_PERSIST_MB: "0"
+  VLLM_GLM53_DFLASH_ATTN: "1"
+  VLLM_CAUSAL_CONV1D_UPDATE_HOIST: "1"
+  VLLM_GLM53_KDA_GATE_SIDE_STREAM: "1"
+  VLLM_GLM53_MTP_DRAFT_HEAD: nvfp4
+  VLLM_MXFP8_LM_HEAD: "0"
+  VLLM_MTP_NVFP4_LM_HEAD: "0"
+  VLLM_LM_HEAD_A16: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  VLLM_GLM53_ONLINE_DENSE_MXFP8: "0"
+  VLLM_DISABLE_SHARED_EXPERTS_STREAM: "0"
+  VLLM_DISABLED_KERNELS: MarlinFP8ScaledMMLinearKernel
+  VLLM_B12X_MOE_FP4_FORCE_A16: "0"
+  VLLM_PLUGINS: ""
+modes:
+  off: {}
+  mtp:
+    draft_tokens: 3
+    config: {method: mtp, draft_sample_method: probabilistic, rejection_sample_method: standard, moe_backend: marlin, attention_backend: B12X}
+  dflash2:
+    draft_tokens: 7
+    config:
+      method: dflash
+      model: local-inference-lab/GLM-5.3-Flash-DFlash2
+      draft_sample_method: probabilistic
+      rejection_sample_method: standard
+      attention_backend: FLASH_ATTN
+      kv_cache_dtype: auto
+cache:
+  gpu: implemented
+  external: unsupported
+  migration_contract: glm-atomic-recurrent

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /opt/lil
+exec /opt/venv/bin/python -m runtime.launcher "$@"
