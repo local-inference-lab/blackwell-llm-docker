@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# The production launcher omits an image-count limit by default. A deployment
+# can opt into a finite limit with MAX_IMAGES_PER_PROMPT.
+COPY --chmod=0755 \
+  launchers/serve-kimi-k3-full-mxfp4-dspark-ii \
+  /usr/local/bin/serve-kimi-k3-full-mxfp4-dspark-ii
+COPY --chmod=0755 \
+  launchers/serve-kimi-k3-production-dspark-ii \
+  /usr/local/bin/serve-kimi-k3-production-dspark-ii
+
+LABEL org.opencontainers.image.title="Kimi-K3 production runtime with optional image-count limit" \
+      org.opencontainers.image.description="Kimi-K3 MXFP4 DSpark runtime that leaves the vLLM image-count limit unspecified unless MAX_IMAGES_PER_PROMPT is set"

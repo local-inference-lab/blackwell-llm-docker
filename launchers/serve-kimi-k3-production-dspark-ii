@@ -41,13 +41,10 @@ export LMCACHE_CHUNK_SIZE="${LMCACHE_CHUNK_SIZE:-12288}"
 export ENABLE_PREFIX_CACHING="${ENABLE_PREFIX_CACHING:-1}"
 export ENABLE_VISION="${ENABLE_VISION:-1}"
 # Kimi-K3 vision attention heads are not divisible by TP16, so vLLM executes
-# the encoder data-parallel even when weight parallelism is requested. Oh My
-# Pi 17.3.5 bounds custom-provider requests to five images and drops the oldest
-# image blocks above that limit. Match the server limit to the client contract
-# so archived tool-result frames remain usable without an avoidable HTTP 400.
-# The processor-wide patch limits below bound each encoded image.
+# the encoder data-parallel even when weight parallelism is requested. The
+# processor-wide patch limits below bound each encoded image independently of
+# the number of images in a request.
 export MM_ENCODER_TP_MODE="${MM_ENCODER_TP_MODE:-weights}"
-export MAX_IMAGES_PER_PROMPT="${MAX_IMAGES_PER_PROMPT:-5}"
 # Kimi-K3 resizes every image before encoder execution. The deployment-wide
 # patch cap bounds startup profiling and request-time vision activations while
 # retaining the checkpoint's maximum single-side resolution for panoramas.

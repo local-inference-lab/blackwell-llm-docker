@@ -137,11 +137,17 @@ case "${ENABLE_VISION:-0}" in
         ;;
     esac
     multimodal_args=(
-      --limit-mm-per-prompt "{\"image\":${MAX_IMAGES_PER_PROMPT:-1}}"
       --mm-processor-kwargs "{\"in_patch_limit\":${VISION_IN_PATCH_LIMIT:-40960},\"patch_limit_on_one_side\":${VISION_PATCH_LIMIT_ON_ONE_SIDE:-512}}"
       --mm-processor-cache-gb "${MM_PROCESSOR_CACHE_GB:-1}"
       --mm-encoder-tp-mode "${MM_ENCODER_TP_MODE:-data}"
     )
+    # An omitted item-count limit uses vLLM's modality default. Operators that
+    # need a hard image-count boundary can opt in without changing the launcher.
+    if [[ -n "${MAX_IMAGES_PER_PROMPT:-}" ]]; then
+      multimodal_args+=(
+        --limit-mm-per-prompt "{\"image\":${MAX_IMAGES_PER_PROMPT}}"
+      )
+    fi
     ;;
   *)
     echo "ENABLE_VISION must be 0 or 1" >&2
