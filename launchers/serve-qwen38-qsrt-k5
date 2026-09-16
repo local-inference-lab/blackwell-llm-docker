@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Serve a materialized TP1 Qwen3.8-27B QSRT K5 plus rank-16 checkpoint.
+
+set -euo pipefail
+
+unset NCCL_GRAPH_FILE
+
+model_path=${MODEL_PATH:-/models/Qwen3.8-27B-QSRT-K5-R16}
+served_model=${SERVED_MODEL:-Qwen3.8-27B-QSRT-K5-R16}
+host=${HOST:-0.0.0.0}
+port=${PORT:-8000}
+max_model_len=${MAX_MODEL_LEN:-261632}
+max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-8192}
+max_num_seqs=${MAX_NUM_SEQS:-64}
+gpu_memory_utilization=${GPU_MEMORY_UTILIZATION:-0.90}
+kv_cache_dtype=${KV_CACHE_DTYPE:-auto}
+default_mm_limits='{"image":0,"video":0}'
+mm_limits=${MM_LIMITS:-$default_mm_limits}
+
+if [[ ! -d "$model_path" ]]; then
+    printf 'MODEL_PATH is not a directory: %s\n' "$model_path" >&2
+    exit 2
+fi
+
+export B12X_QSRT_MODEL_DIR=$model_path
+export VLLM_USE_AOT_COMPILE=${VLLM_USE_AOT_COMPILE:-0}
+
+arguments=(
+    --model "$model_path"
+    --served-model-name "$served_model"
+    --host "$host"
+    --port "$port"
+    --trust-remote-code
+    --tensor-parallel-size 1
+    --dtype bfloat16
+    --attention-backend B12X_ATTN
+    --linear-backend b12x
+    --block-size 128
+    --max-model-len "$max_model_len"
+    --gpu-memory-utilization "$gpu_memory_utilization"
+    --kv-cache-dtype "$kv_cache_dtype"
+    --max-num-batched-tokens "$max_num_batched_tokens"
+    --max-num-seqs "$max_num_seqs"
+    --mm-processor-kwargs '{"truncation":false}'
+    --limit-mm-per-prompt "$mm_limits"
+    --no-enable-prefix-caching
+    --disable-custom-all-reduce
+    --compilation-config '{"cudagraph_mode":"NONE","custom_ops":["-apply_rotary_emb"]}'
+)
+
+if (( $# > 0 )); then
+    arguments+=("$@")
+fi
+
+exec /opt/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    "${arguments[@]}"
