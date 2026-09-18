@@ -1,0 +1,112 @@
+{
+  "schema": "kimi-k3-vision-memory-qualification-v1",
+  "status": "qualified",
+  "image": {
+    "reference": "voipmonitor/vllm:kimi-k3-upstream-aligned-dspark-nativekv-vllm6e843eb-b12x2d466e3-cu133-torch213-20260918-r38@sha256:32ff80279164365b21cdb420d7a22101be704df42b66db2c17d64d5e0558f240",
+    "local_id": "sha256:5849d0fe2b83438109c03ec28a8425762a7bc9cb7c84503608066e860565aa6c",
+    "size_bytes": 33992274394,
+    "build_recipe_commit": "5924b0511dc335800d7678f04cbe3b8a1266c1fe",
+    "runtime": {
+      "cuda": "13.3",
+      "pytorch": "2.13.0",
+      "instanttensor": "0.1.9"
+    }
+  },
+  "source": {
+    "vllm": {
+      "commit": "37a8adcb01fbb5e60ab40b4c4ef472e09a13b218",
+      "tree": "6e843eb0f26cc60aa068b97b917e55d2d3a96a3f",
+      "vision_rope_change": "local-inference-lab/vllm#459@78f81231ae4085e31cffbc4c89021131f4c3629b",
+      "lock": "patches/releases/kimi-k3-upstream-aligned-20260918/vllm/source.lock.json"
+    },
+    "b12x": {
+      "commit": "b8c7153c3e1ca13b1e0ef373d9a382a513ab892f",
+      "tree": "2d466e350e518193f9edd57809e050b3aa8b8dcb",
+      "lock": "patches/releases/kimi-k3-upstream-aligned-20260918/b12x/source.lock.json"
+    },
+    "lmcache": {
+      "commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+      "tree": "e045d729bc5c4c63a40e13d032f42923de97812f",
+      "lock": "patches/releases/kimi-k3-upstream-aligned-20260918/lmcache/source.lock.json"
+    }
+  },
+  "model_free_cuda_validation": {
+    "query_shape": [
+      20160,
+      12,
+      128
+    ],
+    "dtype": "bfloat16",
+    "output": "bit-identical",
+    "out_of_place_peak_mib": 236.250,
+    "in_place_peak_mib": 118.125,
+    "out_of_place_warm_median_ms": 0.414,
+    "in_place_warm_median_ms": 0.390
+  },
+  "frank2_target_only_profile": {
+    "host": "frank2",
+    "gpu": "16 RTX PRO 6000 Blackwell GPUs",
+    "tensor_parallel_size": 16,
+    "decode_context_parallel_size": 16,
+    "max_model_len": 950000,
+    "physical_target_kv_tokens": 950000,
+    "target_kv_cache_dtype": "fp8",
+    "max_num_scheduled_tokens": 4096,
+    "max_num_sequences": 12,
+    "native_host_kv_gib": 32,
+    "speculative_decoding": false,
+    "vision": true,
+    "image_count_limit": null,
+    "per_image_patch_limit": 40960,
+    "per_image_patch_side_limit": 512,
+    "model_memory_gib_per_rank": 90.42,
+    "max_weight_load_seconds": 395.497
+  },
+  "end_to_end_validation": {
+    "four_image_memory_regression": {
+      "status": "qualified",
+      "request_started_utc": "2026-09-18T14:12:33Z",
+      "http_status": 200,
+      "elapsed_seconds": 10.70,
+      "patch_grids": [
+        [
+          1,
+          168,
+          120
+        ],
+        [
+          1,
+          168,
+          120
+        ],
+        [
+          1,
+          168,
+          120
+        ],
+        [
+          1,
+          72,
+          66
+        ]
+      ],
+      "total_patches": 65232,
+      "prompt_tokens": 16448,
+      "completion_tokens": 16,
+      "container_restarts": 0,
+      "container_oom_killed": false
+    },
+    "six_image_admission": {
+      "status": "qualified",
+      "http_status": 200,
+      "image_count": 6,
+      "prompt_tokens": 535,
+      "completion_tokens": 16,
+      "container_restarts": 0
+    },
+    "reproducer_sha256": "866d32c485300ad731da7269010a7936fc3ce5137278afbe7da69bc21c2fd4e7",
+    "launcher_sha256": "ba8957a8dde4a585010bb5484e544dfb017fc09356db6c530de395ff1f47ef48",
+    "server_log_sha256_after_validation": "c575d6b73fecb11f4032e233ae7a1c4038fcbf89e0f5faa804e2fa73737feac3"
+  },
+  "conclusion": "In-place Kimi MoonViT query and key rotary products eliminate the reproduced vision OOM without reducing the 950,000-token physical KV cache or imposing an image-count cap. Qualification covers the declared request geometries and does not establish unrestricted multimodal admission safety."
+}

@@ -125,7 +125,7 @@ IMAGE=voipmonitor/vllm:vllm-b12x-cu132 ./build-vllm-b12x-cu132.sh
 
 Status: **qualified**. `build-kimi-k3-upstream-aligned-runtime.sh` compiles
 vLLM, B12X, and LMCache from the source locks under
-`patches/releases/kimi-k3-upstream-aligned-20260822/`. It reuses the generic
+`patches/releases/kimi-k3-upstream-aligned-20260918/`. It reuses the generic
 CUDA 13.3/PyTorch 2.13 dependencies in the source-neutral image produced by
 `build-kimi-k3-runtime-foundation.sh`. Updating a source lock therefore does
 not rebuild FlashInfer, DeepGEMM, ExLlamaV3, InstantTensor, or the Rust
@@ -139,17 +139,24 @@ voipmonitor/vllm:kimi-k3-runtime-foundation-cu133-torch213-fi1ac6942-rust195-202
 sha256:03b67e53dda73c3fa317d4cb529ad38a220c51c7365ee8d54c16e5063fcc54e2
 
 Production runtime:
-voipmonitor/vllm:kimi-k3-upstream-aligned-dspark-nativekv-vllme755f87-b12x2d466e3-cu133-torch213-20260822-r36
-sha256:c41bf15095b2316c7335d305115ad26bab14ec4234f3109b1d1ebb807895a3ea
+voipmonitor/vllm:kimi-k3-upstream-aligned-dspark-nativekv-vllm6e843eb-b12x2d466e3-cu133-torch213-20260918-r38
+sha256:32ff80279164365b21cdb420d7a22101be704df42b66db2c17d64d5e0558f240
 ```
 
 The production image contains target-only, Inferact DSpark, and modal-labs
-DFlash entrypoints. The default entrypoint enables DSpark, native vLLM host KV
-offload, vision, TP16/DCP16, and a 4,096-token scheduler chunk. Qualification
-against the preceding source-identical image measured 55.801 target-only,
-122.695 DSpark, and 155.069 DFlash decode tokens per second. All deterministic
-output hashes and speculative acceptance rates were identical. The complete
-source identities, cache capacities, and measurement receipts are recorded in
+DFlash entrypoints. Image-count admission is not capped unless
+`MAX_IMAGES_PER_PROMPT` is set explicitly. Kimi MoonViT computes rotary
+frequencies from request grids, projects each image independently, and applies
+query and key rotary products in place. On the deployed TP16/DCP16 target-only
+profile, the original 65,232-patch four-image OOM request returned HTTP 200
+while retaining 950,000 physical FP8 KV tokens; a six-image request also
+returned HTTP 200. Exact source identities and measurements are recorded in
+`validation/kimi-k3-upstream-aligned-r38-20260918.json`.
+
+The decode-throughput qualification for the source composition before the
+vision-only rotary-product update measured 55.801 target-only, 122.695 DSpark,
+and 155.069 DFlash tokens per second. Its complete deterministic-output and
+speculative-acceptance receipts remain in
 `validation/kimi-k3-upstream-aligned-r36-20260822.json`.
 
 ### Kimi-K3 Heraldic Harbinger runtime
