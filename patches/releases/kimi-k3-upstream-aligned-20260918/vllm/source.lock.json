@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "component": "vllm",
+  "purpose": "Compile Kimi-K3 from explicit Infernal Invocation pull-request heads with bounded vision frequency, rotary-product, and projector memory; overlap-safe recurrent-state movement; alias-safe attention-state merging; correct AttnRes buffer ownership; and active staged DFlash auxiliary projection.",
+  "source": {
+    "repository": "https://github.com/voipmonitor/vllm.git",
+    "ref": "refs/heads/integration/ii-kimi-k3-r37-vision-rope-inplace-20260918",
+    "commit": "37a8adcb01fbb5e60ab40b4c4ef472e09a13b218",
+    "tree": "6e843eb0f26cc60aa068b97b917e55d2d3a96a3f"
+  },
+  "upstream_base": {
+    "repository": "https://github.com/local-inference-lab/vllm.git",
+    "ref": "refs/heads/dev/infernal-invocation",
+    "commit": "b5f995e73e6b7fe27c9927477e277a151ebcc9e9"
+  },
+  "pull_requests": [
+    {
+      "number": 414,
+      "head": "990a63debf7201ae5446436a712609fcc8ffaef7",
+      "merge_commit": "4cfeb8ad15cbd4bc4f18164ffb97cf53ad937487",
+      "title": "Preserve Mamba copy-on-write state after external prefix hits"
+    },
+    {
+      "number": 295,
+      "head": "b115455fd0f3d8984d2149974a9007cda51593b6",
+      "merge_commit": "bf5a9b2f20f8c9e38847c550ba87a3ae3e9d0615",
+      "title": "Backport XGrammar termination-safe token batches"
+    },
+    {
+      "number": 294,
+      "head": "d931e0d45dc9606d5d23554e676afa5aed075e8f",
+      "merge_commit": "e62cedb67312d5245d4cb00cc7f9812e235fb636",
+      "title": "Preserve grammar bitmask source widths after draft trimming"
+    },
+    {
+      "number": 320,
+      "head": "fd0237e15f714d4b6aa413f915a45473ec2dec5a",
+      "merge_commit": "6f78b5cf80fa1fefbb62f22704ae5ad5b47d8ab4",
+      "title": "Backport speculative structured-output commit validation"
+    },
+    {
+      "number": 413,
+      "head": "3ebc8967dab28a9df103d8c66bff9688525263bc",
+      "merge_commit": "538ed2eeaeefd662f0dbebe359824d0d2187ad37",
+      "title": "Stream Kimi-K3 tool arguments incrementally"
+    },
+    {
+      "number": 422,
+      "head": "3c296be28b31dba5c4a0ced714d2e21dabe246af",
+      "merge_commit": "8b6e1de1871ef0f17bfc3506e52c8286fa172d91",
+      "title": "Handle KV load failures across hybrid cache groups"
+    },
+    {
+      "number": 310,
+      "head": "f85d3d87e196546eff162c2a61b49aab13f2e625",
+      "merge_commit": "799c2e781514d483649e66034cab06ca0e8a6987",
+      "title": "Preserve replicated DFlash-family draft semantics under DCP"
+    },
+    {
+      "number": 415,
+      "head": "2e8535c70af889a07c42370c28387172c678212f",
+      "merge_commit": "bc3dd5adb68b888d7ccaf3c93eb036fbbf20ef08",
+      "title": "Preserve the DSpark CUDA Graph capture contract"
+    },
+    {
+      "number": 418,
+      "head": "4f34748d5862cf1ba97a588c99bd63956ce4f884",
+      "merge_commit": "afcbf4f801c9cf2e2bd3afbd68583640e814e20d",
+      "title": "Define per-cache DCP block-table geometry"
+    },
+    {
+      "number": 419,
+      "head": "04a6acfe467f4a208c7231a18fc99faf656d016a",
+      "merge_commit": "23e7093fe96c2947c7bcf596d9852c18d1d08818",
+      "title": "Keep Kimi-K3 protocol markers out of streamed content"
+    },
+    {
+      "number": 459,
+      "head": "18d9e2789b1939fd4158b2e35ce4340437995a08",
+      "merge_commit": "f52fadc541df0ead728a2a210fb49703f2413d60",
+      "title": "Bound Kimi vision allocation to request inputs"
+    },
+    {
+      "number": 460,
+      "head": "0a00dacd4f1e6c724c9de1b4ba65b26a2ad2f37c",
+      "merge_commit": "94d3833076ff43702217cab2b48cce8857c30150",
+      "title": "Use pre-norm AttnRes states for Kimi-K3 DFlash"
+    },
+    {
+      "number": 463,
+      "head": "edb1042d476275d1f1230d5db3dddd19cc003cb6",
+      "merge_commit": "dc8f46dba90851370eb9ad5d70cbc4b884db08cd",
+      "title": "Resume Mamba prefix hits on the recurrent checkpoint grid"
+    },
+    {
+      "number": 464,
+      "head": "832b1c929e2c8cedca261817396533eb6d51b266",
+      "merge_commit": "3c9031e08518d4f9b97d17a3efb93bbe6bb146e0",
+      "title": "Gather uneven vision shards without TP padding"
+    },
+    {
+      "number": 467,
+      "head": "d19ef454b57b0800a4eb34785cb0964bd6c6da61",
+      "merge_commit": "7da8bd371fc41258f99f131b5152cb0d1b5565e0",
+      "title": "Preserve the final Kimi-K3 AttnRes block"
+    },
+    {
+      "number": 468,
+      "head": "7671c6660f7ceb368acaad6b7c2d9d5932403ac6",
+      "merge_commit": "6ba940cc4a765b7071233b9d0eda272e47eaadf7",
+      "title": "Preserve aliased LSE in native attention-state merge"
+    },
+    {
+      "number": 469,
+      "head": "62bead59e89eb6b8cc4f117d00832d4d701ea670",
+      "merge_commit": "89b9db62a44a9ee18fba782d4f2540d5cc8f75e6",
+      "title": "Bound Kimi-K3 MLA context-output lifetime"
+    },
+    {
+      "number": 471,
+      "head": "f7180bc7d20415d1d5f40ed69b0feddd4ce7d5dc",
+      "merge_commit": "1c93ca07c10d5922947fb24e49cae4de979b89b5",
+      "title": "Backport overlapping Mamba state-copy fix"
+    }
+  ],
+  "qualification_candidate_commits": [
+    {
+      "head": "52b81e424bcb9fe0ad95878cc637bfee4321faf3",
+      "integration_commit": "b8ec39c45aea97522431739d35d0f39b702ca125",
+      "title": "Bound DFlash auxiliary projection memory"
+    },
+    {
+      "head": "ee6984036d6f0f3339751fae158e6564b204176b",
+      "integration_commit": "e08d796fbe7987fc41683963c22740eaf2515a01",
+      "title": "Activate staged DFlash auxiliary projection with caller-owned output"
+    },
+    {
+      "head": "78f81231ae4085e31cffbc4c89021131f4c3629b",
+      "integration_commit": "37a8adcb01fbb5e60ab40b4c4ef472e09a13b218",
+      "title": "Bound Kimi vision RoPE product memory"
+    }
+  ],
+  "source_patches": []
+}

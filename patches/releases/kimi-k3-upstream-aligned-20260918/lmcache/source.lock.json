@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "component": "lmcache",
+  "purpose": "Build the CPU LMCache service from the branch that contains unified recurrent and subpaged MLA page registration.",
+  "source": {
+    "repository": "https://github.com/local-inference-lab/LMCache.git",
+    "ref": "refs/heads/release/v0.5.2-glm52-dcp-base",
+    "commit": "a128b2e286ebb3556cb43124149e600ff99fe481",
+    "tree": "e045d729bc5c4c63a40e13d032f42923de97812f"
+  },
+  "upstream_base": {
+    "repository": "https://github.com/local-inference-lab/LMCache.git",
+    "ref": "refs/heads/release/v0.5.2-glm52-dcp-base",
+    "commit": "a128b2e286ebb3556cb43124149e600ff99fe481"
+  },
+  "pull_requests": [],
+  "source_patches": []
+}

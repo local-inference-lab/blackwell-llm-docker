@@ -435,6 +435,7 @@ RUN for script in /opt/infernal-invocation/vllm/serve-*.sh; do \
       if test -f "${script}"; then install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; fi; \
     done \
  && for script in /tmp/runtime-launchers/serve-*.sh \
+      /tmp/runtime-launchers/serve-kimi-k3-* \
       /tmp/runtime-launchers/glm52-*.sh \
       /tmp/runtime-launchers/lmcache-*.sh; do \
       install -m 0755 "${script}" "/usr/local/bin/$(basename "${script}")"; \

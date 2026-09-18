@@ -5,10 +5,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${repo_root}"
 
-source_root=patches/releases/kimi-k3-upstream-aligned-20260822
+source_root=patches/releases/kimi-k3-upstream-aligned-20260918
 release_name="${RELEASE_NAME:-kimi-k3-upstream-aligned}"
-release_date="${RELEASE_DATE:-20260822}"
-revision="${REVISION:-r36}"
+release_date="${RELEASE_DATE:-20260918}"
+revision="${REVISION:-r38}"
 runtime_foundation_image="${RUNTIME_FOUNDATION_IMAGE:-voipmonitor/vllm@sha256:03b67e53dda73c3fa317d4cb529ad38a220c51c7365ee8d54c16e5063fcc54e2}"
 base_image="${BASE_IMAGE:-${runtime_foundation_image}}"
 runtime_foundation="${RUNTIME_FOUNDATION:-1}"
@@ -234,6 +234,10 @@ docker run --rm \
       /usr/local/bin/serve-kimi-k3-production-dspark-ii; do
       bash -n "${launcher}"
     done
+    ! grep -Fq "export MAX_IMAGES_PER_PROMPT=" \
+      /usr/local/bin/serve-kimi-k3-production-dspark-ii
+    grep -Fq "if [[ -n \"\${MAX_IMAGES_PER_PROMPT:-}\" ]]" \
+      /usr/local/bin/serve-kimi-k3-full-mxfp4-dspark-ii
   '
 
 if [[ "${RUN_NCCL_SMOKE:-0}" == 1 ]]; then

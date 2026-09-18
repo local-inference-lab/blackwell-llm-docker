@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "component": "b12x",
+  "purpose": "Compile Kimi-K3 kernels from an explicit sequence of pull-request heads rooted at B12X master, including staged MXFP8 inputs and direct caller-owned outputs for the DFlash auxiliary projection.",
+  "source": {
+    "repository": "https://github.com/voipmonitor/b12x.git",
+    "ref": "refs/heads/build/kimi-k3-r35-dflash-active-staged-pack-20260822",
+    "commit": "b8c7153c3e1ca13b1e0ef373d9a382a513ab892f",
+    "tree": "2d466e350e518193f9edd57809e050b3aa8b8dcb"
+  },
+  "upstream_base": {
+    "repository": "https://github.com/local-inference-lab/b12x.git",
+    "ref": "refs/heads/master",
+    "commit": "36bce2c1552ba2d47dc09f20a6f64fbfc8ec4ff8"
+  },
+  "pull_requests": [
+    {
+      "number": 227,
+      "head": "0eba6ae99e0d1fad6ec268d8c291f498ec1dd4d9",
+      "merge_commit": "80b12b87257b22b75d5de3299fa188df98dd18d6",
+      "title": "Honor inactive routes in native W4A16 microkernels"
+    },
+    {
+      "number": 238,
+      "head": "a347a473570798da42115d0ff5f2aeddf3357c61",
+      "merge_commit": "f25c8bdd23aa45f0ba68161931e3417c6f008b3e",
+      "title": "Bound W4A16 prefill route-reduction scratch"
+    },
+    {
+      "number": 239,
+      "head": "906d6127c6dc2b0a433c74606bda7a89cdb5c7a8",
+      "merge_commit": "301c2415f73075a851e4e061a56643a4f244c6f5",
+      "title": "Stabilize large W4A16 prefill route packing"
+    }
+  ],
+  "qualification_candidate_commits": [
+    {
+      "head": "f4db98a1363d1c1d109f9069aaff42af53825f5c",
+      "integration_commit": "6971029deaed17f97e623a4e8de879b5973f4ebe",
+      "title": "Support staged MXFP8 linear inputs"
+    },
+    {
+      "head": "aae6af3229ed224a475f71bf02521d16c024fbb2",
+      "integration_commit": "7848d136c866bf0748c30292446572853cb59819",
+      "title": "Support staged MXFP8 linear inputs and caller-owned outputs"
+    },
+    {
+      "head": "bebd334db301f200300e4a28393dc595588b662e",
+      "integration_commit": "b8c7153c3e1ca13b1e0ef373d9a382a513ab892f",
+      "title": "Record reproducible staged MXFP8 validation"
+    }
+  ],
+  "source_patches": []
+}
