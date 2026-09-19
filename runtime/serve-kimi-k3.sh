@@ -67,6 +67,7 @@ case "$mode" in
     fi
     width=$((proposals+1))
     kv_bytes=${KIMI_KV_BYTES:?MLA DFlash2 requires an explicit per-rank KV allocation}
+    export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-3}
     export VLLM_DSPARK_COMPACT_ROPE=1
     # Preserve the BF16 draft weights and its four sliding/one full MLA layers.
     spec_args=(--speculative-config "{\"method\":\"dflash\",\"model\":\"lightseekorg/kimi-k3-dflash2\",\"revision\":\"e77935fb4804e17eb55085bffd045eae1d779769\",\"num_speculative_tokens\":$proposals,\"attention_backend\":\"B12X_MLA\",\"kv_cache_dtype\":\"fp8\",\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"block\",\"draft_load_config\":{\"load_format\":\"auto\"}}")

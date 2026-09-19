@@ -26,6 +26,7 @@ for proposals in 3 4 7; do
       [[ $graphs == "[$width,$((2*width))]" ]]
       [[ ${spec_args[1]} == *"lightseekorg/kimi-k3-dflash2"* ]]
       [[ ${spec_args[1]} != *"quantization"* ]]
+      [[ $VLLM_K3_KV_GROUP_SIZE == 3 ]]
     ' -- "$recipe/runtime/serve-kimi-k3.sh"
 done
 if KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 \
