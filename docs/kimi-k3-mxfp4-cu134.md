@@ -14,7 +14,10 @@ FlashInfer can be reused without recompilation when its source and ABI match.
 The launcher selects the official `moonshotai/Kimi-K3` checkpoint at revision
 `2496450e92e425c886db095102a52a6682ca3970`. Routed experts retain MXFP4 W4A16;
 the configured KDA and vision projections are converted to MXFP8 at load time.
-InstantTensor uses AIO and a 512 MiB staging buffer. Vision weights load before
+InstantTensor uses AIO, a 512 MiB tensor ring, and I/O queue depth 16. The ring
+size alone does not bound the separate I/O staging allocation. Depth 16 leaves
+repack headroom after the speculative runner's buffers are constructed.
+Vision weights load before
 the routed experts. Target KV uses FP8 with native 32 GiB CPU offload. The
 default context limit is 950,000 tokens and scheduled prefill chunks contain
 4,096 tokens. This context limit is not a measured physical-cache receipt.
