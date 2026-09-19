@@ -34,10 +34,65 @@ def test_generated_files_match_the_profile_registry():
     assert (ROOT / "generated/parameters.md").read_text() == expected
 
 
-def test_profile_payload_does_not_bundle_other_models_source_overlays():
+def test_profile_payload_does_not_bundle_serving_source_overlays():
     payload = payload_hashes()
     assert "lil-serve" in payload and "install.sh" in payload
-    assert not any("kimi-k3" in name or "source-overlay" in name for name in payload)
+    assert "serve-kimi-k3.sh" in payload
+    assert not any("source-overlay" in name for name in payload)
+    assert not any(name.startswith(("vllm/", "b12x/")) for name in payload)
+
+
+@pytest.mark.parametrize(
+    "mode,width,kv",
+    [("none", 1, 910000000), ("dspark", 8, 1325000000), ("dflash", 8, 1325000000)],
+)
+@pytest.mark.parametrize("sequences", [1, 4, 12])
+def test_kimi_launcher_preserves_geometry_and_covers_verifier_batches(
+    mode, width, kv, sequences
+):
+    output = subprocess.check_output(
+        ["bash", str(ROOT / "serve-kimi-k3.sh")],
+        env={
+            "PATH": os.environ["PATH"],
+            "KIMI_PRINT_COMMAND": "1",
+            "KIMI_SPECULATOR": mode,
+            "KIMI_MAX_SEQS": str(sequences),
+        },
+        text=True,
+    )
+    args = shlex.split(output)
+
+    def value(flag):
+        return args[args.index(flag) + 1]
+
+    assert args[:2] == ["/opt/venv/bin/lil-runtime-bootstrap", "/opt/venv/bin/python"]
+    assert (
+        value("--tensor-parallel-size")
+        == value("--decode-context-parallel-size")
+        == "16"
+    )
+    assert (
+        value("--max-num-batched-tokens")
+        == value("--max-num-scheduled-tokens")
+        == "4096"
+    )
+    assert value("--kv-cache-memory-bytes") == str(kv)
+    assert value("--max-model-len") == "950000"
+    assert value("--load-format") == "instanttensor"
+    assert value("--kv-offloading-backend") == "native"
+    assert "--language-model-only" not in args and "--limit-mm-per-prompt" not in args
+    assert value("--reasoning-parser") == value("--tool-call-parser") == "kimi_k3"
+    assert json.loads(value("--compilation-config"))["cudagraph_capture_sizes"] == list(
+        range(width, (sequences + 1) * width, width)
+    )
+    if mode == "none":
+        assert "--speculative-config" not in args
+    else:
+        spec = json.loads(value("--speculative-config"))
+        assert spec["method"] == mode
+        assert len(spec["revision"]) == 40
+        assert spec["num_speculative_tokens"] == 7
+        assert spec["quantization_config"]["linear"] == "mxfp8"
 
 
 @pytest.mark.parametrize(

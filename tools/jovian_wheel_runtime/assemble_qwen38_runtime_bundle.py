@@ -395,7 +395,7 @@ def main() -> int:
     complete_manifest = {
         "schema": "local-inference-qwen38-cu134-runtime/v1",
         "status": "research-only",
-        "purpose": "Qwen3.8 Flash Next serving with vLLM on SM120 GPUs",
+        "purpose": "Source-locked vLLM serving on SM120 GPUs",
         "runtime": {"python": "3.12", "cuda": "13.4.1"},
         "components": component_records,
         "packages": packages,
