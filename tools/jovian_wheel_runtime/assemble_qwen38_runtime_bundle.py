@@ -254,6 +254,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--qwen-lock", required=True, type=Path)
+    parser.add_argument(
+        "--auxiliary-cache", type=Path,
+        help="Package source-matched LMCache cuMem helpers for container installation",
+    )
     foundation = parser.add_mutually_exclusive_group(required=True)
     foundation.add_argument("--foundation-bundle", type=Path)
     foundation.add_argument("--ngc-foundation-lock", type=Path)
@@ -404,6 +408,12 @@ def main() -> int:
             "files": b12x_files,
         },
     }
+    if args.auxiliary_cache is not None:
+        from prepare_runtime_auxiliary import prepare
+
+        complete_manifest["auxiliary"] = {
+            "lmcache_cumem": prepare(complete_manifest, output, args.auxiliary_cache)
+        }
     (output / "manifest.json").write_text(
         json.dumps(complete_manifest, indent=2, sort_keys=True) + "\n"
     )
