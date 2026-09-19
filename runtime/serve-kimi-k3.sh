@@ -1,10 +1,32 @@
 #!/usr/bin/env bash
-# Serve the official MXFP4 checkpoint on TP16/DCP16 through installed packages.
+# Serve Kimi-K3 MXFP4 or serialized QSRT-K2 through installed packages.
 set -euo pipefail
 unset NCCL_GRAPH_FILE PYTHONPATH
 
 readonly mode=${KIMI_SPECULATOR:-none}
 readonly sequences=${KIMI_MAX_SEQS:-1}
+readonly format=${KIMI_QUANT_FORMAT:-mxfp4}
+quant_args=()
+case "$format" in
+  mxfp4)
+    checkpoint=${KIMI_CHECKPOINT:-moonshotai/Kimi-K3}
+    revision=2496450e92e425c886db095102a52a6682ca3970
+    served_model=${KIMI_SERVED_MODEL:-Kimi-K3-MXFP4}
+    tp=${KIMI_TP:-16}
+    quant_args=(--quantization-config '{"linear":"mxfp8","ignore":["re:^(?!.*(?:self_attn\\.(?:q_proj|k_proj|v_proj|b_proj|f_a_proj|in_proj_qkvgfab)|vision_tower\\..*|mm_projector\\..*)$).*$"]}')
+    ;;
+  qsrt_k2)
+    checkpoint=${KIMI_CHECKPOINT:?QSRT-K2 requires a local checkpoint directory}
+    revision=3b98114115f1d41ce7963ba346c3fca19918b0bd
+    served_model=${KIMI_SERVED_MODEL:-Kimi-K3-QSRT-K2}
+    tp=${KIMI_TP:-10}
+    # QSRT stores dense MXFP8 weights and BF16 gates; online conversion changes them.
+    quant_args=(--quantization qsrt_k2)
+    : "${KIMI_KV_BYTES:?Set the QSRT-K2 per-rank KV allocation explicitly}"
+    ;;
+  *) echo 'KIMI_QUANT_FORMAT must be mxfp4 or qsrt_k2' >&2; exit 2 ;;
+esac
+readonly dcp=${KIMI_DCP:-$tp}
 if ! [[ "$sequences" =~ ^[1-9][0-9]*$ ]]; then
   echo 'KIMI_MAX_SEQS must be a positive integer' >&2
   exit 2
@@ -90,12 +112,11 @@ export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/cache/kimi-k3/vllm}
 
 command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python
   -m vllm.entrypoints.cli.main serve
-  "${KIMI_CHECKPOINT:-moonshotai/Kimi-K3}"
-  --revision 2496450e92e425c886db095102a52a6682ca3970
+  "$checkpoint" --revision "$revision"
   --host 0.0.0.0 --port "${KIMI_PORT:-8000}"
-  --served-model-name "${KIMI_SERVED_MODEL:-Kimi-K3-MXFP4}"
-  --trust-remote-code --tensor-parallel-size 16
-  --decode-context-parallel-size 16 --dcp-comm-backend a2a
+  --served-model-name "$served_model"
+  --trust-remote-code --tensor-parallel-size "$tp"
+  --decode-context-parallel-size "$dcp" --dcp-comm-backend a2a
   --dcp-kv-cache-interleave-size 1 --mamba-block-size 12288
   --load-format instanttensor
   --model-loader-extra-config '{"instanttensor_priority_weight_name_prefixes":["vision_tower","mm_projector"],"instanttensor_small_checkpoint_max_bytes":8589934592}'
@@ -110,7 +131,7 @@ command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python
   --mm-processor-kwargs '{"in_patch_limit":40960,"patch_limit_on_one_side":512}'
   --mm-encoder-tp-mode weights
   --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice
-  --quantization-config '{"linear":"mxfp8","ignore":["re:^(?!.*(?:self_attn\\.(?:q_proj|k_proj|v_proj|b_proj|f_a_proj|in_proj_qkvgfab)|vision_tower\\..*|mm_projector\\..*)$).*$"]}'
+  "${quant_args[@]}"
   --compilation-config "{\"mode\":0,\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"cudagraph_capture_sizes\":$graphs,\"pass_config\":{\"fuse_allreduce_rms\":true}}"
   "${spec_args[@]}" "$@")
 if [[ ${KIMI_PRINT_COMMAND:-0} == 1 ]]; then

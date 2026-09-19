@@ -95,6 +95,31 @@ def test_kimi_launcher_preserves_geometry_and_covers_verifier_batches(
         assert spec["quantization_config"]["linear"] == "mxfp8"
 
 
+@pytest.mark.parametrize("tp,dcp", [(8, 8), (10, 10), (12, 6), (16, 16)])
+def test_qsrt_launcher_preserves_serialized_formats_and_explicit_cache(tp, dcp):
+    output = subprocess.check_output(
+        ["bash", str(ROOT / "serve-kimi-k3.sh")],
+        env={
+            "PATH": os.environ["PATH"],
+            "KIMI_PRINT_COMMAND": "1",
+            "KIMI_QUANT_FORMAT": "qsrt_k2",
+            "KIMI_CHECKPOINT": "/weights/qsrt-k2",
+            "KIMI_TP": str(tp),
+            "KIMI_DCP": str(dcp),
+            "KIMI_KV_BYTES": "6442450944",
+        },
+        text=True,
+    )
+    args = shlex.split(output)
+    assert args[args.index("--tensor-parallel-size") + 1] == str(tp)
+    assert args[args.index("--decode-context-parallel-size") + 1] == str(dcp)
+    assert args[args.index("--kv-cache-memory-bytes") + 1] == "6442450944"
+    assert args[args.index("--quantization") + 1] == "qsrt_k2"
+    assert "--quantization-config" not in args
+    assert "--language-model-only" not in args
+    assert args[args.index("serve") + 1] == "/weights/qsrt-k2"
+
+
 @pytest.mark.parametrize(
     "filename,model,overrides",
     [
