@@ -79,6 +79,7 @@ export INSTANTTENSOR_MAX_FREE_MEM_USAGE=0.6
 export VLLM_DISABLED_KERNELS=B12xMxfp8LinearKernel,FlashInferCutedslMxfp8LinearKernel,FlashInferCutlassMxfp8LinearKernel
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/cache/kimi-k3/triton}
 export CUTE_DSL_CACHE_DIR=${CUTE_DSL_CACHE_DIR:-/cache/kimi-k3/cute}
+export B12X_COMPILE_CACHE_DIR=${B12X_COMPILE_CACHE_DIR:-/cache/kimi-k3/b12x-compile}
 export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/cache/kimi-k3/vllm}
 
 command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python

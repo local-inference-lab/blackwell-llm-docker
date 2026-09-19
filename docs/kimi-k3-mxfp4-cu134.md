@@ -58,3 +58,8 @@ Image input is enabled without an image-count cap. Per-image processing is
 limited to 40,960 patches and 512 patches along one side. Kimi-K3 reasoning
 and tool parsers are enabled. `KIMI_PRINT_COMMAND=1` prints the resolved command
 without loading weights; do not use it with secret CLI arguments.
+
+The `/cache/kimi-k3` volume retains Triton, CuTeDSL, and B12X compilation
+artifacts. B12X uses its `b12x-compile` subdirectory for compiled programs and
+source-validated preparation decisions. Keep this volume across container
+replacements to avoid recompiling unchanged kernels.
