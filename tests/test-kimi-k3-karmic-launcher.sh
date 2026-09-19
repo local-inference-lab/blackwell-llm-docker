@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check allocator overrides without starting the model or requiring CUDA.
+# Check allocator, grammar-backend, and graph policy without loading a model.
 set -euo pipefail
 readonly recipe=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 for mode in none dspark dflash dflash2; do
@@ -7,6 +7,7 @@ for mode in none dspark dflash dflash2; do
     KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 bash -c '
       source "$1" >/dev/null
       [[ $PYTORCH_CUDA_ALLOC_CONF == expandable_segments:True,large_segment_size_mb:12 ]]
+      [[ " ${command[*]} " == *" --structured-outputs-config.backend xgrammar "* ]]
       if [[ $KIMI_SPECULATOR == dflash ]]; then
         [[ $VLLM_DFLASH_AUX_MXFP8_STREAMING == 1 && $VLLM_DFLASH_COMPACT_ROPE == 1 ]]
         [[ $VLLM_DFLASH_SHARD_AUX_PROJECTION == 1 ]]

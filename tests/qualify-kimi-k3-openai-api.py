@@ -174,6 +174,35 @@ def main() -> None:
         seconds=tool_seconds,
     )
 
+    # Raw completions bypass the chat parser's request adjustments. Close the
+    # reasoning prefix and disable inserted spaces at special-token boundaries.
+    choice_request = {
+        "model": args.model,
+        "prompt": (
+            "Write HELLO exactly, with no explanation.\n"
+            "<|open|>think<|sep|>The response is HELLO."
+            "<|close|>think<|sep|><|open|>response<|sep|>"
+        ),
+        "structured_outputs": {"choice": ["HELLO"]},
+        "spaces_between_special_tokens": False,
+        "temperature": 0,
+        "max_tokens": 16,
+    }
+    choice_response, choice_seconds = _request_json(
+        f"{args.base_url}/v1/completions",
+        method="POST",
+        payload=choice_request,
+    )
+    assert choice_response["choices"][0]["text"] == "HELLO", choice_response
+    assert _finish_reason(choice_response) == "stop", choice_response
+    _write_receipt(
+        args.output_dir,
+        "structured-choice",
+        request=choice_request,
+        response=choice_response,
+        seconds=choice_seconds,
+    )
+
     image_bytes = args.image.read_bytes()
     image_mime = mimetypes.guess_type(args.image.name)[0] or "image/png"
     image_uri = (
@@ -244,6 +273,7 @@ def main() -> None:
         "models_response_seconds": models_seconds,
         "reasoning": "qualified",
         "tool_calls": "qualified",
+        "structured_choice": "qualified",
         "vision": "qualified",
     }
     (args.output_dir / "summary.json").write_text(

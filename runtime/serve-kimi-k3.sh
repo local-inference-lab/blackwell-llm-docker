@@ -144,6 +144,7 @@ command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python
   --mm-processor-kwargs '{"in_patch_limit":40960,"patch_limit_on_one_side":512}'
   --mm-encoder-tp-mode weights
   --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice
+  --structured-outputs-config.backend xgrammar
   "${quant_args[@]}"
   --compilation-config "{\"mode\":0,\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"cudagraph_capture_sizes\":$graphs,\"pass_config\":{\"fuse_allreduce_rms\":true}}"
   "${spec_args[@]}" "$@")
