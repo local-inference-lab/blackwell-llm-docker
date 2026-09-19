@@ -31,9 +31,24 @@ for proposals in 3 4 7; do
       [[ $VLLM_K3_KV_GROUP_SIZE == 3 ]]
     ' -- "$recipe/runtime/serve-kimi-k3.sh"
 done
+KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=1800000000 \
+  KIMI_DFLASH2_QUANTIZATION=mxfp8 VLLM_K3_KV_GROUP_SIZE=1 bash -c '
+    source "$1" >/dev/null
+    [[ $VLLM_K3_KV_GROUP_SIZE == 1 ]]
+    [[ $VLLM_B12X_MXFP8_ACTIVATION_MODE == a16 ]]
+    jq -e '\''.quantization == "mxfp8" and
+      .quantization_config.linear == "mxfp8" and
+      .quantization_config.ignore == ["re:.*fused_qkv_a_proj$"] and
+      .kv_cache_dtype == "fp8"'\'' <<< "${spec_args[1]}" >/dev/null
+  ' -- "$recipe/runtime/serve-kimi-k3.sh"
+if KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=1800000000 \
+  KIMI_DFLASH2_QUANTIZATION=nvfp4 bash "$recipe/runtime/serve-kimi-k3.sh" >/dev/null 2>&1; then
+  echo 'An unqualified DFlash2 weight format was accepted' >&2
+  exit 1
+fi
 if KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 \
   KIMI_DFLASH2_SPEC_TOKENS=8 bash "$recipe/runtime/serve-kimi-k3.sh" >/dev/null 2>&1; then
   echo 'An unsupported DFlash2 proposal count was accepted' >&2
   exit 1
 fi
-printf 'Kimi-K3 allocator, draft dtype, graph sizing, and input validation: 12 passed.\n'
+printf 'Kimi-K3 allocator, draft dtype, graph sizing, and input validation: 14 passed.\n'
