@@ -29,6 +29,7 @@ case "$mode" in
   dflash)
     width=8
     kv_bytes=${KIMI_KV_BYTES:-1325000000}
+    export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-6}
     # Replicated draft and sharded target pages require block-major pool views.
     export VLLM_KV_CACHE_LAYOUT=BLHNC
     spec_args=(--speculative-config '{"method":"dflash","model":"modal-labs/Kimi-K3-DFlash","revision":"c192d15a43407bf758b5ae0880d5c72052fef1de","num_speculative_tokens":7,"attention_backend":"TRITON_ATTN","draft_load_config":{"load_format":"auto"},"quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*qkv_proj$"]}}')
