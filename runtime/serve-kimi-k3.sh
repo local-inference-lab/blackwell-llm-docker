@@ -52,7 +52,8 @@ case "$mode" in
     width=8
     kv_bytes=${KIMI_KV_BYTES:-1180000000}
     export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-6}
-    export VLLM_DFLASH_AUX_MXFP8_STREAMING=1
+    export VLLM_DFLASH_AUX_MXFP8_STREAMING=${VLLM_DFLASH_AUX_MXFP8_STREAMING:-0}
+    export VLLM_DFLASH_AUX_BF16_STAGING=${VLLM_DFLASH_AUX_BF16_STAGING:-1}
     export VLLM_DFLASH_COMPACT_ROPE=1
     export VLLM_DFLASH_SHARD_AUX_PROJECTION=1
     # Replicated draft and sharded target pages require block-major pool views.

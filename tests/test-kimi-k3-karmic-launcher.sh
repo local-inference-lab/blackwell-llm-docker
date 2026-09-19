@@ -9,7 +9,8 @@ for mode in none dspark dflash dflash2; do
       [[ $PYTORCH_CUDA_ALLOC_CONF == expandable_segments:True,large_segment_size_mb:12 ]]
       [[ " ${command[*]} " == *" --structured-outputs-config.backend xgrammar "* ]]
       if [[ $KIMI_SPECULATOR == dflash ]]; then
-        [[ $VLLM_DFLASH_AUX_MXFP8_STREAMING == 1 && $VLLM_DFLASH_COMPACT_ROPE == 1 ]]
+        [[ $VLLM_DFLASH_AUX_MXFP8_STREAMING == 0 && $VLLM_DFLASH_COMPACT_ROPE == 1 ]]
+        [[ $VLLM_DFLASH_AUX_BF16_STAGING == 1 ]]
         [[ $VLLM_DFLASH_SHARD_AUX_PROJECTION == 1 ]]
       fi
     ' -- "$recipe/runtime/serve-kimi-k3.sh"
