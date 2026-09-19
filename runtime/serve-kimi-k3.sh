@@ -17,7 +17,7 @@ case "$mode" in
     ;;
   dspark)
     width=8
-    kv_bytes=${KIMI_KV_BYTES:-1325000000}
+    kv_bytes=${KIMI_KV_BYTES:-1270000000}
     export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-6}
     export VLLM_DSPARK_DRAFT_KV_WINDOW=${VLLM_DSPARK_DRAFT_KV_WINDOW:-32768}
     export VLLM_DSPARK_COMPACT_ROPE=1
