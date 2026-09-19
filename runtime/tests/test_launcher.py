@@ -44,7 +44,7 @@ def test_profile_payload_does_not_bundle_serving_source_overlays():
 
 @pytest.mark.parametrize(
     "mode,width,kv",
-    [("none", 1, 910000000), ("dspark", 8, 1325000000), ("dflash", 8, 1325000000)],
+    [("none", 1, 910000000), ("dspark", 8, 1270000000), ("dflash", 8, 1180000000)],
 )
 @pytest.mark.parametrize("sequences", [1, 4, 12])
 def test_kimi_launcher_preserves_geometry_and_covers_verifier_batches(

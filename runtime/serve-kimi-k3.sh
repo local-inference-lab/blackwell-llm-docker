@@ -28,8 +28,10 @@ case "$mode" in
     ;;
   dflash)
     width=8
-    kv_bytes=${KIMI_KV_BYTES:-1325000000}
+    kv_bytes=${KIMI_KV_BYTES:-1180000000}
     export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-6}
+    export VLLM_DFLASH_AUX_MXFP8_STREAMING=1
+    export VLLM_DFLASH_COMPACT_ROPE=1
     # Replicated draft and sharded target pages require block-major pool views.
     export VLLM_KV_CACHE_LAYOUT=BLHNC
     spec_args=(--speculative-config '{"method":"dflash","model":"modal-labs/Kimi-K3-DFlash","revision":"c192d15a43407bf758b5ae0880d5c72052fef1de","num_speculative_tokens":7,"attention_backend":"TRITON_ATTN","draft_load_config":{"load_format":"auto"},"quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*qkv_proj$"]}}')
@@ -45,7 +47,7 @@ graphs+=']'
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,large_segment_size_mb:12}
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_USE_BREAKABLE_CUDAGRAPH=1
