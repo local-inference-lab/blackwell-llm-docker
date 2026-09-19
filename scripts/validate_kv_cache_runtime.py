@@ -103,13 +103,14 @@ def _completion(
     model: str,
     prompt: str,
     timeout: float,
+    max_tokens: int = 1,
 ) -> dict[str, Any]:
     result = _json_request(
         f"{base_url.rstrip('/')}/v1/chat/completions",
         {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1,
+            "max_tokens": max_tokens,
             "temperature": 0,
             "stream": False,
         },
@@ -125,9 +126,22 @@ def _completion(
         "id": body.get("id"),
         "finish_reason": choice.get("finish_reason"),
         "content": message.get("content"),
+        "reasoning": message.get("reasoning") or message.get("reasoning_content"),
+        "completion_tokens": usage.get("completion_tokens"),
         "prompt_tokens": usage.get("prompt_tokens"),
         "cached_tokens": prompt_details.get("cached_tokens"),
     }
+
+
+def _native_restored_bytes(before: dict, after: dict) -> float:
+    """Count completed native CPU-to-GPU bytes, excluding metric timestamps."""
+    return sum(
+        value - before.get(url, {}).get(name, 0)
+        for url, metrics in after.items()
+        for name, value in metrics.items()
+        if name.startswith("vllm:kv_offload_total_bytes_total{")
+        and 'transfer_type="CPU_to_GPU"' in name
+    )
 
 
 def _prompt(label: str, characters: int) -> str:
@@ -166,13 +180,18 @@ def main() -> int:
         ),
     )
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--max-tokens", type=int, default=1)
+    parser.add_argument("--require-native-restore", action="store_true")
+    parser.add_argument("--require-identical-output", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.max_tokens < 1:
+        parser.error("--max-tokens must be positive")
+    if args.require_native_restore and not args.metrics_url:
+        parser.error("--require-native-restore requires --metrics-url")
 
     metric_urls = [
-        url
-        for url in (args.metrics_url, args.secondary_metrics_url)
-        if url is not None
+        url for url in (args.metrics_url, args.secondary_metrics_url) if url is not None
     ]
 
     def metrics() -> dict[str, dict[str, float]]:
@@ -186,8 +205,11 @@ def main() -> int:
         "prompt_characters": len(seed_prompt),
         "churn_requests": args.churn_requests,
         "settle_seconds": args.settle_seconds,
+        "max_tokens": args.max_tokens,
         "metrics_before": metrics(),
-        "seed": _completion(args.base_url, args.model, seed_prompt, args.timeout),
+        "seed": _completion(
+            args.base_url, args.model, seed_prompt, args.timeout, args.max_tokens
+        ),
         "churn": [],
     }
     for index in range(args.churn_requests):
@@ -197,6 +219,7 @@ def main() -> int:
                 args.model,
                 _prompt(f"churn-{index}", args.prompt_characters),
                 args.timeout,
+                args.max_tokens,
             )
         )
     if args.settle_seconds > 0:
@@ -211,15 +234,26 @@ def main() -> int:
             args.base_url, args.timeout
         )
     report["replay"] = _completion(
-        args.base_url, args.model, seed_prompt, args.timeout
+        args.base_url, args.model, seed_prompt, args.timeout, args.max_tokens
     )
     if args.settle_seconds > 0:
         time.sleep(args.settle_seconds)
     report["metrics_after_replay"] = metrics()
+    report["native_restored_bytes"] = _native_restored_bytes(
+        report["metrics_after_churn"], report["metrics_after_replay"]
+    )
+    output_fields = ("content", "reasoning", "completion_tokens", "finish_reason")
+    report["identical_output"] = all(
+        report["seed"].get(key) == report["replay"].get(key) for key in output_fields
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps(report, indent=2, sort_keys=True))
+    if args.require_native_restore and report["native_restored_bytes"] <= 0:
+        raise RuntimeError("replay completed without a native CPU-to-GPU cache restore")
+    if args.require_identical_output and not report["identical_output"]:
+        raise RuntimeError("cold and restored requests generated different output")
     return 0
 
 

@@ -37,6 +37,40 @@ def test_prompt_identity_is_stable_and_labels_are_distinct() -> None:
     assert seed.endswith("Return the integer 17.")
 
 
+def test_native_restore_counter_excludes_stores_and_timestamps() -> None:
+    load = 'vllm:kv_offload_total_bytes_total{transfer_type="CPU_to_GPU"}'
+    store = 'vllm:kv_offload_total_bytes_total{transfer_type="GPU_to_CPU"}'
+    timestamp = 'vllm:kv_offload_total_bytes_created{transfer_type="CPU_to_GPU"}'
+    before = {"endpoint": {load: 1024, store: 2000, timestamp: 1000}}
+    after = {"endpoint": {load: 8192, store: 4000, timestamp: 1000}}
+    assert MODULE._native_restored_bytes(before, after) == 7168
+    assert MODULE._native_restored_bytes(after, after) == 0
+
+
+def test_completion_preserves_requested_decode_length_and_reasoning(
+    monkeypatch,
+) -> None:
+    def request(url, payload, timeout):
+        assert payload["max_tokens"] == 64
+        return {
+            "elapsed_seconds": 1,
+            "body": {
+                "choices": [
+                    {
+                        "message": {"reasoning_content": "reason", "content": "17"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"completion_tokens": 12},
+            },
+        }
+
+    monkeypatch.setattr(MODULE, "_json_request", request)
+    result = MODULE._completion("http://localhost:8000", "model", "prompt", 60, 64)
+    assert result["reasoning"] == "reason"
+    assert result["completion_tokens"] == 12
+
+
 def test_local_prefix_reset_retries_without_resetting_external_storage(
     monkeypatch,
 ) -> None:
@@ -78,8 +112,7 @@ def test_local_prefix_reset_explains_hidden_admin_endpoint(monkeypatch) -> None:
         MODULE._reset_local_prefix_cache("http://127.0.0.1:8000", timeout=10)
     except RuntimeError as error:
         assert str(error) == (
-            "local prefix reset requires VLLM_SERVER_DEV_MODE=1 "
-            "on the model server"
+            "local prefix reset requires VLLM_SERVER_DEV_MODE=1 on the model server"
         )
     else:
         raise AssertionError("hidden reset endpoint unexpectedly succeeded")
@@ -97,9 +130,7 @@ def test_external_l1_clear_preserves_lower_tiers(monkeypatch) -> None:
 
     monkeypatch.setattr(MODULE, "_json_request", fake_json_request)
 
-    result = MODULE._clear_external_l1(
-        "http://127.0.0.1:8089/cache/clear", timeout=20
-    )
+    result = MODULE._clear_external_l1("http://127.0.0.1:8089/cache/clear", timeout=20)
 
     assert calls == [
         (
