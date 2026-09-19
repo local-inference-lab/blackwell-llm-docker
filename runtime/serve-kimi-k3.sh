@@ -59,7 +59,19 @@ case "$mode" in
     export VLLM_KV_CACHE_LAYOUT=BLHNC
     spec_args=(--speculative-config '{"method":"dflash","model":"modal-labs/Kimi-K3-DFlash","revision":"c192d15a43407bf758b5ae0880d5c72052fef1de","num_speculative_tokens":7,"attention_backend":"TRITON_ATTN","draft_load_config":{"load_format":"auto"},"quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*qkv_proj$"]}}')
     ;;
-  *) echo 'KIMI_SPECULATOR must be none, dspark or dflash' >&2; exit 2 ;;
+  dflash2)
+    proposals=${KIMI_DFLASH2_SPEC_TOKENS:-7}
+    if ! [[ "$proposals" =~ ^[1-7]$ ]]; then
+      echo 'KIMI_DFLASH2_SPEC_TOKENS must be an integer from 1 through 7' >&2
+      exit 2
+    fi
+    width=$((proposals+1))
+    kv_bytes=${KIMI_KV_BYTES:?MLA DFlash2 requires an explicit per-rank KV allocation}
+    export VLLM_DSPARK_COMPACT_ROPE=1
+    # Preserve the BF16 draft weights and its four sliding/one full MLA layers.
+    spec_args=(--speculative-config "{\"method\":\"dflash\",\"model\":\"lightseekorg/kimi-k3-dflash2\",\"revision\":\"e77935fb4804e17eb55085bffd045eae1d779769\",\"num_speculative_tokens\":$proposals,\"attention_backend\":\"B12X_MLA\",\"kv_cache_dtype\":\"fp8\",\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"block\",\"draft_load_config\":{\"load_format\":\"auto\"}}")
+    ;;
+  *) echo 'KIMI_SPECULATOR must be none, dspark, dflash or dflash2' >&2; exit 2 ;;
 esac
 graphs='['
 for ((i=1; i<=sequences; i++)); do
