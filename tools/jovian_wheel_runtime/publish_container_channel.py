@@ -15,6 +15,7 @@ from urllib.parse import quote
 from build_runtime_image import runtime_smoke_command
 from container_channel import api, digest, download, run
 from prepare_runtime_auxiliary import prepare as prepare_auxiliary
+from release_changelog import collect_release_changelog, render_release_notes
 
 
 def execute(args: list[str], **kwargs: object) -> None:
@@ -182,6 +183,12 @@ def main() -> None:
     if run(["git", "-C", str(root), "status", "--porcelain"]):
         raise ValueError("container build requires a clean recipe checkout")
     args.output.mkdir(parents=True, exist_ok=False)
+    publication_repository = os.environ.get(
+        "GITHUB_REPOSITORY", "local-inference-lab/blackwell-llm-docker"
+    )
+    changelog = collect_release_changelog(assembly, publication_repository)
+    changelog_path = args.output / "release-changelog.json"
+    changelog_path.write_text(json.dumps(changelog, sort_keys=True, indent=2) + "\n")
     bundles = args.output / "components"
     download(assembly, bundles)
     runtime = args.output / "runtime"
@@ -201,6 +208,7 @@ def main() -> None:
     manifest_path = runtime / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     manifest["assembly"] = assembly
+    manifest["release_changelog"] = changelog
     auxiliary_cache = (
         Path(
             os.environ.get(
@@ -344,6 +352,7 @@ def main() -> None:
         "qualification_scope": "Native GPU smoke and LMCache checkpoint/filesystem contract tests; "
         "model-serving performance and full GLM cache E2E remain unqualified.",
         "runtime_manifest_sha256": digest(manifest_path),
+        "release_changelog_sha256": digest(changelog_path),
         "layers": 68,
         "cache_contract_tests": cache_results,
     }
@@ -355,7 +364,7 @@ def main() -> None:
             f"Build and native checks complete: {image}; registry publication was not requested"
         )
         return
-    repository = os.environ["GITHUB_REPOSITORY"]
+    repository = publication_repository
     token = os.environ["GH_TOKEN"]
     actor = os.environ["GITHUB_ACTOR"]
     # Isolate registry credentials without replacing the shared Buildx configuration.
@@ -395,6 +404,10 @@ def main() -> None:
         "",
         receipt["qualification_scope"],
         "",
+        render_release_notes(changelog).rstrip(),
+        "",
+        "## Reproducible component inputs",
+        "",
         "| Component | Source commit | Wheel release |",
         "|---|---|---|",
     ]
@@ -409,7 +422,12 @@ def main() -> None:
         assembly,
         commit,
         notes,
-        [receipt_path, manifest_path, stage_assembly_lock(args.assembly, args.output)],
+        [
+            receipt_path,
+            manifest_path,
+            changelog_path,
+            stage_assembly_lock(args.assembly, args.output),
+        ],
     )
 
 

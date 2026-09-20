@@ -5,21 +5,24 @@
   "channels": {
     "main": {
       "image_tag": "jovian-judgement",
-      "branches": {}
+      "branches": {},
+      "changelog": {"required_components": []}
     },
     "beta": {
       "image_tag": "jovian-judgement-beta",
       "branches": {
         "vllm": "integration/beta",
         "b12x": "integration/beta"
-      }
+      },
+      "changelog": {"required_components": ["vllm", "b12x"]}
     },
     "karmic-kraken": {
       "channel": "karmic-kraken",
       "image_tag": "karmic-kraken",
       "branches": {
         "vllm": "dev/karmic-kraken"
-      }
+      },
+      "changelog": {"required_components": []}
     },
     "karmic-kraken-beta": {
       "channel": "karmic-kraken",
@@ -27,7 +30,8 @@
       "branches": {
         "vllm": "integration/karmic-kraken-beta",
         "b12x": "integration/karmic-kraken-beta"
-      }
+      },
+      "changelog": {"required_components": ["vllm", "b12x"]}
     }
   },
   "components": {

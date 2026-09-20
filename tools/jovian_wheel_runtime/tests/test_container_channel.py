@@ -176,7 +176,18 @@ def test_lmcache_requires_community_receipt(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "fault", [None, "missing", "uploading", "draft", "checksum", "identity"]
+    "fault",
+    [
+        None,
+        "missing",
+        "uploading",
+        "draft",
+        "checksum",
+        "identity",
+        "changelog_checksum",
+        "changelog_identity",
+        "manifest_changelog",
+    ],
 )
 @pytest.mark.parametrize(
     "lock_name",
@@ -194,20 +205,35 @@ def test_published_assembly_requires_complete_matching_receipt(
         "assembly_sha256": "a" * 64,
         "release_channel": "beta",
     }
-    manifest = b'{"packages":[]}'
+    changelog_data = {"assembly_sha256": assembly["assembly_sha256"], "changes": []}
+    manifest_data = {"packages": [], "release_changelog": changelog_data}
+    manifest = json.dumps(manifest_data).encode()
+    changelog = json.dumps(changelog_data).encode()
     receipt = {
         **assembly,
         "status": "qualified",
         "runtime_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        "release_changelog_sha256": hashlib.sha256(changelog).hexdigest(),
         "digest": "ghcr.io/local-inference-lab/vllm@sha256:" + "b" * 64,
     }
     if fault == "checksum":
         receipt["runtime_manifest_sha256"] = "c" * 64
+    if fault == "changelog_checksum":
+        receipt["release_changelog_sha256"] = "c" * 64
     if fault == "identity":
         receipt["assembly_sha256"] = "c" * 64
+    if fault == "changelog_identity":
+        changelog_data["assembly_sha256"] = "c" * 64
+        changelog = json.dumps(changelog_data).encode()
+        receipt["release_changelog_sha256"] = hashlib.sha256(changelog).hexdigest()
+    if fault == "manifest_changelog":
+        manifest_data["release_changelog"] = {**changelog_data, "changes": ["wrong"]}
+        manifest = json.dumps(manifest_data).encode()
+        receipt["runtime_manifest_sha256"] = hashlib.sha256(manifest).hexdigest()
     payloads = {
         "container-release.json": json.dumps(receipt).encode(),
         "manifest.json": manifest,
+        "release-changelog.json": changelog,
         lock_name: json.dumps(assembly).encode(),
     }
     assets = [

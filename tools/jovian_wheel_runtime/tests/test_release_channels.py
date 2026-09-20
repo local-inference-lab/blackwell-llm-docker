@@ -57,7 +57,16 @@ def test_karmic_channels_share_dependencies_without_moving_jovian_branches():
 
 
 @pytest.mark.parametrize(
-    "fault", ["unknown", "duplicate_tag", "unsafe_tag", "unknown_role", "unsafe_family"]
+    "fault",
+    [
+        "unknown",
+        "duplicate_tag",
+        "unsafe_tag",
+        "unknown_role",
+        "unsafe_family",
+        "unknown_changelog_component",
+        "unknown_changelog_policy",
+    ],
 )
 def test_invalid_channel_configuration_fails_closed(fault):
     config = json.loads(CONFIG.read_text())
@@ -71,6 +80,10 @@ def test_invalid_channel_configuration_fails_closed(fault):
         config["channels"]["beta"]["branches"]["untrusted"] = "main"
     elif fault == "unsafe_family":
         config["channels"]["beta"]["channel"] = "../untrusted"
+    elif fault == "unknown_changelog_component":
+        config["channels"]["beta"]["changelog"]["required_components"] = ["untrusted"]
+    elif fault == "unknown_changelog_policy":
+        config["channels"]["beta"]["changelog"]["untrusted"] = True
     with pytest.raises(ValueError):
         channel.channel_config(config, "missing" if fault == "unknown" else "beta")
 

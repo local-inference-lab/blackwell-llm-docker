@@ -200,7 +200,12 @@ def completed_publication(repository: str, assembly: dict) -> bool:
         # Releases produced by channel-matrix jobs used a channel-specific
         # basename. Accept only the selected channel, with the same checks.
         lock_name = f"community-assembly-{assembly.get('release_channel', 'main')}.json"
-    required = {"container-release.json", "manifest.json", lock_name}
+    required = {
+        "container-release.json",
+        "manifest.json",
+        "release-changelog.json",
+        lock_name,
+    }
     if any(
         name not in assets
         or assets[name].get("state") != "uploaded"
@@ -210,6 +215,9 @@ def completed_publication(repository: str, assembly: dict) -> bool:
         return False
     receipt = json.loads(asset_bytes(repository, assets["container-release.json"]))
     manifest = asset_bytes(repository, assets["manifest.json"])
+    changelog = asset_bytes(repository, assets["release-changelog.json"])
+    manifest_data = json.loads(manifest)
+    changelog_data = json.loads(changelog)
     lock = json.loads(asset_bytes(repository, assets[lock_name]))
     return (
         receipt.get("status") == "qualified"
@@ -217,6 +225,10 @@ def completed_publication(repository: str, assembly: dict) -> bool:
         and lock.get("assembly_sha256") == assembly["assembly_sha256"]
         and receipt.get("runtime_manifest_sha256")
         == hashlib.sha256(manifest).hexdigest()
+        and receipt.get("release_changelog_sha256")
+        == hashlib.sha256(changelog).hexdigest()
+        and changelog_data.get("assembly_sha256") == assembly["assembly_sha256"]
+        and manifest_data.get("release_changelog") == changelog_data
         and bool(
             re.fullmatch(
                 r"ghcr.io/local-inference-lab/vllm@sha256:[0-9a-f]{64}",
@@ -244,6 +256,16 @@ def channel_config(config: dict, name: str) -> dict:
             raise ValueError("invalid release family")
         if set(entry["branches"]) - set(config["components"]):
             raise ValueError("branch override names an unknown component")
+        changelog = entry.get("changelog", {})
+        if set(changelog) - {"required_components"}:
+            raise ValueError("release channel contains an unknown changelog policy")
+        required = changelog.get("required_components", [])
+        if (
+            not isinstance(required, list)
+            or len(required) != len(set(required))
+            or set(required) - set(config["components"])
+        ):
+            raise ValueError("invalid required changelog component list")
         tags.append(entry["image_tag"])
     if len(tags) != len(set(tags)):
         raise ValueError("release channels must have distinct image tags")
@@ -252,6 +274,7 @@ def channel_config(config: dict, name: str) -> dict:
     selected["channel"] = entry.get("channel", selected["channel"])
     selected["release_channel"] = name
     selected["image_tag"] = entry["image_tag"]
+    selected["changelog"] = entry.get("changelog", {})
     for role, branch in entry["branches"].items():
         if not isinstance(branch, str) or not branch or branch.startswith("-"):
             raise ValueError("invalid component branch")
@@ -291,6 +314,7 @@ def resolve(config_path: Path, output: Path, name: str = "main") -> dict:
         "recipe_commit": commit,
         "assembly_sha256": identity,
         "components": components,
+        "changelog": config.get("changelog", {}),
         "image": f"{config['image_repository']}:{config['image_tag']}-{date}-{identity[:16]}",
         "alias": f"{config['image_repository']}:{config['image_tag']}",
         "release_tag": f"{config['image_tag']}-{identity}",
