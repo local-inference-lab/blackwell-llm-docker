@@ -42,6 +42,7 @@ defaults:
   override-generation-config: {temperature: 1.0, top_p: 0.95}
 environment:
   OMP_NUM_THREADS: "2"
+  INSTANTTENSOR_BACKEND: URING,AIO
   VLLM_B12X_MOE_FP4_FORCE_A16: "0"
   VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
