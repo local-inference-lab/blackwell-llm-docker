@@ -323,8 +323,9 @@ def test_ds4_keeps_native_dense_selection_and_accepts_explicit_deepgemm():
     assert "linear-backend" not in default.values
     assert default.environment["INSTANTTENSOR_BACKEND"] == "URING,AIO"
     assert (
-        resolve("ds4-flash", env={"INSTANTTENSOR_BACKEND": "BUFFERED"})
-        .environment["INSTANTTENSOR_BACKEND"]
+        resolve("ds4-flash", env={"INSTANTTENSOR_BACKEND": "BUFFERED"}).environment[
+            "INSTANTTENSOR_BACKEND"
+        ]
         == "BUFFERED"
     )
     explicit = resolve("ds4-flash", env={}, argv=["--linear-backend", "deep_gemm"])
