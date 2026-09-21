@@ -7,6 +7,7 @@ for mode in none dspark dflash dflash2; do
     KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 bash -c '
       source "$1" >/dev/null
       [[ $PYTORCH_CUDA_ALLOC_CONF == expandable_segments:True,large_segment_size_mb:12 ]]
+      [[ $VLLM_KIMI_SHARD_AUXILIARY_PROJECTIONS == 1 ]]
       [[ " ${command[*]} " == *" --structured-outputs-config.backend xgrammar "* ]]
       if [[ $KIMI_SPECULATOR == dflash ]]; then
         [[ $VLLM_DFLASH_AUX_MXFP8_STREAMING == 0 && $VLLM_DFLASH_COMPACT_ROPE == 1 ]]
@@ -20,6 +21,20 @@ for mode in none dspark dflash dflash2; do
       [[ $PYTORCH_CUDA_ALLOC_CONF == expandable_segments:True,large_segment_size_mb:16 ]]
     ' -- "$recipe/runtime/serve-kimi-k3.sh"
 done
+for sharding in 0 1; do
+  KIMI_SPECULATOR=none KIMI_PRINT_COMMAND=1 \
+    VLLM_KIMI_SHARD_AUXILIARY_PROJECTIONS="$sharding" bash -c '
+      expected=$VLLM_KIMI_SHARD_AUXILIARY_PROJECTIONS
+      source "$1" >/dev/null
+      [[ $VLLM_KIMI_SHARD_AUXILIARY_PROJECTIONS == "$expected" ]]
+    ' -- "$recipe/runtime/serve-kimi-k3.sh"
+done
+if KIMI_SPECULATOR=none KIMI_PRINT_COMMAND=1 \
+  VLLM_KIMI_SHARD_AUXILIARY_PROJECTIONS=2 \
+  bash "$recipe/runtime/serve-kimi-k3.sh" >/dev/null 2>&1; then
+  echo 'An invalid auxiliary projection sharding value was accepted' >&2
+  exit 1
+fi
 for proposals in 3 4 7; do
   KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 \
     KIMI_MAX_SEQS=2 KIMI_DFLASH2_SPEC_TOKENS="$proposals" bash -c '
@@ -51,4 +66,4 @@ if KIMI_SPECULATOR=dflash2 KIMI_PRINT_COMMAND=1 KIMI_KV_BYTES=3221225472 \
   echo 'An unsupported DFlash2 proposal count was accepted' >&2
   exit 1
 fi
-printf 'Kimi-K3 allocator, draft dtype, graph sizing, and input validation: 14 passed.\n'
+printf 'Kimi-K3 allocator, projection sharding, draft dtype, graph sizing, and input validation: passed.\n'
