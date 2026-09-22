@@ -32,6 +32,7 @@ if ! [[ "$sequences" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 spec_args=()
+draft_graph_width=0
 case "$mode" in
   none)
     width=1
@@ -47,6 +48,19 @@ case "$mode" in
     export VLLM_DSPARK_REPLICATE_MARKOV_W1=1
     export VLLM_KIMI_K3_B12X_DSPARK_ARGMAX=1
     spec_args=(--speculative-config '{"method":"dspark","model":"Inferact/Kimi-K3-DSpark","revision":"cf6b8244620e7ea4b0651d214f28e89eac75bed6","num_speculative_tokens":7,"attention_backend":"B12X_MLA","kv_cache_dtype":"fp8","draft_sample_method":"greedy","rejection_sample_method":"block","quantization":"mxfp8","quantization_config":{"linear":"mxfp8","ignore":["re:.*fused_qkv_a_proj$"]}}')
+    ;;
+  dspark-redhat)
+    width=6
+    draft_graph_width=5
+    kv_bytes=${KIMI_KV_BYTES:-0}
+    export VLLM_K3_KV_GROUP_SIZE=${VLLM_K3_KV_GROUP_SIZE:-3}
+    export VLLM_KV_CACHE_LAYOUT=BLHNC
+    export VLLM_DFLASH_SHARD_AUX_PROJECTION=1
+    export VLLM_DFLASH_AUX_BF16_STAGING=1
+    export VLLM_DFLASH_AUX_MXFP8_STREAMING=0
+    export VLLM_DFLASH_COMPACT_ROPE=1
+    draft=${KIMI_REDHAT_DSPARK_CHECKPOINT:-RedHatAI/Kimi-K3-speculator.dspark}
+    spec_args=(--speculative-config "{\"method\":\"dspark\",\"model\":\"$draft\",\"revision\":\"38a88101e0d46bb22134b9da340f381b954d40d4\",\"num_speculative_tokens\":5,\"attention_backend\":\"TRITON_ATTN\",\"kv_cache_dtype\":\"auto\",\"draft_sample_method\":\"greedy\",\"rejection_sample_method\":\"block\",\"draft_load_config\":{\"load_format\":\"auto\"},\"quantization\":\"mxfp8\",\"quantization_config\":{\"linear\":\"mxfp8\",\"ignore\":[\"re:.*qkv_proj$\",\"re:.*markov_head.*\"]}}")
     ;;
   dflash)
     width=8
@@ -82,14 +96,37 @@ case "$mode" in
     # Preserve the checkpoint's four sliding-attention and one full-attention layers.
     spec_args=(--speculative-config "{\"method\":\"dflash\",\"model\":\"lightseekorg/kimi-k3-dflash2\",\"revision\":\"e77935fb4804e17eb55085bffd045eae1d779769\",\"num_speculative_tokens\":$proposals,\"attention_backend\":\"B12X_MLA\",\"kv_cache_dtype\":\"fp8\",\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"block\",\"draft_load_config\":{\"load_format\":\"auto\"}$draft_quant_fields}")
     ;;
-  *) echo 'KIMI_SPECULATOR must be none, dspark, dflash or dflash2' >&2; exit 2 ;;
+  *) echo 'KIMI_SPECULATOR must be none, dspark, dspark-redhat, dflash or dflash2' >&2; exit 2 ;;
 esac
-graphs='['
+graph_sizes=()
 for ((i=1; i<=sequences; i++)); do
-  if ((i>1)); then graphs+=','; fi
-  graphs+=$((i*width))
+  graph_sizes+=("$((i*width))")
+  if ((draft_graph_width)); then graph_sizes+=("$((i*draft_graph_width))"); fi
+done
+mapfile -t graph_sizes < <(printf '%s\n' "${graph_sizes[@]}" | sort -nu)
+graphs='['
+for ((i=0; i<${#graph_sizes[@]}; i++)); do
+  if ((i>0)); then graphs+=','; fi
+  graphs+=${graph_sizes[i]}
 done
 graphs+=']'
+
+# This profile preserves A16 expert activations and the draft's BF16 inputs.
+# Cache hints and stream overlap do not modify weights or reduction order.
+profile_args=()
+if [[ $format == qsrt_k2 && $mode == dspark-redhat && $tp == 9 && $dcp == 9 ]]; then
+  export VLLM_KIMI_ALIGNED_DECODE_PROJECTIONS=1
+  export VLLM_MLA_CHUNKED_PREFILL_WORKSPACE_SIZE=${VLLM_MLA_CHUNKED_PREFILL_WORKSPACE_SIZE:-65536}
+  export VLLM_MLA_PREFILL_DCP_OVERLAP=1
+  export VLLM_MLA_PREFILL_DCP_FP8_TRANSPORT=1
+  export VLLM_KIMI_L2_PREFETCH=${VLLM_KIMI_L2_PREFETCH:-1}
+  export VLLM_DISABLE_SHARED_EXPERTS_STREAM=${VLLM_DISABLE_SHARED_EXPERTS_STREAM:-0}
+  export VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD=8
+  export B12X_DYNAMIC_DETERMINISTIC_OUTPUT=1
+  profile_args=(--gpu-memory-utilization "${KIMI_GPU_MEMORY_UTILIZATION:-0.970}"
+    --attention-config '{"mla_prefill_backend":"B12X"}'
+    --mm-encoder-tp-mode data)
+fi
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
@@ -161,7 +198,7 @@ command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python
   --structured-outputs-config.backend xgrammar
   "${quant_args[@]}"
   --compilation-config "{\"mode\":0,\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"cudagraph_capture_sizes\":$graphs,\"pass_config\":{\"fuse_allreduce_rms\":true}}"
-  "${spec_args[@]}" "$@")
+  "${spec_args[@]}" "${profile_args[@]}" "$@")
 if [[ ${KIMI_PRINT_COMMAND:-0} == 1 ]]; then
   printf '%q ' "${command[@]}"
   printf '\n'
