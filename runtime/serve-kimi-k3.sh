@@ -114,6 +114,7 @@ graphs+=']'
 # This profile preserves A16 expert activations and the draft's BF16 inputs.
 # Cache hints and stream overlap do not modify weights or reduction order.
 profile_args=()
+mm_encoder_mode=${KIMI_MM_ENCODER_TP_MODE:-weights}
 if [[ $format == qsrt_k2 && $mode == dspark-redhat && $tp == 9 && $dcp == 9 ]]; then
   export VLLM_KIMI_ALIGNED_DECODE_PROJECTIONS=1
   export VLLM_MLA_CHUNKED_PREFILL_WORKSPACE_SIZE=${VLLM_MLA_CHUNKED_PREFILL_WORKSPACE_SIZE:-65536}
@@ -123,9 +124,9 @@ if [[ $format == qsrt_k2 && $mode == dspark-redhat && $tp == 9 && $dcp == 9 ]]; 
   export VLLM_DISABLE_SHARED_EXPERTS_STREAM=${VLLM_DISABLE_SHARED_EXPERTS_STREAM:-0}
   export VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD=8
   export B12X_DYNAMIC_DETERMINISTIC_OUTPUT=1
+  mm_encoder_mode=${KIMI_MM_ENCODER_TP_MODE:-data}
   profile_args=(--gpu-memory-utilization "${KIMI_GPU_MEMORY_UTILIZATION:-0.970}"
-    --attention-config '{"mla_prefill_backend":"B12X"}'
-    --mm-encoder-tp-mode data)
+    --attention-config '{"mla_prefill_backend":"B12X"}')
 fi
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
@@ -193,7 +194,7 @@ command=(/opt/venv/bin/lil-runtime-bootstrap /opt/venv/bin/python
   --enable-chunked-prefill --enable-prefix-caching
   --kv-offloading-size "${KIMI_NATIVE_KV_GIB:-32}" --kv-offloading-backend native
   --mm-processor-kwargs '{"in_patch_limit":40960,"patch_limit_on_one_side":512}'
-  --mm-encoder-tp-mode weights
+  --mm-encoder-tp-mode "$mm_encoder_mode"
   --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice
   --structured-outputs-config.backend xgrammar
   "${quant_args[@]}"
