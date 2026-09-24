@@ -1,0 +1,409 @@
+diff --git a/csrc/smxx/fwd_kernel2.cuh b/csrc/smxx/fwd_kernel2.cuh
+index add4054ff296d648f3d54ef333f37d2db78d0845..1bb3a66d73cc84c7d4c72b30cbc9c06df1b30aec 100644
+--- a/csrc/smxx/fwd_kernel2.cuh
++++ b/csrc/smxx/fwd_kernel2.cuh
+@@ -120,10 +120,33 @@ CUTLASS_DEVICE void movm_transpose_c_to_b_16x16(
+     }
+ }
+ 
++template <class TmaLoad, class GlobalTensor, class SmemLayout, class Barrier>
++CUTLASS_DEVICE void load_workspace_tile(
++    TmaLoad const& tma_load,
++    GlobalTensor const& global_tensor,
++    SmemLayout const& smem_layout,
++    uint32_t* smem_ptr,
++    int workspace_idx,
++    Barrier& barrier
++) {
++    auto global_offset = global_tensor.layout()(workspace_idx, 0, 0);
++    Tensor global_tile = make_tensor(
++        global_tensor.data() + global_offset,
++        make_layout(shape(smem_layout), stride(global_tensor.layout())));
++    Tensor shared_tile = make_tensor(make_smem_ptr(smem_ptr), smem_layout);
++    auto cta_tma_load = tma_load.get_slice(Int<0>{});
++    cute::copy(
++        tma_load.with(barrier),
++        cta_tma_load.partition_S(global_tile),
++        cta_tma_load.partition_D(shared_tile));
++}
++
+ // ==================== Kernel 2: Recurrence ====================
+ template <
+     class TmaLoadV,
+     class TmaLoadBeta,
++    class TmaLoadWorkspaceLarge,
++    class TmaLoadWorkspaceSmall,
+     class TmaLoadState,
+     class TmaStoreState,
+     class TmaStoreOut,
+@@ -143,6 +166,12 @@ template <
+ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+     CUTE_GRID_CONSTANT TmaLoadV const tma_load_v,
+     CUTE_GRID_CONSTANT TmaLoadBeta const tma_load_beta,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceLarge const tma_load_ws_kd,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceLarge const tma_load_ws_qd,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceLarge const tma_load_ws_kr,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceSmall const tma_load_ws_gt,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceSmall const tma_load_ws_inv,
++    CUTE_GRID_CONSTANT TmaLoadWorkspaceSmall const tma_load_ws_mqk,
+     CUTE_GRID_CONSTANT TmaLoadState const tma_load_initial_state,
+     CUTE_GRID_CONSTANT TmaStoreState const tma_store_final_state,
+     CUTE_GRID_CONSTANT TmaStoreOut const tma_store_out,
+@@ -178,6 +207,25 @@ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+     using TMABetaSmemLayout = typename Layouts::TMABetaSmemLayout;
+     using TMAStateSmemLayout = typename Layouts::TMAStateSmemLayout;
+     using SharedStorageT = SharedStorageK2<Layouts, InputStages, OutputStages>;
++    constexpr int kWorkspaceWordsPerRow = 8;
++    constexpr int kLargeWorkspaceRows =
++        (CHUNK * D * int(sizeof(BF16)) / int(sizeof(uint32_t))) /
++        kWorkspaceWordsPerRow;
++    constexpr int kSmallWorkspaceRows =
++        (D * int(sizeof(float)) / int(sizeof(uint32_t))) /
++        kWorkspaceWordsPerRow;
++    static_assert(
++        D * int(sizeof(float)) == CHUNK * CHUNK * int(sizeof(BF16)));
++    using WorkspaceLargeSmemLayout = decltype(make_layout(
++        make_shape(
++            Int<1>{}, Int<kLargeWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{}));
++    using WorkspaceSmallSmemLayout = decltype(make_layout(
++        make_shape(
++            Int<1>{}, Int<kSmallWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{}));
+ 
+     // --- shared memory
+     extern __shared__ __align__(128) unsigned char shared_mem[];
+@@ -188,10 +236,10 @@ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+     constexpr int kComputeThreads = 128;
+     constexpr int kVSlices = D / VD;
+ 
+-    // Transaction bytes: v + beta + k_decayed + q_decayed + k_restored + g_total + INV + Mqk
++    // Transaction bytes: v + beta + six workspace TensorMap loads.
+     constexpr uint32_t kTmaTransactionBytes =
+         uint32_t(cute::cosize_v<VOLayout>) * uint32_t(sizeof(BF16)) +
+-        uint32_t(32) * uint32_t(sizeof(BF16)) +  // beta (bf16, sigmoid fused)
++        uint32_t(32) * uint32_t(sizeof(BF16)) +
+         uint32_t(cute::cosize_v<MMALayout>) * uint32_t(sizeof(BF16)) * 3 +
+         uint32_t(cute::cosize_v<GTotalLayout>) * uint32_t(sizeof(float)) +
+         uint32_t(cute::cosize_v<LMLayout>) * uint32_t(sizeof(BF16)) * 2;
+@@ -338,10 +386,26 @@ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+         __syncthreads();
+     }
+ 
+-    // --- LOAD warp: issue TMA loads for v, beta, and workspace intermediates
++    // --- LOAD warp: issue TensorMap loads for v, beta, and the raw K1
++    // workspace byte images. Unlike SM90_BULK_COPY_G2S, TensorMap loads do not
++    // pull in CUDA 13.3's multi-GiB SM120 bulk-copy syscall runtime.
+     if (warp_role == WarpRole::LOAD_QKG && lane_predicate) {
+         Tensor g_v = tma_load_v.get_tma_tensor(make_shape(H, T_total, D));
+         Tensor g_beta = tma_load_beta.get_tma_tensor(make_shape(H * T_total));
++        auto workspace_large_shape = make_shape(
++            H * total_tiles,
++            Int<kLargeWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{});
++        auto workspace_small_shape = make_shape(
++            H * total_tiles,
++            Int<kSmallWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{});
++        Tensor g_ws_kd = tma_load_ws_kd.get_tma_tensor(workspace_large_shape);
++        Tensor g_ws_qd = tma_load_ws_qd.get_tma_tensor(workspace_large_shape);
++        Tensor g_ws_kr = tma_load_ws_kr.get_tma_tensor(workspace_large_shape);
++        Tensor g_ws_gt = tma_load_ws_gt.get_tma_tensor(workspace_small_shape);
++        Tensor g_ws_inv = tma_load_ws_inv.get_tma_tensor(workspace_small_shape);
++        Tensor g_ws_mqk = tma_load_ws_mqk.get_tma_tensor(workspace_small_shape);
+ 
+         LoadPipelineState load_write = cutlass::make_producer_start_state<LoadPipeline>();
+         auto cta_tma_load_v = tma_load_v.get_slice(Int<0>{});
+@@ -353,26 +417,75 @@ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+             int stage = load_write.index();
+             int ws_idx = head_idx * total_tiles + tile_base + t;
+ 
+-            // TMA load v
+-            auto v_off = g_v.layout()(head_idx, int(bos) + t * CHUNK, v_idx * VD);
+-            Tensor g_v_tile = make_tensor(g_v.data() + v_off,
+-                make_layout(make_shape(Int<1>{}, Int<CHUNK>{}, Int<VD>{}), stride(g_v.layout())));
+-            Tensor s_v_tile = make_tensor(make_smem_ptr(shared_storage.input[stage].v.begin()), TMAVOLayout{});
+-            cute::copy(tma_load_v.with(*tma_barrier),
+-                cta_tma_load_v.partition_S(g_v_tile), cta_tma_load_v.partition_D(s_v_tile));
++            auto v_off = g_v.layout()(
++                head_idx, int(bos) + t * CHUNK, v_idx * VD);
++            Tensor g_v_tile = make_tensor(
++                g_v.data() + v_off,
++                make_layout(
++                    make_shape(Int<1>{}, Int<CHUNK>{}, Int<VD>{}),
++                    stride(g_v.layout())));
++            Tensor s_v_tile = make_tensor(
++                make_smem_ptr(shared_storage.input[stage].v.begin()),
++                TMAVOLayout{});
++            cute::copy(
++                tma_load_v.with(*tma_barrier),
++                cta_tma_load_v.partition_S(g_v_tile),
++                cta_tma_load_v.partition_D(s_v_tile));
+ 
+-            // TMA load beta (1D)
+-            int beta_linear = head_idx * T_total + (int(bos) + t * CHUNK);
++            int beta_linear =
++                head_idx * T_total + (int(bos) + t * CHUNK);
+             int beta_aligned = beta_linear & ~7;
+             auto beta_off = g_beta.layout()(beta_aligned);
+-            Tensor g_beta_tile = make_tensor(g_beta.data() + beta_off, BetaSmemLayout{});
+-            Tensor s_beta_tile = make_tensor(make_smem_ptr(shared_storage.input[stage].beta.begin()), TMABetaSmemLayout{});
+-            cute::copy(tma_load_beta.with(*tma_barrier),
+-                cta_tma_load_beta.partition_S(g_beta_tile), cta_tma_load_beta.partition_D(s_beta_tile));
+-
+-            // K1 stores byte images of its swizzled shared-memory tensors.
+-            // K2 uses the same layouts, so raw bulk copies restore them
+-            // directly without tensor-map coordinate work or repacking.
++            Tensor g_beta_tile = make_tensor(
++                g_beta.data() + beta_off, BetaSmemLayout{});
++            Tensor s_beta_tile = make_tensor(
++                make_smem_ptr(shared_storage.input[stage].beta.begin()),
++                TMABetaSmemLayout{});
++            cute::copy(
++                tma_load_beta.with(*tma_barrier),
++                cta_tma_load_beta.partition_S(g_beta_tile),
++                cta_tma_load_beta.partition_D(s_beta_tile));
++
++#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 1200)
++            // CUDA 13.3 lowers SM90_BULK_COPY_G2S to the driver-provided
++            // __cuda_syscall_cp_async_bulk_unicast fallback on SM120. Loading
++            // that fallback reserves several GiB per CUDA context. TensorMap
++            // loads preserve the raw workspace byte images without the
++            // syscall. Earlier architectures retain their native bulk-copy
++            // path below.
++            WorkspaceLargeSmemLayout workspace_large_smem_layout;
++            WorkspaceSmallSmemLayout workspace_small_smem_layout;
++            load_workspace_tile(
++                tma_load_ws_kd, g_ws_kd, workspace_large_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].k_decayed.begin()),
++                ws_idx, *tma_barrier);
++            load_workspace_tile(
++                tma_load_ws_qd, g_ws_qd, workspace_large_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].q_decayed.begin()),
++                ws_idx, *tma_barrier);
++            load_workspace_tile(
++                tma_load_ws_kr, g_ws_kr, workspace_large_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].k_restored.begin()),
++                ws_idx, *tma_barrier);
++            load_workspace_tile(
++                tma_load_ws_gt, g_ws_gt, workspace_small_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].g_total.begin()),
++                ws_idx, *tma_barrier);
++            load_workspace_tile(
++                tma_load_ws_inv, g_ws_inv, workspace_small_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].INV.begin()),
++                ws_idx, *tma_barrier);
++            load_workspace_tile(
++                tma_load_ws_mqk, g_ws_mqk, workspace_small_smem_layout,
++                reinterpret_cast<uint32_t*>(
++                    shared_storage.input[stage].Mqk.begin()),
++                ws_idx, *tma_barrier);
++#else
+             cute::SM90_BULK_COPY_G2S::copy(
+                 ws_kd + int64_t(ws_idx) * (CHUNK * D),
+                 reinterpret_cast<uint64_t*>(tma_barrier),
+@@ -403,6 +516,7 @@ __global__ void __launch_bounds__(NumThreads, 2) _flash_kda_fwd_recurrence(
+                 reinterpret_cast<uint64_t*>(tma_barrier),
+                 shared_storage.input[stage].Mqk.begin(),
+                 int32_t(CHUNK * CHUNK * sizeof(BF16)));
++#endif
+ 
+             ++load_write;
+         }
+diff --git a/csrc/smxx/fwd_launch.cu b/csrc/smxx/fwd_launch.cu
+index aef551405ebf2658b821c95225d4d3e67e3abcaa..14ebd82026d76be149bc47d024c069b65a84693a 100644
+--- a/csrc/smxx/fwd_launch.cu
++++ b/csrc/smxx/fwd_launch.cu
+@@ -48,8 +48,8 @@ void launch_fwd(
+     using K2VSplitL = K2Layouts<D, CHUNK, VD>;
+     using WS = WorkspaceSizes<CHUNK, D>;
+ 
+-    // Raw bulk copies make the swizzled shared-memory layout a private ABI
+-    // between K1 and K2. Fail at compile time if either side changes alone.
++    // K1 and K2 exchange raw byte images of these swizzled layouts. Fail at
++    // compile time if either side changes the private workspace ABI alone.
+     static_assert(std::is_same_v<typename K1L::MMALayout,
+                                  typename K2L::MMALayout>);
+     static_assert(std::is_same_v<typename K1L::GTotalLayout,
+@@ -95,6 +95,63 @@ void launch_fwd(
+     BF16*  ws_inv = reinterpret_cast<BF16*>(ws + n_ht * (WS::kKDecayed + WS::kQDecayed + WS::kKRestored + WS::kGTotal));
+     BF16*  ws_mqk = reinterpret_cast<BF16*>(ws + n_ht * (WS::kKDecayed + WS::kQDecayed + WS::kKRestored + WS::kGTotal + WS::kINV));
+ 
++    // Describe each workspace tile as an unswizzled uint32 byte image. CUDA
++    // 13.3 emits native TensorMap loads for SM120, avoiding the multi-GiB
++    // __cuda_syscall_cp_async_bulk_unicast runtime used by raw bulk copies.
++    constexpr int kWorkspaceWordsPerRow = 8;
++    constexpr int kLargeWorkspaceRows =
++        (WS::kKDecayed / int(sizeof(uint32_t))) /
++        kWorkspaceWordsPerRow;
++    constexpr int kSmallWorkspaceRows =
++        (WS::kGTotal / int(sizeof(uint32_t))) /
++        kWorkspaceWordsPerRow;
++    static_assert(WS::kKDecayed == WS::kQDecayed);
++    static_assert(WS::kKDecayed == WS::kKRestored);
++    static_assert(WS::kGTotal == WS::kINV);
++    static_assert(WS::kGTotal == WS::kMqk);
++
++    auto workspace_large_gmem_layout = make_layout(
++        make_shape(
++            n_ht, Int<kLargeWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{});
++    auto workspace_small_gmem_layout = make_layout(
++        make_shape(
++            n_ht, Int<kSmallWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{});
++    using WorkspaceLargeSmemLayout = decltype(make_layout(
++        make_shape(
++            Int<1>{}, Int<kLargeWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{}));
++    using WorkspaceSmallSmemLayout = decltype(make_layout(
++        make_shape(
++            Int<1>{}, Int<kSmallWorkspaceRows>{},
++            Int<kWorkspaceWordsPerRow>{}),
++        LayoutRight{}));
++
++    auto make_workspace_large_tma = [&](void const* ptr) {
++        Tensor tensor = make_tensor(
++            make_gmem_ptr(static_cast<uint32_t const*>(ptr)),
++            workspace_large_gmem_layout);
++        return make_tma_copy(
++            SM90_TMA_LOAD{}, tensor, WorkspaceLargeSmemLayout{});
++    };
++    auto make_workspace_small_tma = [&](void const* ptr) {
++        Tensor tensor = make_tensor(
++            make_gmem_ptr(static_cast<uint32_t const*>(ptr)),
++            workspace_small_gmem_layout);
++        return make_tma_copy(
++            SM90_TMA_LOAD{}, tensor, WorkspaceSmallSmemLayout{});
++    };
++    auto tma_load_ws_kd = make_workspace_large_tma(ws_kd);
++    auto tma_load_ws_qd = make_workspace_large_tma(ws_qd);
++    auto tma_load_ws_kr = make_workspace_large_tma(ws_kr);
++    auto tma_load_ws_gt = make_workspace_small_tma(ws_gt);
++    auto tma_load_ws_inv = make_workspace_small_tma(ws_inv);
++    auto tma_load_ws_mqk = make_workspace_small_tma(ws_mqk);
++
+     // --- TMA descriptors for Kernel 1 inputs
+     auto tma_load_q    = make_tma_copy(SM90_TMA_LOAD{}, m_q, TMAQKLayout{});
+     auto tma_load_k    = make_tma_copy(SM90_TMA_LOAD{}, m_k, TMAQKLayout{});
+@@ -107,8 +164,7 @@ void launch_fwd(
+     Tensor m_dt_bias = make_tensor(make_gmem_ptr(dt_bias_ptr), dt_bias_gmem_layout);
+     auto tma_load_dt_bias = make_tma_copy(SM90_TMA_LOAD{}, m_dt_bias, TMAGTotalSmemLayout{});
+ 
+-    // --- TMA descriptors for Kernel 2 inputs and outputs. Workspace payloads
+-    // use the raw bulk-copy pointers above rather than tensor maps.
++    // --- TMA descriptors for Kernel 2 inputs and outputs.
+     auto tma_load_v     = make_tma_copy(SM90_TMA_LOAD{}, m_v, TMAVOLayout{});
+     auto tma_load_beta2 = make_tma_copy(SM90_TMA_LOAD{}, m_beta, TMABetaSmemLayout{});
+     auto tma_store_out = make_tma_copy(SM90_TMA_STORE{}, m_out, TMAVOLayout{});
+@@ -201,6 +257,8 @@ void launch_fwd(
+             auto kernel2 = _flash_kda_fwd_recurrence<
+                 decltype(tma_load_v_vsplit),
+                 decltype(tma_load_beta2),
++                decltype(tma_load_ws_kd),
++                decltype(tma_load_ws_gt),
+                 decltype(tma_load_initial_state_vsplit),
+                 decltype(tma_store_final_state_vsplit),
+                 decltype(tma_store_out_vsplit),
+@@ -214,6 +272,8 @@ void launch_fwd(
+                 smem_size_k2);
+             kernel2<<<grid_k2, block_k2, smem_size_k2, stream>>>(
+                 tma_load_v_vsplit, tma_load_beta2,
++                tma_load_ws_kd, tma_load_ws_qd, tma_load_ws_kr,
++                tma_load_ws_gt, tma_load_ws_inv, tma_load_ws_mqk,
+                 tma_load_initial_state_vsplit,
+                 tma_store_final_state_vsplit,
+                 tma_store_out_vsplit,
+@@ -228,6 +288,7 @@ void launch_fwd(
+ 
+         auto kernel2 = _flash_kda_fwd_recurrence<
+             decltype(tma_load_v), decltype(tma_load_beta2),
++            decltype(tma_load_ws_kd), decltype(tma_load_ws_gt),
+             decltype(tma_load_initial_state),
+             decltype(tma_store_final_state),
+             decltype(tma_store_out),
+@@ -244,6 +305,8 @@ void launch_fwd(
+ 
+         kernel2<<<grid_k2, block_k2, smem_size_k2, stream>>>(
+             tma_load_v, tma_load_beta2,
++            tma_load_ws_kd, tma_load_ws_qd, tma_load_ws_kr,
++            tma_load_ws_gt, tma_load_ws_inv, tma_load_ws_mqk,
+             tma_load_initial_state,
+             tma_store_final_state,
+             tma_store_out,
+diff --git a/tests/test.sh b/tests/test.sh
+index cd00d6df44f771273ddfd6f1a890e9a0a3924113..8463a37088b4e2e3c569fcf333e4937b1fef2a69 100644
+--- a/tests/test.sh
++++ b/tests/test.sh
+@@ -3,3 +3,4 @@ pip install -e .
+ pip install "flash-linear-attention>=0.5.0" matplotlib pytest
+ python tests/test_fwd.py
+ python -m pytest tests/test_vsplit.py -x -q
++python -m pytest tests/test_sm120_runtime.py -x -q
+diff --git a/tests/test_sm120_runtime.py b/tests/test_sm120_runtime.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..951bf590a46bfcb17062966957533168d7461a4d
+--- /dev/null
++++ b/tests/test_sm120_runtime.py
+@@ -0,0 +1,31 @@
++"""SM120-specific binary contract checks."""
++
++from __future__ import annotations
++
++import shutil
++import subprocess
++
++import pytest
++import torch
++
++
++if not torch.cuda.is_available():
++    pytest.skip("CUDA is required", allow_module_level=True)
++
++import flash_kda
++
++
++def test_sm120_avoids_bulk_copy_syscall_runtime() -> None:
++    if torch.cuda.get_device_capability() != (12, 0):
++        pytest.skip("SM120 is required")
++    cuobjdump = shutil.which("cuobjdump")
++    if cuobjdump is None:
++        pytest.skip("cuobjdump is required")
++
++    symbols = subprocess.run(
++        [cuobjdump, "--dump-elf-symbols", flash_kda._C.__file__],
++        check=True,
++        capture_output=True,
++        text=True,
++    ).stdout
++    assert "__cuda_syscall_cp_async_bulk_unicast" not in symbols
+diff --git a/tests/test_vsplit.py b/tests/test_vsplit.py
+index d6d9febde017d0879f3b08631603aa45a0106576..b763d06af90f5bd8b2d981a106e523b2fb0b8577 100644
+--- a/tests/test_vsplit.py
++++ b/tests/test_vsplit.py
+@@ -110,11 +110,12 @@ def _make_fixed_problem() -> Problem:
+ 
+ 
+ def _make_stage_reuse_problem() -> Problem:
+-    # InputStages=3, so four full chunks are the smallest case that forces a
+-    # circular input stage to be reused.
++    # InputStages=3, so five full chunks exercise two successive circular
++    # stage reuses. A single reuse can miss producer/publication races because
++    # the first three loads fill otherwise untouched stages.
+     return _make_problem(
+         batch=1,
+-        seq_len=64,
++        seq_len=80,
+         cu_seqlens=None,
+         num_sequences=1,
+         seed=404,
