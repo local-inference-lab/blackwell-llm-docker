@@ -1,0 +1,35 @@
+# Cherry-pick layer on the cu132 image — validated upstream backports.
+# Full pick list: see the commit message for patches/cherry-picks-20260611.diff
+# (tool-call/grammar #21593 #23476 #21722 #23953 #26433, Responses-API function
+# tools = port of open PR #25881, tree-drafting #27463, EAGLE #27390 #26397
+# #26800 #26424, mamba leaks #24244 #25770 #26941, detok #25309 #24659, #25155
+# #24627, GDN #26206, sgl-kernel case-512 #25775 — the kernel pick is inert in
+# this layer and takes effect via the main Dockerfile's in-tree apply.
+# Also: port of open PR #27983 — rope overrides reach text_config, fixes the
+# --json-model-override-args silent no-op/crash on VLM-format models (issue
+# #27974); and the open PR #27324 guard — None mamba_next_track_idx crash in
+# spec v2 verify under extra_buffer (issue #27325, hit 5x in production)).
+# Source branch: sglang-fork blackwell-cu132-picks;
+# patch generated via `git diff 260194aa..blackwell-cu132-picks`.
+FROM localhost/voipmonitor/sglang:cu132
+
+COPY patches/cherry-picks-20260611.diff /tmp/picks.diff
+# plain apply (no --3way: the tree is intentionally dirty from runtime patches,
+# so the index can't be used); only runtime package paths matter in the image.
+# Syntax check covers the SAME scope as the apply (python/sglang/**, not just
+# srt/ — picks touch e.g. jit_kernel/ too).
+RUN cd /opt/sglang \
+ && git apply --include='python/sglang/*' --stat /tmp/picks.diff | tail -2 \
+ && git apply --include='python/sglang/*' /tmp/picks.diff \
+ && rm /tmp/picks.diff \
+ && python -c "import ast,glob; [ast.parse(open(f,encoding='utf-8-sig').read(),f) for f in glob.glob('python/sglang/**/*.py',recursive=True)]" \
+ && echo "OK: picks applied, full python/sglang syntax check passed"
+
+# 21722 needs xgrammar>=0.2.0; the cu132 base already ships 0.2.1 — verify only
+RUN python -c "from importlib.metadata import version; v=version('xgrammar'); print('xgrammar', v); assert tuple(map(int, v.split('.')[:2])) >= (0,2), v"
+
+# smoke_test_cu132.py includes the ServerArgs.from_cli_args gate: it maps EVERY
+# dataclass field from the argparse namespace, so an orphaned field (added
+# without its CLI arg) fails the build here instead of crashing at server start.
+COPY smoke_test_cu132.py /tmp/smoke_test.py
+RUN python /tmp/smoke_test.py && rm /tmp/smoke_test.py
