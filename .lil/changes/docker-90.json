@@ -3,7 +3,7 @@
   "id": "docker-90",
   "category": "fix",
   "summary": "Launcher lint fix for the installed-vLLM check",
-  "models": [],
+  "models": ["GLM-5.3-Flash"],
   "compatibility": "No behavior change.",
   "details": [
     "Spells the regular-expression flag of docker #89's installed-vLLM check as re.MULTILINE, which the CI linter requires."
