@@ -46,15 +46,30 @@ docker run -d --name glm-spark-tp2 --init --gpus '"device=0,1"' \
   -e PRESET=glm53-spark-tp2 -e PORT=8000 "$LIL_IMAGE"
 ```
 
-This selects TP2/DCP2, MTP3 with B12X draft experts, four request slots, a
-3,072-token prefill budget, 3,996 MiB fixed KV per rank and sparse full/piecewise
-captures through 16 verifier rows. The allocator uses 12 MiB large segments;
-NCCL uses two channels and 1 MiB buffers. No image-count limit is imposed.
-Only this bounded configuration is qualified; other slot, context or speculation
-choices may need less KV memory. Long mixed vision/text traffic can still cause
-allocator retries with this tight memory budget.
+This selects TP2/DCP2, MTP3 with B12X draft experts, eight request slots, a
+3,072-token prefill budget, 4,557 MiB fixed KV per rank (about 1.15M tokens)
+and sparse full/piecewise captures through 32 verifier rows. To make room for
+the KV cache, the input embedding table lives in pinned host RAM (0.59 GiB per
+GPU, read row by row over PCIe), the vision tower runs in MXFP8 (0.24 GiB) and
+the TP, DCP and EP groups share one NCCL communicator (74 MiB). Decode speed is
+unchanged; long prefills are 1-3% slower. The allocator uses 12 MiB large
+segments; NCCL uses two channels and 1 MiB buffers. No image-count limit is
+imposed.
 
+- Sixteen request slots: add `-e MAX_NUM_SEQS=16`. Each slot above eight takes
+  64 MiB from the KV allocation for larger CUDA graphs and buffers, so 16 slots
+  keep 4,045 MiB per rank (about 1.02M tokens). An explicit
+  `KV_CACHE_MEMORY_BYTES` is used as given.
+- Qualified worst case at 8 and 16 slots: 62K-token prompts, a 3840x2160 image,
+  six-image requests and decoding streams at the same time, with at least
+  0.24 GiB of GPU memory still free at the peak. A larger explicit KV size or
+  more slots than 16 can run out of memory under such mixed load.
+- BF16 vision tower or GPU-resident embeddings: add
+  `-e VLLM_GLM53_VISION_MXFP8=0` or `-e VLLM_GLM53_EMBED_HOST=0` and lower
+  `KV_CACHE_MEMORY_BYTES` by 0.24 GiB or 0.59 GiB respectively.
 - CPU/disk LMCache: add `-e CACHE_MODE=lmcache`. GPU-only cache is the default.
+  The connector's GPU buffers take 192 MiB from the preset KV allocation
+  (about 1.0M tokens at eight slots, 0.86M at sixteen).
   Text recurrent checkpoints can be restored externally; vision requests
   recompute. LMCache retains fewer KV tokens than the GPU-only configuration.
 - Smaller KV allocation: add `-e KV_CACHE_MEMORY_BYTES=3758096384` for 3.5 GiB.

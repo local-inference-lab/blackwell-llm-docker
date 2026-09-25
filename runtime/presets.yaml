@@ -3,7 +3,7 @@ presets:
   glm53-spark-tp2:
     profile: glm53-flash
     hardware: rtx-pro-6000-pcie
-    description: GLM Spark checkpoint on two 96-GB RTX PRO GPUs, with TP2/DCP2 MTP3, four request slots and a 3072-token prefill budget. Spark identifies the checkpoint, not DGX Spark hardware.
+    description: GLM Spark checkpoint on two 96-GB RTX PRO GPUs, with TP2/DCP2 MTP3, eight request slots (16 selectable) and a 3072-token prefill budget. The input embedding table lives in host RAM and the vision tower runs in MXFP8, which leaves room for about 1.15M KV tokens. Spark identifies the checkpoint, not DGX Spark hardware.
     options:
       model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
       served-model-name: GLM-5.3-Flash
@@ -11,10 +11,10 @@ presets:
       decode-context-parallel-size: 2
       mode: mtp
       max-model-len: -1
-      max-num-seqs: 4
+      max-num-seqs: 8
       max-num-batched-tokens: 3072
       cache-object-tokens: 3072
-      kv-cache-memory-bytes: 4190109696
+      kv-cache-memory-bytes: 4778151936
       gpu-memory-utilization: 0.985
       max-cudagraph-capture-size: auto
       cudagraph-capture-sizes: [1, 2, 4, 8, 12, 16]
@@ -32,11 +32,16 @@ presets:
       OMP_NUM_THREADS: "1"
       VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "65536"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,large_segment_size_mb:12
+      VLLM_GLM53_EMBED_HOST: "1"
+      VLLM_GLM53_VISION_MXFP8: "1"
+      VLLM_SHARE_PYNCCL_COMMS: "1"
     modes:
       mtp:
         config: {moe_backend: b12x}
     linked_options:
       cache-object-tokens: max-num-batched-tokens
+    kv_bytes_per_extra_slot: 67108864
+    kv_bytes_for_external_cache: 201326592
   glm53-tp3:
     profile: glm53-flash
     hardware: rtx-pro-6000-pcie
