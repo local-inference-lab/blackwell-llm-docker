@@ -1,0 +1,13 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-92",
+  "category": "internal",
+  "summary": "The runtime guide describes external checkpoints for image conversations",
+  "models": ["GLM-5.3-Flash"],
+  "compatibility": "Documentation only.",
+  "details": [
+    "With vllm #904 and LMCache #98, GLM conversations with images restore from the external cache instead of recomputing; the guide no longer says vision requests recompute."
+  ],
+  "pull_requests": [92],
+  "requires": ["vllm-904", "lmcache-98"]
+}

@@ -73,8 +73,8 @@ imposed.
 - CPU/disk LMCache: add `-e CACHE_MODE=lmcache`. GPU-only cache is the default.
   The connector's GPU buffers take 192 MiB from the preset KV allocation
   (about 1.0M tokens at eight slots, 0.86M at sixteen).
-  Text recurrent checkpoints can be restored externally; vision requests
-  recompute. LMCache retains fewer KV tokens than the GPU-only configuration.
+  Text and image recurrent checkpoints can be restored externally. LMCache
+  retains fewer KV tokens than the GPU-only configuration.
 - Smaller KV allocation: add `-e KV_CACHE_MEMORY_BYTES=3758096384` for 3.5 GiB.
 - Change serving choices with the same `SPECULATOR`, `MTP_DEPTH`, `TP`, `DCP`,
   `MAX_NUM_SEQS`, and `MAX_NUM_BATCHED_TOKENS` controls as other profiles.
@@ -411,9 +411,9 @@ The model and cache use distinct ports, defaulting to API port plus
 
 | Contract | Required preserved behavior | Resolver disposition |
 |---|---|---|
-| GLM atomic recurrent cache | Target/recurrent/draft all-rank bundles, request/SYSTEM boundaries, identity checks and restart restore | Implemented for text; TP2 requires engine-driven request-boundary transfer. TP4/TP8 also accept aligned transfer. |
+| GLM atomic recurrent cache | Target/recurrent/draft all-rank bundles, request/SYSTEM boundaries, identity checks and restart restore | Implemented for text and image/video-bearing requests (placeholders keyed by content hash); TP2 requires engine-driven request-boundary transfer. TP4/TP8 also accept aligned transfer. |
 | DS4 engine-driven cache | Worker-owned pinned SHM, CPU-only service, RAM/disk storage and coordinated shutdown | Implemented for text and authenticated image-bearing prefixes. |
-| Qwen atomic recurrent cache | Complete target/GDN/draft checkpoint bundles | Implemented for text with engine-driven transfer; external image-bearing checkpoint reuse is unsupported. |
+| Qwen atomic recurrent cache | Complete target/GDN/draft checkpoint bundles | Implemented for text with engine-driven transfer; image-bearing requests use the same content-hash placeholder keys (GPU-validated on GLM-5.3-Flash only). |
 | DS4.1 engine-driven cache | Target and auxiliary cache groups with independent Engram placement | Implemented; RAM/disk Engram placement is separate from prefix offload. |
 
 Typed settings include `cache-mode`, `cache-transfer-mode`, `cache-l1-gib`,
@@ -491,8 +491,11 @@ divided by the checkpoint bytes written per minute; check
 metrics port. The engine-driven service uses CPU memory,
 not a separate GPU. The profile selects request-boundary checkpoints and a
 matching target scheduling budget. It does not enable aligned/direct transfer
-for TP2. GLM vision remains available, but image-bearing requests recompute
-instead of restoring external recurrent checkpoints. The auto-fit context
+for TP2. Image-bearing requests restore external recurrent checkpoints too:
+each image's placeholder positions are keyed by its content hash (and the
+vision precision), so a checkpoint is never restored for a different image
+and an image at the start of a conversation no longer blocks reuse of the
+text after it. The auto-fit context
 limit can differ from the VRAM-only recipe because external-cache geometry
 and transfer buffers differ; inspect the reported capacity at startup.
 
