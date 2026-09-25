@@ -1,0 +1,13 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-88",
+  "category": "fix",
+  "summary": "The Spark TP2 KV allocation is a whole number of MiB",
+  "models": ["GLM-5.3-Flash"],
+  "compatibility": "Applies to PRESET=glm53-spark-tp2.",
+  "details": [
+    "The preset KV size is 4,556 MiB per rank (4,044 MiB at 16 slots) instead of 4,556.8 MiB, so the configurator's KV field shows a whole number. The KV cache holds about 0.2% fewer tokens."
+  ],
+  "pull_requests": [88],
+  "requires": []
+}

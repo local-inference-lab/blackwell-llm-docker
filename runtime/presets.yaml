@@ -14,7 +14,7 @@ presets:
       max-num-seqs: 8
       max-num-batched-tokens: 3072
       cache-object-tokens: 3072
-      kv-cache-memory-bytes: 4778151936
+      kv-cache-memory-bytes: 4777312256
       gpu-memory-utilization: 0.985
       max-cudagraph-capture-size: auto
       cudagraph-capture-sizes: [1, 2, 4, 8, 12, 16]
