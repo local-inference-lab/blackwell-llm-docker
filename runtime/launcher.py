@@ -147,8 +147,21 @@ def deployment_presets() -> dict:
             "linked_options",
         }
         kv_fields = {"kv_bytes_per_extra_slot", "kv_bytes_for_external_cache"}
-        if not required <= set(item) <= required | kv_fields:
+        optional = kv_fields | {"vllm_fallback"}
+        if not required <= set(item) <= required | optional:
             raise ConfigError(f"Invalid deployment preset fields: {name}")
+        fallback = item.get("vllm_fallback")
+        if fallback is not None and (
+            not isinstance(fallback, dict)
+            or set(fallback) != {"requires_environment", "options"}
+            or not isinstance(fallback["options"], dict)
+            or not isinstance(fallback["requires_environment"], list)
+            or not all(
+                isinstance(key, str) and key in item["environment"]
+                for key in fallback["requires_environment"]
+            )
+        ):
+            raise ConfigError(f"Invalid preset vllm_fallback: {name}")
         for field in kv_fields:
             value = item.get(field, 0)
             if type(value) is not int or value < 0:
@@ -164,6 +177,28 @@ def deployment_presets() -> dict:
         ):
             raise ConfigError(f"Invalid deployment preset values: {name}")
     return presets
+
+
+def installed_vllm_environment() -> frozenset[str] | None:
+    """Environment names the installed vLLM declares, or None without vLLM.
+
+    Reads vllm/envs.py as text; the launcher must not import vLLM or CUDA.
+    """
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("vllm")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    for location in spec.submodule_search_locations:
+        path = Path(location) / "envs.py"
+        if path.is_file():
+            return frozenset(
+                re.findall(r'^    "(VLLM_[A-Z0-9_]+)"', path.read_text(), re.M)
+            )
+    return None
 
 
 def deployment_preset(identifier: str) -> dict:
@@ -371,6 +406,7 @@ def resolve(
     cli_env: dict[str, str] | None = None,
     runtime_identity: str | None = None,
     preset: str | None = None,
+    vllm_environment: frozenset[str] | None = None,
 ) -> LaunchPlan:
     incoming = dict(os.environ if env is None else env)
     config = config or {}
@@ -393,6 +429,18 @@ def resolve(
     deployment = deployment_preset(preset) if preset else None
     if deployment and deployment["profile"] != identifier:
         raise ConfigError("The deployment preset belongs to a different model profile")
+    fallback_reason = None
+    if deployment and deployment.get("vllm_fallback") and vllm_environment is not None:
+        # A preset that relies on vLLM features newer than the installed vLLM
+        # (for example the same recipe in a channel with an older vLLM) keeps
+        # its previously qualified values instead.
+        fallback = deployment["vllm_fallback"]
+        missing = sorted(set(fallback["requires_environment"]) - vllm_environment)
+        if missing:
+            deployment["options"].update(fallback["options"])
+            for name in fallback["requires_environment"]:
+                deployment["environment"].pop(name, None)
+            fallback_reason = "installed vLLM lacks " + ", ".join(missing)
     if deployment:
         model = copy.deepcopy(model)
         for mode_name, overrides in deployment["modes"].items():
@@ -440,8 +488,11 @@ def resolve(
     for key, value in hw.get("model_environment", {}).get(identifier, {}).items():
         set_env(key, value, f"hardware:{hardware}/{identifier}")
     if deployment:
+        source = f"preset:{preset}"
+        if fallback_reason:
+            source += f" (fallback: {fallback_reason})"
         for key, value in deployment["options"].items():
-            set_value(key, value, f"preset:{preset}")
+            set_value(key, value, source)
         for key, value in deployment["environment"].items():
             set_env(key, value, f"preset:{preset}")
 
@@ -1178,6 +1229,9 @@ def main() -> int:
             cli_env=explicit_env,
             runtime_identity=runtime_identity,
             preset=args.preset,
+            # Inside an image, check the installed vLLM; a CPU-only
+            # --print-config outside one resolves the preset as written.
+            vllm_environment=installed_vllm_environment() if contract else None,
         )
         if args.print_config:
             public = plan.public()

@@ -266,3 +266,40 @@ def test_glm_tp3_preset_rejects_the_external_cache():
             preset="glm53-tp3",
             env={"CACHE_MODE": "lmcache"},
         )
+
+
+SAVINGS = frozenset(
+    {"VLLM_GLM53_EMBED_HOST", "VLLM_GLM53_VISION_MXFP8", "VLLM_SHARE_PYNCCL_COMMS"}
+)
+
+
+def test_spark_keeps_the_four_slot_recipe_on_a_vllm_without_the_memory_savings():
+    current = spark(vllm_environment=SAVINGS | {"VLLM_USE_V2_MODEL_RUNNER"})
+    assert current.values["max-num-seqs"] == 8
+    assert current.values["kv-cache-memory-bytes"] == 4777312256
+    older = spark(vllm_environment=frozenset({"VLLM_USE_V2_MODEL_RUNNER"}))
+    assert older.values["max-num-seqs"] == 4
+    assert older.values["kv-cache-memory-bytes"] == 4190109696
+    assert older.values["cudagraph-capture-sizes"] == [1, 2, 4, 8, 12, 16]
+    assert not SAVINGS & set(older.environment)
+    assert "fallback" in older.origins["kv-cache-memory-bytes"]
+    # Explicit choices still win over the fallback recipe.
+    chosen = spark(
+        env={"MAX_NUM_SEQS": "6", "KV_CACHE_MEMORY_BYTES": "3758096384"},
+        vllm_environment=frozenset(),
+    )
+    assert chosen.values["max-num-seqs"] == 6
+    assert chosen.values["kv-cache-memory-bytes"] == 3758096384
+
+
+def test_installed_vllm_environment_reads_envs_without_importing(tmp_path, monkeypatch):
+    from runtime.launcher import installed_vllm_environment
+
+    package = tmp_path / "vllm"
+    package.mkdir()
+    (package / "__init__.py").write_text("raise RuntimeError('must not import')\n")
+    (package / "envs.py").write_text(
+        'environment_variables = {\n    "VLLM_GLM53_EMBED_HOST": lambda: False,\n}\n'
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert installed_vllm_environment() == frozenset({"VLLM_GLM53_EMBED_HOST"})
