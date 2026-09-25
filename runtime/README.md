@@ -47,7 +47,7 @@ docker run -d --name glm-spark-tp2 --init --gpus '"device=0,1"' \
 ```
 
 This selects TP2/DCP2, MTP3 with B12X draft experts, eight request slots, a
-3,072-token prefill budget, 4,557 MiB fixed KV per rank (about 1.15M tokens)
+3,072-token prefill budget, 4,556 MiB fixed KV per rank (about 1.15M tokens)
 and sparse full/piecewise captures through 32 verifier rows. To make room for
 the KV cache, the input embedding table lives in pinned host RAM (0.59 GiB per
 GPU, read row by row over PCIe), the vision tower runs in MXFP8 (0.24 GiB) and
@@ -58,7 +58,7 @@ imposed.
 
 - Sixteen request slots: add `-e MAX_NUM_SEQS=16`. Each slot above eight takes
   64 MiB from the KV allocation for larger CUDA graphs and buffers, so 16 slots
-  keep 4,045 MiB per rank (about 1.02M tokens). An explicit
+  keep 4,044 MiB per rank (about 1.02M tokens). An explicit
   `KV_CACHE_MEMORY_BYTES` is used as given.
 - Qualified worst case at 8 and 16 slots: 62K-token prompts, a 3840x2160 image,
   six-image requests and decoding streams at the same time, with at least
