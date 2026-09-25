@@ -196,7 +196,7 @@ def installed_vllm_environment() -> frozenset[str] | None:
         path = Path(location) / "envs.py"
         if path.is_file():
             return frozenset(
-                re.findall(r'^    "(VLLM_[A-Z0-9_]+)"', path.read_text(), re.M)
+                re.findall(r'^    "(VLLM_[A-Z0-9_]+)"', path.read_text(), re.MULTILINE)
             )
     return None
 
