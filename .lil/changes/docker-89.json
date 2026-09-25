@@ -1,0 +1,14 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-89",
+  "category": "fix",
+  "summary": "The Spark TP2 preset keeps its four-slot recipe on images whose vLLM lacks the new memory savings",
+  "models": ["GLM-5.3-Flash"],
+  "compatibility": "Applies to PRESET=glm53-spark-tp2. Images with vllm #898 are unchanged.",
+  "details": [
+    "At launch the launcher reads the installed vLLM's environment names without importing it. Without VLLM_GLM53_EMBED_HOST, VLLM_GLM53_VISION_MXFP8 and VLLM_SHARE_PYNCCL_COMMS, the preset uses four request slots and 3,996 MiB of KV per rank, as before docker #87, and does not set those variables.",
+    "The same recipe builds images with different vLLM revisions; the larger KV size is safe only together with those savings."
+  ],
+  "pull_requests": [89],
+  "requires": []
+}

@@ -64,6 +64,9 @@ imposed.
   six-image requests and decoding streams at the same time, with at least
   0.24 GiB of GPU memory still free at the peak. A larger explicit KV size or
   more slots than 16 can run out of memory under such mixed load.
+- Images whose vLLM predates these memory savings (checked in the installed
+  `vllm/envs.py` at launch) keep the earlier four-slot recipe with 3,996 MiB
+  of KV per rank.
 - BF16 vision tower or GPU-resident embeddings: add
   `-e VLLM_GLM53_VISION_MXFP8=0` or `-e VLLM_GLM53_EMBED_HOST=0` and lower
   `KV_CACHE_MEMORY_BYTES` by 0.24 GiB or 0.59 GiB respectively.
