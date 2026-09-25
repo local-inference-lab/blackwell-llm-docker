@@ -146,8 +146,13 @@ def deployment_presets() -> dict:
             "modes",
             "linked_options",
         }
-        if set(item) != required:
+        kv_fields = {"kv_bytes_per_extra_slot", "kv_bytes_for_external_cache"}
+        if not required <= set(item) <= required | kv_fields:
             raise ConfigError(f"Invalid deployment preset fields: {name}")
+        for field in kv_fields:
+            value = item.get(field, 0)
+            if type(value) is not int or value < 0:
+                raise ConfigError(f"Invalid preset {field}: {name}")
         for key in ("profile", "hardware"):
             if not isinstance(item[key], str) or not re.fullmatch(
                 r"[a-z][a-z0-9-]*", item[key]
@@ -591,6 +596,29 @@ def resolve(
                 raise ConfigError("Preset option dependency is not declared")
             if origins.get(target, "").startswith(("preset:", "model:", "common:")):
                 set_value(target, values[source], f"derived:preset link to {source}")
+        # A preset's fixed KV size is qualified at its own request-slot count.
+        # Each additional slot needs working memory (CUDA graphs up to the
+        # larger verifier-row count, sampler and state buffers), so the KV
+        # allocation shrinks unless the operator set it explicitly.
+        # The external cache connector keeps its own GPU buffers.
+        preset_kv = origins.get("kv-cache-memory-bytes", "").startswith("preset:")
+        per_slot = deployment.get("kv_bytes_per_extra_slot", 0)
+        base_slots = deployment["options"].get("max-num-seqs")
+        reductions = []
+        if per_slot and base_slots and values.get("max-num-seqs", 0) > base_slots:
+            extra = values["max-num-seqs"] - base_slots
+            reductions.append(
+                (extra * per_slot, f"{extra} request slots above the preset")
+            )
+        external = deployment.get("kv_bytes_for_external_cache", 0)
+        if external and values.get("cache-mode", "vram") != "vram":
+            reductions.append((external, "external cache buffers"))
+        if preset_kv and reductions:
+            derive(
+                "kv-cache-memory-bytes",
+                values["kv-cache-memory-bytes"] - sum(size for size, _ in reductions),
+                "; ".join(reason for _, reason in reductions),
+            )
 
     # A repository-specific code revision must not leak to an operator's model.
     if (

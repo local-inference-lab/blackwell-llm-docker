@@ -1,0 +1,16 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-87",
+  "category": "performance",
+  "summary": "GLM-5.3-Flash Spark TP2 serves eight requests with 1.15M KV tokens; 16 slots selectable",
+  "models": ["GLM-5.3-Flash"],
+  "compatibility": "Applies to PRESET=glm53-spark-tp2. MAX_NUM_SEQS=16 or CACHE_MODE=lmcache lower the preset KV size automatically; an explicit KV_CACHE_MEMORY_BYTES is used as given. The embedding table needs about 0.6 GiB of pinned host RAM per GPU.",
+  "details": [
+    "Eight request slots (was four) and 4,557 MiB of KV per rank: about 1.15M tokens (was 998K). The input embedding table lives in host RAM, the vision tower runs in MXFP8 and TP, DCP and EP share one NCCL communicator.",
+    "Sixteen slots keep 4,045 MiB (about 1.02M tokens). With LMCache: 1.0M tokens at eight slots, 0.86M at sixteen.",
+    "Every combination passed a worst-case mixed load of 62K-token prompts, 4K images, six-image requests and decoding streams with at least 0.24 GiB free at the peak; the previous preset had 27 MiB free under the same load.",
+    "Decode speed is unchanged (C1 69 steps/s); long prefills are 1-3% slower."
+  ],
+  "pull_requests": [87],
+  "requires": ["vllm-898"]
+}
