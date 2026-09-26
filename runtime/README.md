@@ -217,7 +217,8 @@ performance measurements. Source references are recorded inside each profile.
   configuration remains authoritative; benchmark temperature 1/top-p 0.95/
   top-k 20 is a request policy, not evidence that every checkpoint has those
   server defaults. Qwen attention selection is native; GDN, MoE, and dense
-  kernel selection are explicitly B12X.
+  kernel selection are explicitly B12X. Target KV defaults to FP8;
+  `KV_CACHE_DTYPE=nvfp4_qsa` stores QSA main K/V as B12X NVFP4 records.
 
 GLM and DeepSeek retain the source launchers' temperature 1/top-p 0.95
 server defaults. Explicit generation configuration replaces these defaults;
