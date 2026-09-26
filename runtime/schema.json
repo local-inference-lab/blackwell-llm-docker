@@ -71,6 +71,10 @@
           },
           "config": {
             "type": "object"
+          },
+          "draft_subfolder": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+$"
           }
         }
       }

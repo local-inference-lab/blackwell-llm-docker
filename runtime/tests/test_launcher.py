@@ -17,7 +17,7 @@ from runtime.packaging import (
     payload_hashes,
 )
 
-MODELS = ["glm53-flash", "ds4-flash", "ds4-vision", "ds41-flash", "qwen38-flash-next"]
+MODELS = ["glm53-flash", "ds4-flash", "ds4-vision", "ds41-flash", "qwen38-flash-next", "mimo26-flash"]
 
 
 @pytest.mark.parametrize("tp", [1, 2, 4])
@@ -658,3 +658,32 @@ def test_glm_base_recipe_semantic_parity_for_model_arguments():
             if isinstance(resolved, dict)
             else value == str(resolved)
         )
+
+
+def test_mimo_drafter_resolves_inside_a_local_checkpoint(tmp_path):
+    from runtime.launcher import resolve_draft_subfolder
+
+    (tmp_path / "dflash").mkdir()
+    (tmp_path / "dflash" / "config.json").write_text("{}")
+    plan = resolve("mimo26-flash", env={"MODEL": str(tmp_path), "TP": "2"})
+    spec = plan.values["speculative-config"]
+    assert spec["method"] == "dflash" and spec["draft_tensor_parallel_size"] == 2
+    assert plan.values["max-num-scheduled-tokens"] == 2048
+    resolve_draft_subfolder(plan)
+    assert spec["model"] == str(tmp_path / "dflash")
+    assert json.loads(plan.argv[plan.argv.index("--speculative-config") + 1])[
+        "model"
+    ] == str(tmp_path / "dflash")
+
+
+def test_mimo_drafter_requires_its_config(tmp_path):
+    from runtime.launcher import resolve_draft_subfolder
+
+    plan = resolve("mimo26-flash", env={"MODEL": str(tmp_path)})
+    with pytest.raises(ConfigError, match="Drafter config not found"):
+        resolve_draft_subfolder(plan)
+
+
+def test_mimo_without_speculation_has_no_drafter():
+    plan = resolve("mimo26-flash", env={"SPECULATOR": "off"})
+    assert "speculative-config" not in plan.values

@@ -85,3 +85,14 @@ presets:
     environment: {}
     modes: {}
     linked_options: {}
+  mimo26-flash-tp2:
+    profile: mimo26-flash
+    hardware: rtx-pro-6000-pcie
+    description: MiMo-V2.6-Flash-RL on two 96-GB RTX PRO GPUs with DFlash 7 and adaptive verification, FP8 KV and the full 1M context. Images and audio work; video input is off because its encoder profile would take most of the KV cache at TP2.
+    options:
+      tensor-parallel-size: 2
+      gpu-memory-utilization: 0.985
+      limit-mm-per-prompt: {video: 0}
+    environment: {}
+    modes: {}
+    linked_options: {}

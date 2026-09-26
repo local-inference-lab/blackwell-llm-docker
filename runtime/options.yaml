@@ -137,6 +137,12 @@
       "MM_ENCODER_TP_MODE"
     ]
   },
+  "limit-mm-per-prompt": {
+    "type": "object",
+    "env": [
+      "LIMIT_MM_PER_PROMPT"
+    ]
+  },
   "port": {
     "type": "integer",
     "env": [

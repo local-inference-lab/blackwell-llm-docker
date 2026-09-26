@@ -6,4 +6,5 @@
 | `ds4-vision` | 2 / 1 | dspark / 3 | 4096 | 2 | B12X / b12x / native | 16 |
 | `ds41-flash` | 4 / 1 | dspark / 7 | 4096 | 8 | B12X / b12x / b12x | 128 |
 | `glm53-flash` | 4 / 1 | mtp / 3 | 4096 | 1 | B12X / b12x / b12x | 256 |
+| `mimo26-flash` | 4 / 1 | dflash2 / 7 | 4096 | 16 | B12X / b12x / b12x | 256 |
 | `qwen38-flash-next` | 1 / 1 | mtp / 3 | 6019 | 2 | native / b12x / b12x | 64 |
