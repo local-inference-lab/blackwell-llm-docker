@@ -347,6 +347,9 @@ class LaunchPlan:
     passthrough: list[str]
     warnings: list[str]
     cache_service: Any = None
+    # Drafter shipped inside the target checkpoint; resolved to a local path
+    # at launch, so printing a configuration never downloads anything.
+    draft_subfolder: str | None = None
 
     def public(self) -> dict:
         # Build public argv from redacted values; never dump the process environment.
@@ -691,6 +694,15 @@ def resolve(
             "remote code follows selected checkpoint",
         )
 
+    if identifier == "mimo26-flash" and "max-num-scheduled-tokens" not in values:
+        # Qualified MiMo split: half of each step's rows for target tokens,
+        # the rest for DFlash verification rows (vllm #881: 4096 / 2048).
+        derive(
+            "max-num-scheduled-tokens",
+            values["max-num-batched-tokens"] // 2,
+            "MiMo target share of the step",
+        )
+
     if identifier == "qwen38-flash-next":
         # B12X QSA shards compressed KV across DCP ranks in groups of four
         # tokens and refuses vLLM's default interleave of one, so every
@@ -764,6 +776,7 @@ def resolve(
     ):
         derive("mode", "mtp", "positive MTP depth")
     mode = values["mode"]
+    draft_subfolder = None
     if mode not in model["modes"]:
         raise ConfigError(f"{identifier} does not define mode {mode}")
     if "speculative-config" not in values:
@@ -786,10 +799,15 @@ def resolve(
                         "adaptive-verification-cost-scale"
                     ],
                 )
+            elif identifier == "mimo26-flash":
+                spec["draft_tensor_parallel_size"] = values["tensor-parallel-size"]
             elif identifier.startswith("ds4-") and mode == "dspark":
                 spec["model"] = values["model"]
             if "draft-model" in values:
                 spec["model"] = values["draft-model"]
+            elif model["modes"][mode].get("draft_subfolder"):
+                draft_subfolder = model["modes"][mode]["draft_subfolder"]
+                spec["model"] = f"{values['model']}/{draft_subfolder}"
             if "draft-revision" in values:
                 spec["revision"] = values["draft-revision"]
             elif mode in {"mtp", "dspark"} and "revision" in values:
@@ -956,7 +974,38 @@ def resolve(
         passthrough,
         warnings,
         cache_service,
+        draft_subfolder,
     )
+
+
+def resolve_draft_subfolder(plan: LaunchPlan) -> None:
+    """Point the speculative config at the drafter inside the target checkpoint."""
+    if not plan.draft_subfolder or "speculative-config" not in plan.values:
+        return
+    target = plan.values["model"]
+    if Path(target).is_dir():
+        root = Path(target)
+    else:
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
+
+        # Fetches only the drafter's files; vLLM downloads the target itself.
+        # A cached snapshot is used as is, which also works offline.
+        options = {
+            "revision": plan.values.get("revision"),
+            "allow_patterns": [f"{plan.draft_subfolder}/*"],
+        }
+        try:
+            root = Path(snapshot_download(target, local_files_only=True, **options))
+        except LocalEntryNotFoundError:
+            root = None
+        if root is None or not (root / plan.draft_subfolder / "config.json").is_file():
+            root = Path(snapshot_download(target, **options))
+    draft = root / plan.draft_subfolder
+    if not (draft / "config.json").is_file():
+        raise ConfigError(f"Drafter config not found: {draft}/config.json")
+    plan.values["speculative-config"]["model"] = str(draft)
+    plan.argv = make_argv(plan.values, plan.passthrough)
 
 
 def make_argv(values: dict, passthrough: list[str]) -> list[str]:
@@ -1155,6 +1204,7 @@ def execute(plan: LaunchPlan, contract_path: Path) -> None:
     if environment.get("NCCL_GRAPH_FILE") == "":
         environment.pop("NCCL_GRAPH_FILE")
     environment.update(plan.environment)
+    resolve_draft_subfolder(plan)
     if plan.cache_service:
         from runtime.cache import resolve_identity, verify_installed_transfer
         from runtime.supervisor import supervise
@@ -1185,7 +1235,7 @@ def main() -> int:
     parser.add_argument(
         "--profile",
         default=os.environ.get("PROFILE"),
-        help="Model profile (or PROFILE): glm53-flash, qwen38-flash-next, ds4-flash, ds4-vision, ds41-flash",
+        help="Model profile (or PROFILE): glm53-flash, qwen38-flash-next, ds4-flash, ds4-vision, ds41-flash, mimo26-flash",
     )
     parser.add_argument("--hardware", default=os.environ.get("HARDWARE_PROFILE"))
     parser.add_argument(

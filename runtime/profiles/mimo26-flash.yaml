@@ -1,0 +1,66 @@
+schema_version: 1
+kind: model
+id: mimo26-flash
+status: implemented
+description: MiMo-V2.6-Flash-RL FP8 target with vision and audio, served on b12x with the checkpoint's DFlash drafter (7 tokens, adaptive verification).
+evidence:
+  - https://github.com/local-inference-lab/vllm/issues/882
+  - https://github.com/local-inference-lab/vllm/pull/881
+# Older snapshots ship dflash/config.json with a trailing comma.
+checkpoint_revision: 5711b268169967567844e1e560e8a3966da959b1
+defaults:
+  model: XiaomiMiMo/MiMo-V2.6-Flash-RL
+  served-model-name: MiMo-V2.6-Flash
+  tensor-parallel-size: 4
+  mode: dflash2
+  trust-remote-code: true
+  hf-overrides: {architectures: [MiMoV2OmniForCausalLM]}
+  mm-encoder-tp-mode: weights
+  load-format: auto
+  max-model-len: 1048576
+  max-num-seqs: 32
+  max-num-batched-tokens: 4096
+  prefill-compute-share: 0.8
+  scheduler-reserve-full-isl: false
+  gpu-memory-utilization: 0.96
+  block-size: 64
+  attention-backend: B12X
+  moe-backend: b12x
+  linear-backend: b12x
+  enable-flashinfer-autotune: false
+  async-scheduling: true
+  max-cudagraph-capture-size: 256
+  compilation-config: {cudagraph_mode: FULL_AND_PIECEWISE, custom_ops: [all]}
+  reasoning-parser: mimo
+  tool-call-parser: mimo
+  generation-config: vllm
+  override-generation-config: {temperature: 1.0, top_p: 0.95}
+environment:
+  VLLM_KV_CACHE_LAYOUT: BLHNC
+  VLLM_B12X_MOE_FP4_FORCE_A16: "1"
+  B12X_W4A16_FP32_TOPK_WEIGHTS: "1"
+  B12X_DENSE_SPLITK_TURBO: "0"
+  VLLM_B12X_BF16_GEMV: "1"
+  VLLM_MIMO_L2_PREFETCH: "1"
+  VLLM_DFLASH_VOCAB_PARALLEL_DRAFT: "1"
+  VLLM_SCHEDULER_UNCAP_PREFILL_ONLY_STEPS: "1"
+  VLLM_ADAPTIVE_VERIFICATION_PROFILE_CONTEXT_LEN: "32768"
+  OMP_NUM_THREADS: "16"
+  VLLM_PLUGINS: ""
+modes:
+  off: {}
+  dflash2:
+    draft_tokens: 7
+    # The drafter ships inside the target checkpoint.
+    draft_subfolder: dflash
+    config:
+      method: dflash
+      enable_adaptive_verification: true
+      draft_sample_method: probabilistic
+      rejection_sample_method: standard
+      attention_backend: B12X
+      kv_cache_dtype: fp8
+cache:
+  gpu: implemented
+  external: unsupported
+  migration_contract: none

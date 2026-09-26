@@ -90,6 +90,19 @@ imposed.
   The external cache (`CACHE_MODE=lmcache`) is not available at TP3; the VRAM
   prefix cache is. The first start tunes FlashInfer MoE kernels and stores the
   result under `/cache`.
+- MiMo-V2.6-Flash on two GPUs: `PRESET=mimo26-flash-tp2` serves
+  `XiaomiMiMo/MiMo-V2.6-Flash-RL` (FP8 weights, text, images and audio) on
+  b12x with the checkpoint's own DFlash drafter: seven draft tokens, adaptive
+  verification, drafts sharded across both GPUs. The FP8 KV cache holds about
+  1.31M tokens, enough for the full 1M context. Video input is off at TP2,
+  because vLLM would reserve about 6 GiB per GPU for a maximum-size video.
+  `PROFILE=mimo26-flash` is the four-GPU default and keeps video. The profile
+  pins checkpoint revision `5711b268`, because older snapshots ship an invalid
+  `dflash/config.json`. The drafter is read from the `dflash/` folder of that
+  snapshot. Sampling defaults to temperature 1.0, top_p 0.95; top_p 1.0 makes
+  the model ramble. `KV_CACHE_DTYPE=bfloat16` selects the exact BF16 cache at
+  half the capacity. The first start autotunes b12x kernels for about 15
+  minutes and stores the result under `/cache`.
 
 For Qwen, the `rtx-pro-6000-pcie` hardware profile keeps residual-mixing
 projections replicated on each GPU (`VLLM_QWEN3_8_FLASH_NEXT_HC_TP=0`). This
