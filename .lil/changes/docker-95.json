@@ -1,0 +1,13 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-95",
+  "category": "fix",
+  "summary": "MiMo-V2.6-Flash accepts KV_CACHE_DTYPE=bfloat16",
+  "models": ["XiaomiMiMo/MiMo-V2.6-Flash-RL"],
+  "compatibility": "No user action required.",
+  "details": [
+    "The launcher rejected the exact BF16 KV cache for MiMo although the README documents it; it holds half the FP8 capacity."
+  ],
+  "pull_requests": [95],
+  "requires": []
+}

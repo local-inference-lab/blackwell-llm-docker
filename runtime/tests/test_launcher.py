@@ -694,3 +694,10 @@ def test_mimo_drafter_requires_its_config(tmp_path):
 def test_mimo_without_speculation_has_no_drafter():
     plan = resolve("mimo26-flash", env={"SPECULATOR": "off"})
     assert "speculative-config" not in plan.values
+
+
+def test_mimo_accepts_the_exact_bf16_cache():
+    plan = resolve("mimo26-flash", env={"KV_CACHE_DTYPE": "bfloat16"})
+    assert plan.values["kv-cache-dtype"] == "bfloat16"
+    with pytest.raises(ConfigError, match="supports target KV"):
+        resolve("qwen38-flash-next", env={"KV_CACHE_DTYPE": "bfloat16"})
