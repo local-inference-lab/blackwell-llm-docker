@@ -1,0 +1,15 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-93",
+  "category": "feature",
+  "summary": "PROFILE=mimo26-flash and PRESET=mimo26-flash-tp2: MiMo-V2.6-Flash with DFlash on b12x",
+  "models": ["XiaomiMiMo/MiMo-V2.6-Flash-RL"],
+  "compatibility": "New profile and preset; requires the MiMo-V2.6 series in vLLM and b12x.",
+  "details": [
+    "Serves XiaomiMiMo/MiMo-V2.6-Flash-RL (revision 5711b268) with text, images and audio, FP8 KV and the checkpoint's DFlash drafter (7 tokens, adaptive verification).",
+    "PRESET=mimo26-flash-tp2 runs on two GPUs with 1.31M KV tokens (full 1M context); video input is off at TP2.",
+    "New managed option limit-mm-per-prompt (LIMIT_MM_PER_PROMPT)."
+  ],
+  "pull_requests": [93],
+  "requires": ["vllm-871", "vllm-881", "b12x-420"]
+}
