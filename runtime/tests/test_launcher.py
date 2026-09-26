@@ -17,7 +17,14 @@ from runtime.packaging import (
     payload_hashes,
 )
 
-MODELS = ["glm53-flash", "ds4-flash", "ds4-vision", "ds41-flash", "qwen38-flash-next", "mimo26-flash"]
+MODELS = [
+    "glm53-flash",
+    "ds4-flash",
+    "ds4-vision",
+    "ds41-flash",
+    "qwen38-flash-next",
+    "mimo26-flash",
+]
 
 
 @pytest.mark.parametrize("tp", [1, 2, 4])
