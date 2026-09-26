@@ -987,16 +987,17 @@ def resolve_draft_subfolder(plan: LaunchPlan) -> None:
         root = Path(target)
     else:
         from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
 
         # Fetches only the drafter's files; vLLM downloads the target itself.
         # A cached snapshot is used as is, which also works offline.
-        options = dict(
-            revision=plan.values.get("revision"),
-            allow_patterns=[f"{plan.draft_subfolder}/*"],
-        )
+        options = {
+            "revision": plan.values.get("revision"),
+            "allow_patterns": [f"{plan.draft_subfolder}/*"],
+        }
         try:
             root = Path(snapshot_download(target, local_files_only=True, **options))
-        except Exception:
+        except LocalEntryNotFoundError:
             root = None
         if root is None or not (root / plan.draft_subfolder / "config.json").is_file():
             root = Path(snapshot_download(target, **options))
