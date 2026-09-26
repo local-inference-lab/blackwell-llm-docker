@@ -6,6 +6,9 @@ description: Qwen3.8 Flash Next NVFP4 with CPU PLE tables and a private NVFP4 MT
 evidence:
   - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/qwen38-flash-next/qwen38-flash-next.compose.yml
 defaults:
+  # Disk gets the newest checkpoint of each conversation when it leaves RAM
+  # and at shutdown; superseded turns are never written.
+  cache-l2-checkpoint-writes: on-evict
   model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
   served-model-name: Qwen3.8-Flash-Next
   tensor-parallel-size: 1

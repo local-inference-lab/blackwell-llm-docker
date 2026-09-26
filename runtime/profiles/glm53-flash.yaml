@@ -8,6 +8,9 @@ evidence:
   - recipes/glm53/serve-glm53-flash-cache-complete.sh
   - recipes/glm53/serve-glm53-flash-nvfp4-dflash2.sh
 defaults:
+  # Disk gets the newest checkpoint of each conversation when it leaves RAM
+  # and at shutdown; superseded turns are never written.
+  cache-l2-checkpoint-writes: on-evict
   cache-l1-gib: 64
   cache-l1-init-gib: 2
   cache-l2-gib: 512

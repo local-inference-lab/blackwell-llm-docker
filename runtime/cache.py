@@ -320,6 +320,19 @@ def configure(values, origins, environment, env_origins, identifier, runtime_ide
     # at shutdown, and never writes superseded ones.
     store_policy = "default"
     checkpoint_writes = values["cache-l2-checkpoint-writes"]
+    if (
+        values["cache-l2-enabled"]
+        and checkpoint_writes in CHECKPOINT_STORE_POLICIES
+        and not semantic
+        and origins["cache-l2-checkpoint-writes"].startswith(("model:", "common:"))
+    ):
+        # The profile default applies to request-boundary checkpoints only;
+        # other checkpoint policies keep writing every cache object.
+        checkpoint_writes = "always"
+        values["cache-l2-checkpoint-writes"] = checkpoint_writes
+        origins["cache-l2-checkpoint-writes"] = (
+            "derived:no request-boundary checkpoints"
+        )
     if values["cache-l2-enabled"] and checkpoint_writes in CHECKPOINT_STORE_POLICIES:
         if not semantic:
             raise ConfigError(
