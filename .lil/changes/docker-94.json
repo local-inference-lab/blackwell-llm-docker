@@ -1,0 +1,14 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-94",
+  "category": "compatibility",
+  "summary": "GLM-5.3-Flash and Qwen3.8 write checkpoints to the disk cache only when they leave RAM",
+  "models": ["GLM-5.3-Flash", "Qwen3.8-Flash-Next"],
+  "compatibility": "With CACHE_MODE=lmcache and a disk tier, LMCACHE_L2_CHECKPOINT_WRITES now defaults to on-evict; set it to always for the previous behaviour. Give the container time to stop (the generated commands set it) so RAM-only checkpoints reach the disk.",
+  "details": [
+    "Each conversation's newest checkpoint is written when it leaves RAM and at shutdown; superseded turns are never written, so the disk holds many more conversations.",
+    "Configurations without request-boundary checkpoints keep writing every cache object."
+  ],
+  "pull_requests": [94],
+  "requires": []
+}

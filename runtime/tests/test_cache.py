@@ -388,13 +388,19 @@ def store_policies(plan) -> list[str]:
 @pytest.mark.parametrize(
     "identifier,env,expected",
     [
-        ("qwen38-flash-next", {}, ["default"]),
+        ("qwen38-flash-next", {}, ["checkpoint_on_evict"]),
+        (
+            "qwen38-flash-next",
+            {"LMCACHE_L2_CHECKPOINT_WRITES": "always"},
+            ["default"],
+        ),
         (
             "qwen38-flash-next",
             {"LMCACHE_L2_CHECKPOINT_WRITES": "on-reuse"},
             ["checkpoint_on_reuse"],
         ),
-        ("glm53-flash", {"TP": "2"}, []),
+        ("glm53-flash", {"TP": "2"}, ["checkpoint_on_evict"]),
+        ("glm53-flash", {"TP": "2", "LMCACHE_L2_CHECKPOINT_WRITES": "always"}, []),
         (
             "glm53-flash",
             {"TP": "2", "LMCACHE_L2_CHECKPOINT_WRITES": "on-reuse"},
@@ -442,7 +448,9 @@ def test_l2_checkpoint_writes_need_l2_and_request_boundary_checkpoints():
 )
 def test_on_evict_flushes_at_shutdown_and_extends_the_stop_grace(identifier, env):
     base = {"CACHE_MODE": "lmcache", "LMCACHE_L2_ENABLED": "true", **env}
-    always = resolve(identifier, env=base).cache_service
+    always = resolve(
+        identifier, env={**base, "LMCACHE_L2_CHECKPOINT_WRITES": "always"}
+    ).cache_service
     on_evict = resolve(
         identifier, env={**base, "LMCACHE_L2_CHECKPOINT_WRITES": "on-evict"}
     ).cache_service
@@ -450,3 +458,30 @@ def test_on_evict_flushes_at_shutdown_and_extends_the_stop_grace(identifier, env
     flag = on_evict.argv.index("--checkpoint-shutdown-flush-seconds")
     flush = float(on_evict.argv[flag + 1])
     assert on_evict.stop_grace >= flush + always.stop_grace
+
+
+def test_on_evict_default_falls_back_without_request_boundary_checkpoints():
+    plan = resolve(
+        "glm53-flash",
+        env={
+            "CACHE_MODE": "lmcache",
+            "LMCACHE_L2_ENABLED": "true",
+            "RECURRENT_CHECKPOINT_POLICY": "aligned",
+        },
+    )
+    assert plan.values["cache-l2-checkpoint-writes"] == "always"
+    assert plan.origins["cache-l2-checkpoint-writes"].startswith("derived:")
+    with pytest.raises(ConfigError, match="request-boundary"):
+        resolve(
+            "glm53-flash",
+            env={
+                "CACHE_MODE": "lmcache",
+                "LMCACHE_L2_ENABLED": "true",
+                "RECURRENT_CHECKPOINT_POLICY": "aligned",
+                "LMCACHE_L2_CHECKPOINT_WRITES": "on-evict",
+            },
+        )
+    ds4 = resolve(
+        "ds4-flash", env={"CACHE_MODE": "lmcache", "LMCACHE_L2_ENABLED": "true"}
+    )
+    assert ds4.values["cache-l2-checkpoint-writes"] == "always"

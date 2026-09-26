@@ -482,8 +482,10 @@ With disk storage, a chat turn writes two or three of them even when the next
 turn cannot use them, because the chat template rewrites the previous prompt
 and response. `LMCACHE_L2_CHECKPOINT_WRITES` selects what reaches the disk:
 
-- `always` (default) writes every checkpoint to disk.
-- `on-evict` writes the current checkpoint of a conversation once, when it
+- `always` writes every checkpoint to disk. It is the default for models
+  without request-boundary checkpoints.
+- `on-evict` (default for GLM-5.3-Flash and Qwen3.8) writes the current
+  checkpoint of a conversation once, when it
   leaves RAM, and again for everything still only in RAM when the container
   stops. Checkpoints that a newer turn of the same conversation has
   superseded are never written. Disk writes fall from every request to about
