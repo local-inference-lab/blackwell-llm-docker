@@ -1,0 +1,13 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-96",
+  "category": "feature",
+  "summary": "Every launcher option and environment variable is documented with what it does and why a profile sets it",
+  "models": ["all"],
+  "compatibility": "No user action required.",
+  "details": [
+    "runtime/parameter-docs.yaml groups all managed options and environment variables and explains the values our profiles, presets and hardware files choose; the Docker configurator shows it next to every parameter."
+  ],
+  "pull_requests": [96],
+  "requires": []
+}
