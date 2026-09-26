@@ -34,7 +34,7 @@ options:
     summary: Weight loader used at startup, for example auto, safetensors or instanttensor. instanttensor
       loads safetensors weights onto the GPUs with pipelined prefetching and direct I/O.
     why: The common layer uses instanttensor. MiMo uses auto because the b12x loader's cuFile setup fails
-      to parse the NGC image's /etc/cufile.json (vllm PR 881); the GLM Spark TP2 preset uses safetensors.
+      to parse the NGC image's /etc/cufile.json (fixed in b12x PR 431); the GLM Spark TP2 preset uses safetensors.
   dtype:
     group: model
     summary: Data type for model weights and activations that are not otherwise quantized.
