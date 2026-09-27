@@ -1,6 +1,6 @@
 {
   "schema": "local-inference-release-change/v1",
-  "id": "docker-qwen38-nvfp4-qsa-kv",
+  "id": "docker-102",
   "category": "feature",
   "summary": "Qwen3.8-Flash-Next accepts KV_CACHE_DTYPE=nvfp4_qsa",
   "models": [
@@ -14,5 +14,8 @@
   "requires": [
     "vllm-910",
     "b12x-qsa-nvfp4-kv"
+  ],
+  "pull_requests": [
+    102
   ]
 }
