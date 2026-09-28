@@ -18,6 +18,39 @@ from runtime.cache import CacheService
 from runtime.launcher import resolve
 
 
+@pytest.mark.parametrize("grace", [20, 50])
+def test_stop_drains_model_before_signalling_cache(monkeypatch, grace):
+    events = []
+    clock = [100.0]
+
+    class Child:
+        def __init__(self, pid, delay):
+            self.pid, self.delay = pid, delay
+
+        def wait(self, timeout=None):
+            events.append(("wait", self.pid, timeout))
+            if timeout is not None:
+                clock[0] += min(timeout, self.delay)
+                if self.delay > timeout:
+                    raise subprocess.TimeoutExpired("child", timeout)
+            return 0
+
+    monkeypatch.setattr(supervisor.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        supervisor.os, "killpg", lambda pid, sig: events.append(("signal", pid, sig))
+    )
+    cache, model = Child(101, 25), Child(102, 100)
+    supervisor.stop_groups([cache, model], grace=grace)
+    assert events[:4] == [
+        ("signal", 102, signal.SIGTERM),
+        ("wait", 102, 10),
+        ("signal", 102, signal.SIGKILL),
+        ("wait", 102, None),
+    ]
+    assert events[4:6] == [("signal", 101, signal.SIGTERM), ("wait", 101, grace - 10)]
+    assert clock[0] == 110 + min(25, grace - 10)
+
+
 @pytest.mark.parametrize(
     "cache_exit,model_exit,expected",
     [(None, 0, 0), (7, None, "before readiness"), (None, 3, 3)],

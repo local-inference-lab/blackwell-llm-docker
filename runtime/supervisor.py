@@ -323,19 +323,26 @@ def announce(message: str) -> None:
 
 
 def stop_groups(children, grace=10):
-    for child in children:
+    """Stop producers before cache, within one shared shutdown deadline.
+
+    Children are appended cache first, model second. Model workers must drain
+    their copy leases while the cache RPC service is still available.
+    """
+    deadline = time.monotonic() + grace
+    for child in reversed(children):
         try:
             os.killpg(child.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-    deadline = time.monotonic() + grace
-    for child in children:
+        # Reserve the cache flush portion of the shared budget for the cache.
+        remaining = max(0.01, deadline - time.monotonic())
+        wait = min(10.0, remaining) if child is not children[0] else remaining
         try:
-            child.wait(timeout=max(0.01, deadline - time.monotonic()))
+            child.wait(timeout=wait)
         except subprocess.TimeoutExpired:
             pass
-    # A group can still contain worker descendants after its leader exits.
-    for child in children:
+        # Workers may outlive the leader; signal the entire producer group
+        # before cache shutdown. Cache ownership still protects undrained copies.
         try:
             os.killpg(child.pid, signal.SIGKILL)
         except ProcessLookupError:

@@ -506,11 +506,11 @@ options:
   cache-l2-checkpoint-writes:
     group: cache
     summary: Chooses which request-boundary recurrent checkpoints reach the disk tier. always writes every
-      one, on-reuse writes a checkpoint only after a restore used it, and on-evict writes the current
-      checkpoint of a conversation when it leaves RAM and at shutdown.
-    why: 'GLM-5.3-Flash and Qwen3.8 default to on-evict: each conversation''s newest checkpoint reaches
-      the disk when it leaves RAM and at shutdown, so the disk holds many more conversations (docker PR
-      94). Other models write every checkpoint (always).'
+      one, on-reuse writes a checkpoint only after a restore used it, and on-evict defers retained
+      checkpoint pages until memory pressure or shutdown.
+    why: 'GLM-5.3-Flash and Qwen3.8 default to on-evict. Shared persisted pages are reused; older branches
+      remain eligible. Write savings depend on data retiring before persistence becomes necessary.
+      Other models write every checkpoint (always).'
   cache-directory:
     group: cache
     summary: Absolute directory for the LMCache disk tier. Each model, cache layout and checkpoint identity

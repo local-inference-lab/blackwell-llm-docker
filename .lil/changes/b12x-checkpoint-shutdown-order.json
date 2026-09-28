@@ -1,0 +1,13 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "b12x-checkpoint-shutdown-order",
+  "category": "fix",
+  "summary": "Stop model producers before draining the checkpoint cache",
+  "models": ["all"],
+  "compatibility": "No user action required.",
+  "details": [
+    "Model shutdown and cache cleanup receive separate allowances. Disk-backed recurrent checkpoint services also receive a 30-second persistence drain budget.",
+    "The supervisor allows up to 50 seconds for checkpoint service shutdown, including producer termination and cache cleanup; other cache services receive 20 seconds."
+  ],
+  "authors": ["ktsaou"]
+}

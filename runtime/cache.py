@@ -20,7 +20,7 @@ CHECKPOINT_STORE_POLICIES = {
     "on-evict": "checkpoint_on_evict",
 }
 # Seconds LMCache may spend writing RAM-only checkpoints to L2 at shutdown
-# with on-evict, and the extra time the supervisor waits before SIGKILL.
+# and a separate margin for metadata retirement and adapter teardown.
 CHECKPOINT_SHUTDOWN_FLUSH_SECONDS = 30
 STOP_GRACE_SECONDS = 10
 
@@ -37,7 +37,7 @@ class CacheService:
     identity_required: bool = False
     namespace: str = ""
     # Seconds between SIGTERM and SIGKILL when the container stops.
-    stop_grace: float = STOP_GRACE_SECONDS
+    stop_grace: float = 2 * STOP_GRACE_SECONDS
     # Delete unused disk-tier namespaces of earlier images or settings.
     prune_stale_tiers: bool = False
 
@@ -313,11 +313,8 @@ def configure(values, origins, environment, env_origins, identifier, runtime_ide
         values["cache-prefetch-policy"],
     ]
     argv += ["--no-l1-use-lazy", "--shm-name", shm] if engine else ["--l1-use-lazy"]
-    # A request-boundary checkpoint carries the complete recurrent state and
-    # the next turn of the same conversation supersedes it. on-reuse keeps
-    # new checkpoints in RAM until a restore proves them useful; on-evict
-    # writes the current checkpoint of a conversation when it leaves RAM and
-    # at shutdown, and never writes superseded ones.
+    # on-reuse waits for a restore; on-evict waits for memory pressure or
+    # shutdown. Older branches remain eligible until coherent retirement.
     store_policy = "default"
     checkpoint_writes = values["cache-l2-checkpoint-writes"]
     if (
@@ -340,8 +337,9 @@ def configure(values, origins, environment, env_origins, identifier, runtime_ide
                 "to request-boundary checkpoints"
             )
         store_policy = CHECKPOINT_STORE_POLICIES[checkpoint_writes]
-    stop_grace = STOP_GRACE_SECONDS
-    if store_policy == "checkpoint_on_evict":
+    # Producer shutdown and cache cleanup each retain their own allowance.
+    stop_grace = 2 * STOP_GRACE_SECONDS
+    if semantic and values["cache-l2-enabled"]:
         argv += [
             "--checkpoint-shutdown-flush-seconds",
             str(CHECKPOINT_SHUTDOWN_FLUSH_SECONDS),

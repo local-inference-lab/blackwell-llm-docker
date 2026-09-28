@@ -446,7 +446,7 @@ def test_l2_checkpoint_writes_need_l2_and_request_boundary_checkpoints():
 @pytest.mark.parametrize(
     "identifier,env", [("qwen38-flash-next", {}), ("glm53-flash", {"TP": "2"})]
 )
-def test_on_evict_flushes_at_shutdown_and_extends_the_stop_grace(identifier, env):
+def test_checkpoint_policies_reserve_time_for_shutdown_drain(identifier, env):
     base = {"CACHE_MODE": "lmcache", "LMCACHE_L2_ENABLED": "true", **env}
     always = resolve(
         identifier, env={**base, "LMCACHE_L2_CHECKPOINT_WRITES": "always"}
@@ -454,10 +454,10 @@ def test_on_evict_flushes_at_shutdown_and_extends_the_stop_grace(identifier, env
     on_evict = resolve(
         identifier, env={**base, "LMCACHE_L2_CHECKPOINT_WRITES": "on-evict"}
     ).cache_service
-    assert "--checkpoint-shutdown-flush-seconds" not in always.argv
+    assert "--checkpoint-shutdown-flush-seconds" in always.argv
     flag = on_evict.argv.index("--checkpoint-shutdown-flush-seconds")
     flush = float(on_evict.argv[flag + 1])
-    assert on_evict.stop_grace >= flush + always.stop_grace
+    assert on_evict.stop_grace == always.stop_grace == flush + 20
 
 
 def test_on_evict_default_falls_back_without_request_boundary_checkpoints():

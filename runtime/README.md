@@ -502,23 +502,24 @@ and response. `LMCACHE_L2_CHECKPOINT_WRITES` selects what reaches the disk:
 
 - `always` writes every checkpoint to disk. It is the default for models
   without request-boundary checkpoints.
-- `on-evict` (default for GLM-5.3-Flash and Qwen3.8) writes the current
-  checkpoint of a conversation once, when it
-  leaves RAM, and again for everything still only in RAM when the container
-  stops. Checkpoints that a newer turn of the same conversation has
-  superseded are never written. Disk writes fall from every request to about
-  one checkpoint per conversation that goes idle, so the disk holds the
-  newest state of many more conversations. Give the container time to stop:
+- `on-evict` (default for GLM-5.3-Flash and Qwen3.8) defers writes until RAM
+  pressure or shutdown. Shared pages already on disk are reused. Older branches
+  remain eligible for persistence; supersession alone does not discard them.
+  Write savings depend on checkpoints retiring before they need persistence:
+  keeping every branch can eventually write as much as `always`.
+  Give the container time to stop:
   `docker run --stop-timeout 60` or Compose `stop_grace_period: 60s`; the
-  shutdown write takes up to 30 s. A crash or `docker kill` loses checkpoints
-  that were only in RAM.
+  persistence has a 30-second budget inside a 50-second producer/cache shutdown
+  allowance. Remaining RAM-only checkpoints may be lost. A crash or `docker
+  kill` also loses checkpoints that were only in RAM.
 - `on-reuse` keeps new checkpoints in RAM and writes each one to disk only
   after a restore from the cache has used it. A follow-up served from GPU
   memory does not count, so with long conversations little reaches the disk.
 
-With every value, RAM and disk eviction remove superseded checkpoints before
-any other entry. After a restart or eviction, a restore uses the longest
-checkpoint that still exists. Disk retention is roughly the disk capacity
+Supersession and recency guide eviction. Under sustained memory pressure, cold
+checkpoints may be retired before their last pages are reclaimed; active copies
+retain their buffers until completion. After a restart or eviction, a restore
+uses the longest complete compatible checkpoint that remains. Disk retention is roughly the disk capacity
 divided by the checkpoint bytes written per minute; check
 `lmcache_mp_checkpoint_retention{stat="l2_checkpoint_bytes"}` on the cache
 metrics port. The engine-driven service uses CPU memory,
