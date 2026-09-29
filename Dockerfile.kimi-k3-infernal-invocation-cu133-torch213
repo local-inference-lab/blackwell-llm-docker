@@ -21,6 +21,14 @@ ARG B12X_PATCH_SHA256
 ARG B12X_INTEGRATION_TREE
 ARG B12X_INTEGRATION_LOCK_SHA256
 ARG B12X_PRS
+ARG FLASHKDA_REPO=https://github.com/vllm-project/FlashKDA.git
+ARG FLASHKDA_REF=dev
+ARG FLASHKDA_COMMIT=ee0be888cd0e972f9409bf53756f8c38c6652173
+ARG FLASHKDA_PATCH_FILE=releases/flashkda-sm120-tensormap-r1/flashkda/integration.patch
+ARG FLASHKDA_PATCH_SHA256=2119fdd721decd873cdbbbe5263f624e21b8b2e83cede36d9f19e75377895951
+ARG FLASHKDA_INTEGRATION_TREE=6851531e95decd57c28f166fa6ce8aa381a1aa04
+ARG FLASHKDA_INTEGRATION_LOCK_SHA256
+ARG FLASHKDA_CUTLASS_COMMIT=5c149f52a436782210263fb2f19b354443a61c6a
 ARG INSTANTTENSOR_REPO=https://github.com/voipmonitor/InstantTensor.git
 ARG INSTANTTENSOR_REF=49b4010afc1cae0441e71fe0b0bffc24fa05e932
 ARG INSTANTTENSOR_COMMIT=49b4010afc1cae0441e71fe0b0bffc24fa05e932
@@ -49,7 +57,7 @@ ENV VIRTUAL_ENV=/opt/venv \
     NCCL_CUMEM_ENABLE=0 \
     NCCL_PROTO=LL,LL128,Simple
 
-# Cache paths include both composed source trees. Target-only, DSpark, and
+# Cache paths include all composed source trees. Target-only, DSpark, and
 # DFlash profiles use separate host volumes so compiled modules cannot cross
 # profile boundaries.
 ENV LOCAL_INFERENCE_CACHE_FINGERPRINT=${CACHE_FINGERPRINT} \
@@ -107,6 +115,13 @@ RUN set -eux; \
     compose_source b12x /opt/kimi-k3/b12x \
       "${B12X_REPO}" "${B12X_REF}" "${B12X_COMMIT}" \
       "${B12X_PATCH_FILE}" "${B12X_PATCH_SHA256}" "${B12X_INTEGRATION_TREE}"; \
+    compose_source flashkda /opt/kimi-k3/flashkda \
+      "${FLASHKDA_REPO}" "${FLASHKDA_REF}" "${FLASHKDA_COMMIT}" \
+      "${FLASHKDA_PATCH_FILE}" "${FLASHKDA_PATCH_SHA256}" \
+      "${FLASHKDA_INTEGRATION_TREE}"; \
+    git -C /opt/kimi-k3/flashkda submodule update --init --recursive; \
+    test "$(git -C /opt/kimi-k3/flashkda/cutlass rev-parse HEAD)" = \
+      "${FLASHKDA_CUTLASS_COMMIT}"; \
     rm -rf /tmp/release-patches
 
 # The virtual environment inherits the CUDA 13.3 and stable PyTorch 2.13
@@ -174,6 +189,7 @@ RUN --mount=type=cache,id=kimi-k3-infernal-vllm-extensions,target=/tmp/vllm-exte
       -DCMAKE_CUDA_ARCHITECTURES=75 \
       -DVLLM_TARGET_DEVICE=cuda \
       -DVLLM_PYTHON_EXECUTABLE=/opt/venv/bin/python \
+      -DFETCHCONTENT_SOURCE_DIR_FLASHKDA=/opt/kimi-k3/flashkda \
       -DNVCC_THREADS=4; \
     cmake --build /tmp/vllm-extensions --parallel 48; \
     find /tmp/vllm-extensions -name '*.abi3.so' > /tmp/vllm-extension-list; \
@@ -309,7 +325,7 @@ ARG RELEASE_DATE
 ARG DOCKER_COMMIT
 
 LABEL org.opencontainers.image.title="Kimi-K3 dev/infernal-invocation CUDA 13.3 PyTorch 2.13 runtime" \
-      org.opencontainers.image.description="Pinned infernal-invocation and B12X Kimi-K3 serving runtime on stable PyTorch 2.13 and CUDA 13.3" \
+      org.opencontainers.image.description="Pinned infernal-invocation, B12X, and FlashKDA Kimi-K3 serving runtime on stable PyTorch 2.13 and CUDA 13.3" \
       org.opencontainers.image.source="https://github.com/local-inference-lab/blackwell-llm-docker" \
       org.opencontainers.image.version="${RELEASE_DATE}" \
       org.opencontainers.image.revision="${DOCKER_COMMIT}" \
@@ -335,6 +351,14 @@ LABEL org.opencontainers.image.title="Kimi-K3 dev/infernal-invocation CUDA 13.3 
       local-inference.b12x.patch_file="${B12X_PATCH_FILE}" \
       local-inference.b12x.patch_sha256="${B12X_PATCH_SHA256}" \
       local-inference.b12x.integration.lock_sha256="${B12X_INTEGRATION_LOCK_SHA256}" \
+      local-inference.flashkda.repo="${FLASHKDA_REPO}" \
+      local-inference.flashkda.branch="${FLASHKDA_REF}" \
+      local-inference.flashkda.commit="${FLASHKDA_COMMIT}" \
+      local-inference.flashkda.integration.tree="${FLASHKDA_INTEGRATION_TREE}" \
+      local-inference.flashkda.patch_file="${FLASHKDA_PATCH_FILE}" \
+      local-inference.flashkda.patch_sha256="${FLASHKDA_PATCH_SHA256}" \
+      local-inference.flashkda.integration.lock_sha256="${FLASHKDA_INTEGRATION_LOCK_SHA256}" \
+      local-inference.flashkda.cutlass.commit="${FLASHKDA_CUTLASS_COMMIT}" \
       local-inference.instanttensor.repo="${INSTANTTENSOR_REPO}" \
       local-inference.instanttensor.ref="${INSTANTTENSOR_REF}" \
       local-inference.instanttensor.commit="${INSTANTTENSOR_COMMIT}" \
