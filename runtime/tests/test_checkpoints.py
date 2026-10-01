@@ -2,6 +2,8 @@
 and the serving files that let vLLM read an FP4-CSF repository."""
 
 import json
+import sys
+import types
 
 import pytest
 
@@ -146,6 +148,27 @@ def _csf_checkpoint(root, schema, quantization_config, nested=False, shard=b"xyz
     return root
 
 
+def _fake_hub(monkeypatch, snapshot_download, hf_hub_download=None):
+    """A stand-in huggingface_hub: the runtime CI has none, and the tests
+    must not reach the Hub or a real cache."""
+
+    class LocalEntryNotFoundError(Exception):
+        pass
+
+    def no_manifest_download(*args, **kwargs):
+        raise AssertionError("unexpected manifest download")
+
+    hub = types.ModuleType("huggingface_hub")
+    errors = types.ModuleType("huggingface_hub.errors")
+    errors.LocalEntryNotFoundError = LocalEntryNotFoundError
+    hub.errors = errors
+    hub.snapshot_download = snapshot_download
+    hub.hf_hub_download = hf_hub_download or no_manifest_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    monkeypatch.setitem(sys.modules, "huggingface_hub.errors", errors)
+    return LocalEntryNotFoundError
+
+
 def _serving_config(plan):
     serving = plan.values["model"]
     assert plan.argv[4] == serving
@@ -185,7 +208,7 @@ def test_mxfp4_csf_serving_files_keep_the_source_fields(tmp_path, monkeypatch):
         snapshots.append((repository, revision, local_files_only))
         return str(root)
 
-    monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
+    _fake_hub(monkeypatch, snapshot_download)
     plan = resolve("ds41-flash", "rtx-pro-6000-pcie", env={})
 
     prepare_csf_checkpoint(plan)
@@ -249,8 +272,6 @@ def test_hub_checkpoints_download_only_after_the_manifest_matches(
 ):
     """An incomplete cache downloads the rest; a repository that is not FP4-CSF
     is refused before its weights are downloaded."""
-    from huggingface_hub.errors import LocalEntryNotFoundError
-
     monkeypatch.setattr(launcher, "CSF_SERVING_ROOT", tmp_path / "serving")
     partial = _csf_checkpoint(
         tmp_path / "partial", "lil-nvfp4-csf-checkpoint/1", {}, shard=b"x"
@@ -263,15 +284,14 @@ def test_hub_checkpoints_download_only_after_the_manifest_matches(
     def snapshot_download(repository, revision=None, local_files_only=False):
         calls.append(("snapshot", local_files_only))
         if repository == "org/other":
-            raise LocalEntryNotFoundError("not cached")
+            raise not_cached("not cached")
         return str(partial if local_files_only else complete)
 
     def hf_hub_download(repository, filename, revision=None):
         calls.append(("manifest", filename))
         return str(other if repository == "org/other" else complete / filename)
 
-    monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
-    monkeypatch.setattr("huggingface_hub.hf_hub_download", hf_hub_download)
+    not_cached = _fake_hub(monkeypatch, snapshot_download, hf_hub_download)
 
     plan = resolve("glm53-flash", env={"MODEL": "org/csf", "CHECKPOINT": "csf"})
     prepare_csf_checkpoint(plan)
