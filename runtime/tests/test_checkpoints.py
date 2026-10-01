@@ -170,6 +170,7 @@ def test_nvfp4_csf_serving_files_name_the_reader_and_the_root(tmp_path, monkeypa
         "source_quantization_config": source,
     }
     assert (launcher.Path(plan.values["model"]) / "tokenizer.json").is_file()
+    assert launcher.Path(plan.values["model"]).name.startswith("qwen-")
     assert "revision" not in plan.values
     assert "revision" not in plan.values["speculative-config"]
 
@@ -198,6 +199,9 @@ def test_mxfp4_csf_serving_files_keep_the_source_fields(tmp_path, monkeypatch):
         "checkpoint_root": str(root),
     }
     assert plan.origins["model"].startswith("resolved:FP4-CSF")
+    assert launcher.Path(plan.values["model"]).name.startswith(
+        "DeepSeek-V4.1-Flash-MXFP4-CSF-"
+    )
 
 
 @pytest.mark.parametrize(

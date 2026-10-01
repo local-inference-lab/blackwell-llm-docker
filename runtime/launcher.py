@@ -1196,7 +1196,10 @@ def prepare_csf_checkpoint(plan: LaunchPlan) -> None:
         config = json.loads((root / "metadata" / "config.json").read_text())
     except (OSError, ValueError) as error:
         raise ConfigError(f"{source} has no readable metadata/config.json") from error
-    serving = CSF_SERVING_ROOT / hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    # The name shows in the vLLM command line, logs and benchmark records.
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", Path(source).name) or "checkpoint"
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
+    serving = CSF_SERVING_ROOT / f"{name}-{digest}"
     if serving.exists():
         shutil.rmtree(serving)
     serving.mkdir(parents=True)
