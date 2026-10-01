@@ -289,3 +289,36 @@ def test_hub_checkpoints_download_only_after_the_manifest_matches(
     with pytest.raises(ConfigError, match="FP4-CSF schema"):
         prepare_csf_checkpoint(plan)
     assert calls == [("snapshot", True), ("manifest", "manifest.json")]
+
+
+def test_images_without_csf_readers_serve_the_original_checkpoint():
+    """dk main serves beta and canonical images; an image whose vLLM predates
+    the FP4-CSF readers keeps working on the original checkpoint."""
+    plan = resolve("glm53-flash", env={}, csf_formats=frozenset())
+
+    assert plan.values["checkpoint"] == "original"
+    assert plan.values["model"] == CSF["glm53-flash"][3]
+    assert plan.values["quantization"] == "modelopt_mixed"
+    assert any("cannot read FP4-CSF" in warning for warning in plan.warnings)
+    supported = resolve(
+        "glm53-flash", env={}, csf_formats=frozenset(launcher.CSF_FORMATS)
+    )
+    assert supported.values["checkpoint"] == "csf"
+
+
+@pytest.mark.parametrize(
+    "env", [{"CHECKPOINT": "csf"}, {"MODEL": CSF["qwen38-flash-next"][0]}]
+)
+def test_an_explicit_csf_choice_needs_the_readers(env):
+    with pytest.raises(ConfigError, match="cannot read FP4-CSF"):
+        resolve("qwen38-flash-next", env=env, csf_formats=frozenset({"mxfp4_csf"}))
+
+
+def test_installed_csf_formats_reads_the_loader_registry(tmp_path, monkeypatch):
+    package = tmp_path / "vllm" / "model_executor" / "model_loader"
+    package.mkdir(parents=True)
+    (tmp_path / "vllm" / "__init__.py").write_text("raise RuntimeError('no import')\n")
+    (package / "__init__.py").write_text('_LOADERS = {"nvfp4_csf": 1, "auto": 2}\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    assert launcher.installed_csf_formats() == frozenset({"nvfp4_csf"})

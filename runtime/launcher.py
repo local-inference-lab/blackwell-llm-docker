@@ -210,6 +210,14 @@ def installed_vllm_environment() -> frozenset[str] | None:
     return frozenset(re.findall(r'^    "(VLLM_[A-Z0-9_]+)"', source, re.MULTILINE))
 
 
+def installed_csf_formats() -> frozenset[str] | None:
+    """FP4-CSF load formats the installed vLLM reads, or None without vLLM."""
+    source = installed_source("vllm", "model_executor/model_loader/__init__.py")
+    if source is None:
+        return None
+    return frozenset(fmt for fmt in CSF_FORMATS if f'"{fmt}"' in source)
+
+
 def installed_b12x_mxfp8_moe() -> bool:
     """Whether the installed vLLM and B12X run MXFP8 MoE experts on B12X.
 
@@ -435,6 +443,7 @@ def resolve(
     runtime_identity: str | None = None,
     preset: str | None = None,
     vllm_environment: frozenset[str] | None = None,
+    csf_formats: frozenset[str] | None = None,
 ) -> LaunchPlan:
     incoming = dict(os.environ if env is None else env)
     config = config or {}
@@ -617,6 +626,7 @@ def resolve(
     # checkpoint selects that variant. Any other model or revision chosen by a
     # preset, settings or the operator keeps the profile settings unless
     # CHECKPOINT is chosen there too; then the variant fills in everything else.
+    checkpoint_warnings: list[str] = []
     if "checkpoint" in values:
         variants = model.get("checkpoints", {})
         profile_level = ("common:", "model:", "hardware:")
@@ -624,7 +634,7 @@ def resolve(
         def chosen(key: str) -> bool:
             return key in values and not origins[key].startswith(profile_level)
 
-        name = values["checkpoint"]
+        name, reason = values["checkpoint"], "derived:model"
         if not chosen("checkpoint") and (chosen("model") or chosen("revision")):
             named = [
                 variant
@@ -632,6 +642,27 @@ def resolve(
                 if item["options"]["model"] == values["model"]
             ]
             name = named[0] if chosen("model") and named else None
+        unreadable = [
+            variant
+            for variant, item in variants.items()
+            if csf_formats is not None
+            and item["options"].get("load-format") in CSF_FORMATS
+            and item["options"]["load-format"] not in csf_formats
+        ]
+        if name in unreadable:
+            if chosen("checkpoint") or chosen("model"):
+                raise ConfigError(
+                    "This image's vLLM cannot read FP4-CSF checkpoints; "
+                    "use CHECKPOINT=original"
+                )
+            # An image whose vLLM predates the FP4-CSF readers serves the
+            # checkpoint it can read instead of failing at startup.
+            name = next(v for v in variants if v not in unreadable)
+            reason = "derived:installed vLLM lacks FP4-CSF readers"
+            checkpoint_warnings.append(
+                f"This image's vLLM cannot read FP4-CSF checkpoints; serving the "
+                f"{name} checkpoint."
+            )
         if name is None:
             values.pop("checkpoint")
             origins.pop("checkpoint")
@@ -639,7 +670,7 @@ def resolve(
             raise ConfigError(f"{identifier} has no {name} checkpoint variant")
         else:
             if name != values["checkpoint"]:
-                set_value("checkpoint", name, "derived:model")
+                set_value("checkpoint", name, reason)
             options = variants[name]["options"]
             # A pinned revision belongs to the variant's own checkpoint.
             other = chosen("model") and values["model"] != options["model"]
@@ -1027,7 +1058,8 @@ def resolve(
         if name not in environment:
             set_env(name, path, "derived:runtime-lock and profile identity")
     warnings = [
-        "Model parameters preserve recipe intent; changing installed vLLM/B12X requires independent qualification."
+        "Model parameters preserve recipe intent; changing installed vLLM/B12X requires independent qualification.",
+        *checkpoint_warnings,
     ]
     if identifier.startswith("ds4-") and "linear-backend" not in values:
         warnings.append(
@@ -1673,6 +1705,7 @@ def main() -> int:
             # Inside an image, check the installed vLLM; a CPU-only
             # --print-config outside one resolves the preset as written.
             vllm_environment=installed_vllm_environment() if contract else None,
+            csf_formats=installed_csf_formats() if contract else None,
         )
         if args.print_config:
             public = plan.public()
