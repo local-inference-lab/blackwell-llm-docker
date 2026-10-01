@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -611,6 +612,41 @@ def resolve(
         target[parts[-1]] = value
         origins[root] = "cli:json-fields"
 
+    # The checkpoint variant (CHECKPOINT) chooses the checkpoint and the settings
+    # that read it, replacing profile defaults only. A model naming a variant's
+    # checkpoint selects that variant. Any other model or revision chosen by a
+    # preset, settings or the operator keeps the profile settings unless
+    # CHECKPOINT is chosen there too; then the variant fills in everything else.
+    if "checkpoint" in values:
+        variants = model.get("checkpoints", {})
+        profile_level = ("common:", "model:", "hardware:")
+
+        def chosen(key: str) -> bool:
+            return key in values and not origins[key].startswith(profile_level)
+
+        name = values["checkpoint"]
+        if not chosen("checkpoint") and (chosen("model") or chosen("revision")):
+            named = [
+                variant
+                for variant, item in variants.items()
+                if item["options"]["model"] == values["model"]
+            ]
+            name = named[0] if chosen("model") and named else None
+        if name is None:
+            values.pop("checkpoint")
+            origins.pop("checkpoint")
+        elif name not in variants:
+            raise ConfigError(f"{identifier} has no {name} checkpoint variant")
+        else:
+            if name != values["checkpoint"]:
+                set_value("checkpoint", name, "derived:model")
+            options = variants[name]["options"]
+            # A pinned revision belongs to the variant's own checkpoint.
+            other = chosen("model") and values["model"] != options["model"]
+            for key, value in options.items():
+                if not chosen(key) and not (key == "revision" and other):
+                    set_value(key, value, f"checkpoint:{name}")
+
     # Environment values are explicit only in a model-neutral image. Its build
     # contract is checked before execution; value-equality origin guessing is forbidden.
     consumed = {alias for spec in specs.values() for alias in spec["env"]}
@@ -1045,6 +1081,144 @@ def resolve(
     )
 
 
+CSF_FORMATS = ("nvfp4_csf", "mxfp4_csf")
+CSF_SCHEMAS = {
+    "lil-nvfp4-csf-checkpoint/1": "nvfp4_csf",
+    "lil-mxfp4-csf-checkpoint/1": "mxfp4_csf",
+}
+CSF_SERVING_ROOT = Path("/tmp/lil-csf")
+
+
+def csf_serving_config(config: dict, method: str, root: Path) -> dict:
+    """config.json that points vLLM's FP4-CSF reader at a checkpoint root."""
+    holder = config if "quantization_config" in config else config.get("text_config")
+    if not isinstance(holder, dict) or not isinstance(
+        holder.get("quantization_config"), dict
+    ):
+        raise ConfigError("FP4-CSF metadata/config.json has no quantization_config")
+    source = holder["quantization_config"]
+    location = {"format_version": 1, "checkpoint_root": str(root)}
+    if method == "nvfp4_csf":
+        holder["quantization_config"] = {
+            "quant_method": method,
+            **location,
+            "source_quantization_config": source,
+        }
+    else:
+        holder["quantization_config"] = {**source, "quant_method": method, **location}
+    return config
+
+
+def csf_format(manifest: Path, source: str, method: str) -> None:
+    """Check that a manifest describes an FP4-CSF checkpoint read by method."""
+    try:
+        schema = json.loads(manifest.read_text()).get("schema")
+    except (OSError, ValueError, AttributeError) as error:
+        raise ConfigError(
+            f"{source} is not an FP4-CSF checkpoint ({error}); "
+            "use CHECKPOINT=original for other checkpoints"
+        ) from error
+    stored = CSF_SCHEMAS.get(schema)
+    if stored is None:
+        raise ConfigError(
+            f"{source} has FP4-CSF schema {schema!r}; this image reads "
+            f"{', '.join(sorted(CSF_SCHEMAS))}"
+        )
+    if stored != method:
+        raise ConfigError(f"{source} is a {stored} checkpoint, not {method}")
+
+
+def csf_missing_files(root: Path) -> list[str]:
+    """Files the manifest of an FP4-CSF checkpoint lists that are absent or partial."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    expected: dict[str, int | None] = {"build-contract.json": None}
+    for name in manifest.get("metadata_sha256", {}):
+        expected[f"metadata/{name}"] = None
+    for shard in manifest.get("shards", []):
+        expected[f"tensors/{shard['file']}"] = shard.get("target_file_bytes")
+    return [
+        name
+        for name, size in expected.items()
+        if not (root / name).is_file()
+        or (size is not None and (root / name).stat().st_size != size)
+    ]
+
+
+def csf_snapshot(repository: str, revision: str | None, method: str) -> Path:
+    """A complete local snapshot of an FP4-CSF Hub repository.
+
+    A complete cached snapshot is used as is, also offline. Otherwise the
+    small manifest proves the format before the weights are downloaded.
+    """
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        root = Path(
+            snapshot_download(repository, revision=revision, local_files_only=True)
+        )
+    except LocalEntryNotFoundError:
+        root = None
+    if root is not None and (root / "manifest.json").is_file():
+        csf_format(root / "manifest.json", repository, method)
+        if not csf_missing_files(root):
+            return root
+    manifest = hf_hub_download(repository, "manifest.json", revision=revision)
+    csf_format(Path(manifest), repository, method)
+    return Path(snapshot_download(repository, revision=revision))
+
+
+def prepare_csf_checkpoint(plan: LaunchPlan) -> None:
+    """Serve an FP4-CSF checkpoint from a directory vLLM can open.
+
+    An FP4-CSF repository keeps the Hugging Face files under metadata/ and the
+    compressed tensors under tensors/. vLLM gets a directory with those files
+    and a config.json whose quantization_config names the CSF reader and the
+    checkpoint root; the weights stay where they are. vLLM does not download a
+    directory, so a Hub checkpoint is downloaded here, at the pinned revision.
+    """
+    method = plan.values.get("load-format")
+    if method not in CSF_FORMATS:
+        return
+    source = plan.values["model"]
+    if Path(source).is_dir():
+        root = Path(source).absolute()
+    else:
+        root = csf_snapshot(source, plan.values.get("revision"), method)
+    csf_format(root / "manifest.json", source, method)
+    missing = csf_missing_files(root)
+    if missing:
+        raise ConfigError(
+            f"{source} is incomplete; missing or partial: {', '.join(missing[:5])}"
+            + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+        )
+    try:
+        config = json.loads((root / "metadata" / "config.json").read_text())
+    except (OSError, ValueError) as error:
+        raise ConfigError(f"{source} has no readable metadata/config.json") from error
+    serving = CSF_SERVING_ROOT / hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    if serving.exists():
+        shutil.rmtree(serving)
+    serving.mkdir(parents=True)
+    for item in sorted((root / "metadata").iterdir()):
+        if item.is_file() and item.name != "config.json":
+            shutil.copyfile(item, serving / item.name)
+    (serving / "config.json").write_text(
+        json.dumps(csf_serving_config(config, method, root), indent=2) + "\n"
+    )
+    plan.values["model"] = str(serving)
+    plan.origins["model"] = f"resolved:FP4-CSF serving files for {source}"
+    plan.values.pop("revision", None)
+    spec = plan.values.get("speculative-config")
+    if spec and spec.get("model", source) == source:
+        # Drafters read from the target checkpoint follow its serving files.
+        spec.pop("revision", None)
+        if "model" in spec:
+            spec["model"] = str(serving)
+    plan.argv = make_argv(plan.values, plan.passthrough)
+    print(f"Serving FP4-CSF checkpoint {root} through {serving}", file=sys.stderr)
+
+
 def resolve_draft_subfolder(plan: LaunchPlan) -> None:
     """Point the speculative config at the drafter inside the target checkpoint."""
     if not plan.draft_subfolder or "speculative-config" not in plan.values:
@@ -1230,6 +1404,18 @@ def validate(values: dict, environment: dict, identifier: str) -> None:
         raise ConfigError(
             "These profiles support single-node tensor parallelism, not pipeline parallelism"
         )
+    if {values.get("load-format"), values.get("quantization")} & set(CSF_FORMATS):
+        if values.get("load-format") != values.get("quantization"):
+            raise ConfigError(
+                "FP4-CSF checkpoints need matching --quantization and --load-format "
+                "(nvfp4_csf or mxfp4_csf)"
+            )
+        if values.get("moe-backend") != "b12x" or values.get("enable-expert-parallel"):
+            raise ConfigError(
+                "FP4-CSF checkpoints decode their experts on B12X with tensor "
+                "parallelism only; use CHECKPOINT=original with another MoE "
+                "backend or expert parallelism"
+            )
     supported_kv = {"fp8", "fp8_e4m3"}
     if identifier == "glm53-flash":
         supported_kv.add("nvfp4_ds_mla")
@@ -1383,6 +1569,7 @@ def execute(plan: LaunchPlan, contract_path: Path) -> None:
     if environment.get("NCCL_GRAPH_FILE") == "":
         environment.pop("NCCL_GRAPH_FILE")
     environment.update(plan.environment)
+    prepare_csf_checkpoint(plan)
     resolve_draft_subfolder(plan)
     resolve_draft_moe_backend(plan)
     if plan.values["replicas"] > 1:

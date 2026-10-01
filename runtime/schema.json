@@ -98,6 +98,35 @@
           "type": "string"
         }
       }
+    },
+    "checkpoints": {
+      "type": "object",
+      "minProperties": 2,
+      "propertyNames": {
+        "enum": [
+          "csf",
+          "original"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "options"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "required": [
+              "model"
+            ]
+          }
+        }
+      }
     }
   },
   "$defs": {

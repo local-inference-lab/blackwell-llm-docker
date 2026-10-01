@@ -237,6 +237,35 @@ performance measurements. Source references are recorded inside each profile.
   server defaults. Qwen attention selection is native; GDN, MoE, and dense
   kernel selection are explicitly B12X.
 
+### FP4-CSF checkpoints
+
+Qwen3.8-Flash-Next, GLM-5.3-Flash and DeepSeek-V4.1-Flash serve their FP4-CSF
+checkpoints by default (`checkpoint: csf`). An FP4-CSF checkpoint holds the
+same FP4 weights as the original with losslessly compressed expert scales.
+B12X decodes the scales while it runs the experts, and they stay compressed
+in GPU memory, which leaves about 3 GiB per GPU more for the KV cache (Qwen
+TP1; GLM TP2 about 3.5 GiB). The downloads are smaller too:
+
+| Model | FP4-CSF (pinned revision) | Original |
+| --- | --- | --- |
+| Qwen3.8-Flash-Next | `local-inference-lab/Qwen3.8-Flash-Next-NVFP4-CSF`, 102.3 GB | `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`, 105.8 GB |
+| GLM-5.3-Flash | `local-inference-lab/GLM-5.3-Flash-NVFP4-CSF`, 188.9 GB | `local-inference-lab/GLM-5.3-Flash-NVFP4`, 198.1 GB |
+| DeepSeek-V4.1-Flash | `local-inference-lab/DeepSeek-V4.1-Flash-MXFP4-CSF`, 495.6 GB | `deepseek-ai/DeepSeek-V4.1-Flash`, 510.3 GB |
+
+- `-e CHECKPOINT=original` serves the original checkpoint with the profile's
+  ModelOpt or DeepSeek settings.
+- `MODEL` naming either checkpoint selects it. Any other `MODEL` or
+  `MODEL_REVISION`, such as the Qwen QAD revision `qad-step5500-ple1000` of
+  the original repository, keeps the original settings. A local FP4-CSF copy
+  needs `-e CHECKPOINT=csf` with its `MODEL` path.
+- The launcher downloads an FP4-CSF repository itself. It then gives vLLM a
+  directory under `/tmp/lil-csf` with the repository's metadata and a
+  `config.json` whose quantization (`nvfp4_csf` or `mxfp4_csf`) points at the
+  downloaded weights.
+- FP4-CSF needs B12X MoE without expert parallelism, so the GLM TP3 preset
+  serves the original checkpoint, and so does the GLM Spark TP2 preset, which
+  names its own checkpoint.
+
 GLM and DeepSeek retain the source launchers' temperature 1/top-p 0.95
 server defaults. Explicit generation configuration replaces these defaults;
 request sampling remains authoritative. GLM retains `reasoning_effort=high`

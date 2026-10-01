@@ -113,6 +113,17 @@
       "MODEL_REVISION"
     ]
   },
+  "checkpoint": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "CHECKPOINT"
+    ],
+    "enum": [
+      "csf",
+      "original"
+    ]
+  },
   "hf-overrides": {
     "type": "object",
     "env": [

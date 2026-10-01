@@ -18,6 +18,7 @@ defaults:
   cache-cpu-workers: 16
   cache-gpu-workers: 8
   cache-l2-workers: 8
+  checkpoint: csf
   model: local-inference-lab/GLM-5.3-Flash-NVFP4
   served-model-name: GLM-5.3-Flash-NVFP4
   tensor-parallel-size: 4
@@ -81,6 +82,19 @@ environment:
   VLLM_DISABLED_KERNELS: MarlinFP8ScaledMMLinearKernel
   VLLM_B12X_MOE_FP4_FORCE_A16: "0"
   VLLM_PLUGINS: ""
+checkpoints:
+  csf:
+    description: >-
+      Lossless FP4-CSF container of the NVFP4 checkpoint: the same weights with losslessly compressed expert scales (188.9 GB instead of 198.1 GB). The scales stay compressed in GPU memory, which leaves about 2 GiB (TP4) to 4 GiB (TP2) more for the KV cache per GPU.
+    options:
+      model: local-inference-lab/GLM-5.3-Flash-NVFP4-CSF
+      revision: 20f4777422f833c48b67bb0e554e1bc61dc55ca1
+      quantization: nvfp4_csf
+      load-format: nvfp4_csf
+  original:
+    description: The ModelOpt NVFP4 export the FP4-CSF container was made from.
+    options:
+      model: local-inference-lab/GLM-5.3-Flash-NVFP4
 modes:
   off: {}
   mtp:
