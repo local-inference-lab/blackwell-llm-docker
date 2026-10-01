@@ -342,3 +342,44 @@ def test_installed_csf_formats_reads_the_loader_registry(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(tmp_path))
 
     assert launcher.installed_csf_formats() == frozenset({"nvfp4_csf"})
+
+
+def test_csf_identity_follows_the_manifest_not_the_location(tmp_path, monkeypatch):
+    """LMCache namespaces and the shared PLE table key on the checkpoint
+    content; the serving files are generated, so the manifest names it."""
+    from runtime import replicas
+    from runtime.cache import resolve_identity
+
+    monkeypatch.setattr(launcher, "CSF_SERVING_ROOT", tmp_path / "serving")
+    roots = [
+        _csf_checkpoint(tmp_path / name, "lil-nvfp4-csf-checkpoint/1", {})
+        for name in ("a", "b")
+    ]
+    plans = []
+    for root in roots:
+        plan = resolve(
+            "glm53-flash",
+            env={"MODEL": str(root), "CHECKPOINT": "csf", "CACHE_MODE": "lmcache"},
+        )
+        prepare_csf_checkpoint(plan)
+        plans.append(plan)
+    assert plans[0].values["model"] != plans[1].values["model"]
+    assert plans[0].target_identity == plans[1].target_identity
+
+    helper = tmp_path / "identity.py"
+    helper.write_text(
+        "def resolve_checkpoint(model, revision):\n"
+        "    raise AssertionError('generated files were hashed')\n"
+    )
+    resolve_identity(plans[0], {"runtime_lock_sha256": "b" * 64}, helper)
+    identity = plans[0].values["kv-transfer-config"]["kv_connector_extra_config"][
+        "lmcache.mp.checkpoint_identity"
+    ]
+    assert identity["target_revision"] == plans[0].target_identity["identity"]
+    assert replicas.checkpoint_identity(plans[1], helper) == identity["target_revision"]
+
+    manifest = roots[1] / "manifest.json"
+    manifest.write_text(manifest.read_text().replace('"0"', '"1"'))
+    changed = resolve("glm53-flash", env={"MODEL": str(roots[1]), "CHECKPOINT": "csf"})
+    prepare_csf_checkpoint(changed)
+    assert changed.target_identity != plans[0].target_identity

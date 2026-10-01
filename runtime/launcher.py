@@ -383,6 +383,9 @@ class LaunchPlan:
     # Drafter shipped inside the target checkpoint; resolved to a local path
     # at launch, so printing a configuration never downloads anything.
     draft_subfolder: str | None = None
+    # Content identity of a target served from generated files (FP4-CSF),
+    # which the checkpoint identity helper cannot hash itself.
+    target_identity: dict | None = None
 
     def public(self) -> dict:
         # Build public argv from redacted values; never dump the process environment.
@@ -1243,6 +1246,12 @@ def prepare_csf_checkpoint(plan: LaunchPlan) -> None:
     )
     plan.values["model"] = str(serving)
     plan.origins["model"] = f"resolved:FP4-CSF serving files for {source}"
+    # The manifest names every shard and metadata file by SHA-256, so it
+    # identifies the checkpoint content wherever the snapshot lives.
+    manifest_digest = hashlib.sha256(
+        b"lil-fp4-csf-v1\0" + (root / "manifest.json").read_bytes()
+    ).hexdigest()
+    plan.target_identity = {"identity": manifest_digest, "revision": ""}
     plan.values.pop("revision", None)
     spec = plan.values.get("speculative-config")
     if spec and spec.get("model", source) == source:
