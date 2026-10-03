@@ -506,7 +506,9 @@ def resolve_identity(plan, contract, helper: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     values = plan.values
-    target = module.resolve_checkpoint(values["model"], values.get("revision"))
+    target = plan.target_identity or module.resolve_checkpoint(
+        values["model"], values.get("revision")
+    )
     draft = {"identity": "", "revision": ""}
     if values["mode"] == "mtp" or values["mode"] == "dspark":
         draft = target

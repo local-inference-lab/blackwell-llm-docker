@@ -641,7 +641,8 @@ def test_glm_base_recipe_semantic_parity_for_model_arguments():
         check=True,
     )
     legacy = shlex.split(result.stdout.split("launch:", 1)[1])
-    plan = resolve("glm53-flash", env={"MTP_DEPTH": "3"})
+    # The historical recipe serves the original NVFP4 checkpoint.
+    plan = resolve("glm53-flash", env={"MTP_DEPTH": "3", "CHECKPOINT": "original"})
     for name in (
         "model",
         "tensor-parallel-size",

@@ -16,7 +16,7 @@ services:
     - --hardware
     - rtx-pro-6000-pcie
     environment:
-      MODEL: ${MODEL:-local-inference-lab/GLM-5.3-Flash-NVFP4}
+      MODEL: ${MODEL:-local-inference-lab/GLM-5.3-Flash-NVFP4-CSF}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
       TP: '4'

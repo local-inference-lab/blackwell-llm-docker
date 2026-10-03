@@ -27,9 +27,20 @@ options:
     group: model
     summary: Hugging Face repository or local path of the target checkpoint. Overriding it changes the
       weights only; the profile still selects the model architecture and kernels.
-    why: Each profile names the checkpoint its settings were qualified with, for example local-inference-lab/GLM-5.3-Flash-NVFP4
-      for GLM and XiaomiMiMo/MiMo-V2.6-Flash-RL for MiMo. The GLM Spark TP2 preset selects the Spark checkpoint
-      GLM-5.3-Flash-NVFP4-Spark.
+    why: Each profile names the checkpoint its settings were qualified with, for example XiaomiMiMo/MiMo-V2.6-Flash-RL
+      for MiMo. Qwen3.8-Flash-Next, GLM-5.3-Flash and DeepSeek-V4.1-Flash take theirs from checkpoint (FP4-CSF by
+      default). The GLM Spark TP2 preset selects the Spark checkpoint GLM-5.3-Flash-NVFP4-Spark.
+  checkpoint:
+    group: model
+    summary: Which checkpoint of the model to serve. csf is the FP4-CSF container (the same FP4 weights
+      with losslessly compressed expert scales, decoded by B12X); original is the checkpoint it was
+      made from. The choice sets the model, revision, quantization and load format together. A model
+      or revision you set yourself keeps its own settings unless you also set checkpoint, so
+      checkpoint=csf with a local FP4-CSF copy reads that copy.
+    why: Qwen3.8-Flash-Next, GLM-5.3-Flash and DeepSeek-V4.1-Flash default to csf. Their scales stay
+      compressed in GPU memory, which leaves more room for the KV cache (about 3 GiB per GPU for Qwen TP1
+      and 3.5 GiB for GLM TP2), and the downloads are smaller. FP4-CSF needs B12X MoE kernels without
+      expert parallelism, so the GLM TP3 preset uses original.
   served-model-name:
     group: api
     summary: Model name that the OpenAI-compatible API reports and that clients put in the `model` field
@@ -44,7 +55,8 @@ options:
     group: model
     summary: Weight loader used at startup, for example auto, safetensors or instanttensor. instanttensor
       loads safetensors weights onto the GPUs with pipelined prefetching and direct I/O.
-    why: The common layer uses instanttensor. MiMo uses auto because the b12x loader's cuFile setup fails
+    why: The common layer uses instanttensor. FP4-CSF checkpoints use nvfp4_csf or mxfp4_csf, which
+      read the compressed expert scales. MiMo uses auto because the b12x loader's cuFile setup fails
       to parse the NGC image's /etc/cufile.json (fixed in b12x PR 431); the GLM Spark TP2 preset uses
       safetensors.
   dtype:
@@ -89,7 +101,8 @@ options:
   quantization:
     group: model
     summary: Quantization method used to interpret the checkpoint weights.
-    why: GLM and Qwen set modelopt_mixed to match their mixed-precision NVFP4 ModelOpt checkpoints.
+    why: GLM and Qwen set modelopt_mixed to match their original mixed-precision NVFP4 ModelOpt
+      checkpoints. Their FP4-CSF checkpoints use nvfp4_csf and DeepSeek-V4.1-Flash's uses mxfp4_csf.
   mamba-cache-mode:
     group: cache
     summary: How recurrent (Mamba-style) layer state is kept for prefix caching. align stores the state
@@ -123,7 +136,7 @@ options:
     group: model
     summary: Hugging Face revision (branch, tag or commit) of the checkpoint.
     why: When the profile's default checkpoint is used, the launcher pins the profile's checkpoint_revision
-      (DS4, DS4 Vision, MiMo). MiMo pins 5711b268, the first revision whose dflash/config.json is valid
+      (DS4, DS4 Vision, MiMo); the FP4-CSF checkpoints pin their verified main revisions. MiMo pins 5711b268, the first revision whose dflash/config.json is valid
       JSON (vllm PR 881).
   hf-overrides:
     group: model
@@ -173,8 +186,10 @@ options:
       Qwen3.8-Flash-Next maps one host-RAM copy of its PLE table (about 27 GiB) for all of them. The
       first replica to exit stops the container. 1 runs one server.
     why: The common default is 1. Every option applies to each replica, so max-num-seqs and the KV
-      size are per GPU. On PCIe systems two TP1 replicas of Qwen3.8-Flash-Next serve concurrent
-      conversations faster than one TP2 server, because no layer waits on cross-GPU communication.
+      size are per GPU. Two TP1 replicas skip the cross-GPU communication of every TP2 layer but give
+      each request one GPU. awsdl measured 12-20% more decode throughput than TP2 at 8-16 requests on
+      two Max-Q PCIe GPUs; on two RTX PRO 6000 Server Edition GPUs it was equal at 8, 2% ahead at 16
+      and 22% slower for a single request.
   pipeline-parallel-size:
     group: parallelism
     summary: Number of pipeline stages the model layers are split into.

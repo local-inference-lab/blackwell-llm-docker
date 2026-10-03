@@ -57,6 +57,8 @@ presets:
     hardware: rtx-pro-6000-pcie
     description: GLM-5.3-Flash on three 96-GB RTX PRO GPUs with TP3, expert parallelism and MTP3. Attention heads are padded for TP3, the vision tower runs data-parallel, and large dense projections decode in FP8. VRAM prefix cache only.
     options:
+      # FP4-CSF experts need B12X without expert parallelism.
+      checkpoint: original
       tensor-parallel-size: 3
       enable-expert-parallel: true
       moe-backend: flashinfer_cutlass

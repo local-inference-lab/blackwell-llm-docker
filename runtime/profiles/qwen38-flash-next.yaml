@@ -9,6 +9,7 @@ defaults:
   # Disk gets the newest checkpoint of each conversation when it leaves RAM
   # and at shutdown; superseded turns are never written.
   cache-l2-checkpoint-writes: on-evict
+  checkpoint: csf
   model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
   served-model-name: Qwen3.8-Flash-Next
   tensor-parallel-size: 1
@@ -61,6 +62,19 @@ environment:
   VLLM_B12X_DENSE_ACTIVATION_MODE: auto
   B12X_DYNAMIC_DETERMINISTIC_OUTPUT: "0"
   B12X_DENSE_SPLITK_TURBO: "1"
+checkpoints:
+  csf:
+    description: >-
+      Lossless FP4-CSF container of the NVFP4 checkpoint: the same weights with losslessly compressed expert scales (102.3 GB instead of 105.8 GB). The scales stay compressed in GPU memory, which leaves about 3 GiB more for the KV cache per GPU.
+    options:
+      model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4-CSF
+      revision: 4656f502fa1a6aba3f05ff9ed14f6ecc828b3e9e
+      quantization: nvfp4_csf
+      load-format: nvfp4_csf
+  original:
+    description: The ModelOpt NVFP4 export the FP4-CSF container was made from.
+    options:
+      model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
 modes:
   off: {}
   mtp:

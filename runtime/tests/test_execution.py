@@ -51,7 +51,9 @@ def test_model_image_contract_is_checked_and_exec_preserves_private_environment(
     path = tmp_path / "image-contract.json"
     path.write_text(json.dumps(contract))
     verify_contract(path)
-    plan = resolve("ds41-flash", env={}, runtime_identity="2" * 64)
+    plan = resolve(
+        "ds41-flash", env={"CHECKPOINT": "original"}, runtime_identity="2" * 64
+    )
     monkeypatch.setenv("HF_TOKEN", "private-value")
     monkeypatch.setenv("TP", "wrong-at-exec")
     monkeypatch.setenv("NCCL_GRAPH_FILE", "")
