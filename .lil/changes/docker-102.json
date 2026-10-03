@@ -1,0 +1,21 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-102",
+  "category": "feature",
+  "summary": "Qwen3.8-Flash-Next accepts KV_CACHE_DTYPE=nvfp4_qsa",
+  "models": [
+    "Qwen3.8-Flash-Next"
+  ],
+  "compatibility": "No user action required. FP8 remains the default target KV.",
+  "details": [
+    "KV_CACHE_DTYPE=nvfp4_qsa emits --kv-cache-dtype nvfp4_qsa for the qwen38-flash-next profile and presets; other models still reject it.",
+    "The external-cache namespace includes the KV dtype, so NVFP4 and FP8 pages never share LMCache storage."
+  ],
+  "requires": [
+    "vllm-910",
+    "b12x-qsa-nvfp4-kv"
+  ],
+  "pull_requests": [
+    102
+  ]
+}

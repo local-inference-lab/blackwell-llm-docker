@@ -485,3 +485,21 @@ def test_on_evict_default_falls_back_without_request_boundary_checkpoints():
         "ds4-flash", env={"CACHE_MODE": "lmcache", "LMCACHE_L2_ENABLED": "true"}
     )
     assert ds4.values["cache-l2-checkpoint-writes"] == "always"
+
+
+@pytest.mark.parametrize("dcp", [1, 2])
+def test_qwen_nvfp4_kv_is_an_explicit_target_setting(dcp):
+    env = {"CACHE_MODE": "lmcache", "TP": "4", "DCP": str(dcp)}
+    fp8 = resolve("qwen38-flash-next", env=env)
+    nvfp4 = resolve("qwen38-flash-next", env={**env, "KV_CACHE_DTYPE": "nvfp4_qsa"})
+    assert fp8.values["kv-cache-dtype"] == "fp8"
+    assert nvfp4.values["kv-cache-dtype"] == "nvfp4_qsa"
+    assert nvfp4.argv.count("--kv-cache-dtype") == 1
+    assert nvfp4.argv[nvfp4.argv.index("--kv-cache-dtype") + 1] == "nvfp4_qsa"
+    # FP8 and NVFP4 pages must never share an external-cache namespace.
+    assert nvfp4.cache_service.namespace != fp8.cache_service.namespace
+
+
+def test_nvfp4_qsa_is_rejected_outside_qwen():
+    with pytest.raises(ConfigError, match="separate qualification"):
+        resolve("glm53-flash", env={"KV_CACHE_DTYPE": "nvfp4_qsa"})

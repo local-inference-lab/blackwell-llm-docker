@@ -1236,6 +1236,8 @@ def validate(values: dict, environment: dict, identifier: str) -> None:
     if identifier == "mimo26-flash":
         # vllm #882 qualified the exact BF16 cache (half the FP8 capacity).
         supported_kv.add("bfloat16")
+    if identifier == "qwen38-flash-next":
+        supported_kv.add("nvfp4_qsa")
     if values["kv-cache-dtype"] not in supported_kv:
         raise ConfigError(
             f"{identifier} supports target KV settings {sorted(supported_kv)}; other precisions require separate qualification"
