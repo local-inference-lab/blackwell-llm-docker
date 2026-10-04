@@ -113,6 +113,17 @@
       "MODEL_REVISION"
     ]
   },
+  "checkpoint": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "CHECKPOINT"
+    ],
+    "enum": [
+      "csf",
+      "original"
+    ]
+  },
   "hf-overrides": {
     "type": "object",
     "env": [
@@ -764,6 +775,39 @@
     "type": "string",
     "env": [
       "MODEL_CODE_REVISION"
+    ]
+  },
+  "expert-activations": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "EXPERT_ACTIVATIONS"
+    ],
+    "enum": [
+      "bf16",
+      "fp4"
+    ]
+  },
+  "router-weights": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "ROUTER_WEIGHTS"
+    ],
+    "enum": [
+      "fp32",
+      "bf16"
+    ]
+  },
+  "prefill-activations": {
+    "type": "string",
+    "control": true,
+    "env": [
+      "PREFILL_ACTIVATIONS"
+    ],
+    "enum": [
+      "a16",
+      "a4"
     ]
   }
 }

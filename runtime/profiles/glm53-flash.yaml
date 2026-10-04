@@ -18,6 +18,7 @@ defaults:
   cache-cpu-workers: 16
   cache-gpu-workers: 8
   cache-l2-workers: 8
+  checkpoint: csf
   model: local-inference-lab/GLM-5.3-Flash-NVFP4
   served-model-name: GLM-5.3-Flash-NVFP4
   tensor-parallel-size: 4
@@ -53,6 +54,12 @@ defaults:
   # returned answer re-renders to the same tokens and reuses its checkpoint.
   chat-template: runtime:templates/glm53-flash.jinja
   override-generation-config: {temperature: 1.0, top_p: 0.95}
+  # Routed FP4 experts on B12X take BF16 activations (W4A16) and combine their
+  # outputs with FP32 router weights. Prefill can trade activation precision
+  # for speed with prefill-activations a4; decode stays W4A16.
+  expert-activations: bf16
+  router-weights: fp32
+  prefill-activations: a16
 environment:
   B12X_DYNAMIC_SPLIT_ROUTE_COMPUTE: "1"
   B12X_DYNAMIC_DIRECT_EXPERT_SCALES: "1"
@@ -79,8 +86,20 @@ environment:
   VLLM_GLM53_ONLINE_DENSE_MXFP8: "0"
   VLLM_DISABLE_SHARED_EXPERTS_STREAM: "0"
   VLLM_DISABLED_KERNELS: MarlinFP8ScaledMMLinearKernel
-  VLLM_B12X_MOE_FP4_FORCE_A16: "0"
   VLLM_PLUGINS: ""
+checkpoints:
+  csf:
+    description: >-
+      Lossless FP4-CSF container of the QAD NVFP4 checkpoint: the same weights as the original, with the routed-expert scales compressed losslessly. B12X reads the compressed scales and they stay compressed in GPU memory, which leaves more room for the KV cache; the download is smaller too.
+    options:
+      model: local-inference-lab/GLM-5.3-Flash-NVFP4-CSF-QAD
+      # TODO pin after upload
+      quantization: nvfp4_csf
+      load-format: nvfp4_csf
+  original:
+    description: The QAD ModelOpt NVFP4 checkpoint the FP4-CSF container is made from, with uncompressed expert scales.
+    options:
+      model: local-inference-lab/GLM-5.3-Flash-NVFP4
 modes:
   off: {}
   mtp:

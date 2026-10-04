@@ -3,7 +3,6 @@ kind: model
 id: ds4-flash
 status: implemented
 description: DeepSeek V4 text DSpark with B12X W4A8 MoE and native dense-kernel selection.
-checkpoint_revision: 9e165c30e2704aec5d9d593cce3eebd58bbef1cb
 evidence:
   - https://github.com/local-inference-lab/rtx6kpro/blob/master/models/ds4-jovian-community-r29.md
   - recipes/glm53/serve-ds4-jovian.sh
@@ -15,6 +14,7 @@ defaults:
   cache-l2-enabled: false
   cache-cpu-workers: 4
   cache-l2-workers: 4
+  checkpoint: csf
   model: deepseek-ai/DeepSeek-V4-Flash-0731
   served-model-name: DeepSeek-V4-Flash-0731
   tensor-parallel-size: 2
@@ -53,6 +53,22 @@ environment:
   # keyed by the vLLM config and device and refused if free memory shrank.
   VLLM_ENABLE_STARTUP_PLAN: "1"
   VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD: "1024"
+checkpoints:
+  csf:
+    description: >-
+      Lossless FP4-CSF container of DeepSeek-V4-Flash-0731: the same weights as the original, with the routed-expert scales compressed losslessly. B12X reads the compressed scales and they stay compressed in GPU memory, which leaves more room for the KV cache; the download is smaller too.
+    # The installed vLLM must list this family in its MXFP4-CSF loader.
+    csf_family: deepseek_v4_flash
+    options:
+      model: local-inference-lab/DeepSeek-V4-Flash-0731-lossless-CSF
+      # TODO pin after upload
+      quantization: mxfp4_csf
+      load-format: mxfp4_csf
+  original:
+    description: DeepSeek's original release, pinned to the revision of the source launcher.
+    options:
+      model: deepseek-ai/DeepSeek-V4-Flash-0731
+      revision: 9e165c30e2704aec5d9d593cce3eebd58bbef1cb
 modes:
   off: {}
   mtp:

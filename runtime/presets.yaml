@@ -1,9 +1,61 @@
 schema_version: 1
 presets:
+  glm53-tp2:
+    profile: glm53-flash
+    hardware: rtx-pro-6000-pcie
+    description: The default TP2 recipe for GLM-5.3-Flash on two 96-GB RTX PRO GPUs. It serves the QAD weights from the stored checkpoint GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD (MXFP8 attention and shared experts, NVFP4 routed experts with losslessly compressed scales) with BF16 activations into the routed experts and FP32 router weights, TP2/DCP2, MTP3 with B12X drafter experts, eight request slots, a 3072-token prefill budget and an 8 GiB KV cache per GPU. The input embedding table lives in host RAM and the vision tower is quantized to MXFP8 while loading. glm53-spark-tp2 stays available.
+    options:
+      # Stored QAD checkpoint in FP4-CSF form; CHECKPOINT=original does not apply.
+      model: local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD
+      revision: 9ca06e24effde995982c439091722e9e76db82bc
+      quantization: nvfp4_csf
+      load-format: nvfp4_csf
+      served-model-name: GLM-5.3-Flash
+      tensor-parallel-size: 2
+      decode-context-parallel-size: 2
+      mode: mtp
+      max-model-len: -1
+      max-num-seqs: 8
+      max-num-batched-tokens: 3072
+      cache-object-tokens: 3072
+      kv-cache-memory-bytes: 8589934592
+      gpu-memory-utilization: 0.985
+      # auto: 32 verifier rows at eight slots (MTP3 verifies four per request).
+      max-cudagraph-capture-size: auto
+      cudagraph-capture-sizes: [1, 2, 4, 8, 12, 16, 20, 24, 28, 32]
+      expert-activations: bf16
+      router-weights: fp32
+      prefill-activations: a16
+    environment:
+      VLLM_PCIE_TWOSHOT_ALLREDUCE_MAX_SIZE: "off"
+      NCCL_SOCKET_IFNAME: lo
+      GLOO_SOCKET_IFNAME: lo
+      NCCL_MIN_NCHANNELS: "2"
+      NCCL_MAX_NCHANNELS: "2"
+      NCCL_BUFFSIZE: "1048576"
+      NCCL_NET_PLUGIN: none
+      NCCL_TUNER_PLUGIN: none
+      CUBLAS_WORKSPACE_CONFIG: ":4096:1"
+      OMP_NUM_THREADS: "1"
+      VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "65536"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,large_segment_size_mb:12
+      VLLM_GLM53_EMBED_HOST: "1"
+      # The checkpoint stores the vision tower in BF16.
+      VLLM_GLM53_VISION_MXFP8: "1"
+      VLLM_SHARE_PYNCCL_COMMS: "1"
+    modes:
+      mtp:
+        config: {moe_backend: b12x}
+    linked_options:
+      cache-object-tokens: max-num-batched-tokens
+    # Carried over from the Spark TP2 measurements: working memory per request
+    # slot above eight and the external cache connector's GPU buffers.
+    kv_bytes_per_extra_slot: 67108864
+    kv_bytes_for_external_cache: 201326592
   glm53-spark-tp2:
     profile: glm53-flash
     hardware: rtx-pro-6000-pcie
-    description: GLM Spark checkpoint on two 96-GB RTX PRO GPUs, with TP2/DCP2 MTP3, eight request slots (16 selectable) and a 3072-token prefill budget. The input embedding table lives in host RAM and the vision tower runs in MXFP8, which leaves room for about 1.02M KV tokens with 0.5 GiB per GPU kept free for image-heavy peaks. Spark identifies the checkpoint, not DGX Spark hardware.
+    description: GLM Spark checkpoint (stored MXFP8 attention, pre-QAD experts) on two 96-GB RTX PRO GPUs; glm53-tp2 is the default TP2 recipe. It runs with TP2/DCP2 MTP3, eight request slots (16 selectable) and a 3072-token prefill budget. The input embedding table lives in host RAM and the vision tower runs in MXFP8, which leaves room for about 1.02M KV tokens with 0.5 GiB per GPU kept free for image-heavy peaks. Spark identifies the checkpoint, not DGX Spark hardware.
     options:
       model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
       served-model-name: GLM-5.3-Flash
@@ -57,6 +109,8 @@ presets:
     hardware: rtx-pro-6000-pcie
     description: GLM-5.3-Flash on three 96-GB RTX PRO GPUs with TP3, expert parallelism and MTP3. Attention heads are padded for TP3, the vision tower runs data-parallel, and large dense projections decode in FP8. VRAM prefix cache only.
     options:
+      # FP4-CSF experts need B12X without expert parallelism.
+      checkpoint: original
       tensor-parallel-size: 3
       enable-expert-parallel: true
       moe-backend: flashinfer_cutlass

@@ -287,7 +287,7 @@ def test_installed_explicit_execution_invokes_bootstrap_once(tmp_path):
         bin_directory=tmp_path / "bin",
         python_site=tmp_path / "site",
     )
-    plan = resolve("glm53-flash", "rtx-pro-6000-pcie", env={})
+    plan = resolve("glm53-flash", "rtx-pro-6000-pcie", env={"CHECKPOINT": "original"})
     result = subprocess.run(
         [
             sys.executable,

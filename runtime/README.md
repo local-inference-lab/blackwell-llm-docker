@@ -45,9 +45,42 @@ cache. To use another location, mount that directory and set `-e HF_HOME=/path`.
 ## Named deployment settings
 
 `PRESET` selects a data-only overlay from `presets.yaml`. Model defaults remain
-separate from deployment-specific memory constraints. The Spark TP2 preset uses
-the Spark checkpoint on two 96-GB RTX PRO GPUs; it does not select DGX Spark
-hardware or replace GLM TP4 defaults.
+separate from deployment-specific memory constraints. The default GLM recipe
+for two 96-GB RTX PRO GPUs is `glm53-tp2`:
+
+```bash
+docker run -d --name glm-tp2 --init --gpus '"device=0,1"' \
+  --restart on-failure --network host --ipc host --shm-size 32g \
+  --ulimit memlock=-1 --ulimit stack=67108864:67108864 \
+  -v model-cache:/root/.cache/huggingface -v glm-tp2-runtime:/cache \
+  -e PRESET=glm53-tp2 -e PORT=8000 "$LIL_IMAGE"
+```
+
+It serves the QAD weights from the stored checkpoint
+`local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `9ca06e24`:
+MXFP8 attention and shared experts, and NVFP4 routed experts whose scales stay
+losslessly compressed (FP4-CSF). Routed experts take BF16 activations with
+FP32 router weights. It runs TP2/DCP2, MTP3 with B12X drafter experts, eight
+request slots, a 3,072-token prefill budget and an 8 GiB KV cache per GPU, with
+the Spark preset's memory savings (input embedding table in host RAM, MXFP8
+vision tower, shared NCCL communicator) and NCCL settings. The checkpoint keeps
+the vision tower in BF16, so the preset quantizes it while loading
+(`VLLM_GLM53_VISION_MXFP8=1`).
+
+- It serves only its own checkpoint: `CHECKPOINT=original` is refused; use the
+  GLM profile without a preset, or the Spark preset below, for other checkpoints.
+- The image's vLLM must read `nvfp4_csf` checkpoints; otherwise the launcher
+  refuses the preset.
+- Sixteen request slots (`MAX_NUM_SEQS=16`) and LMCache (`CACHE_MODE=lmcache`)
+  take 64 MiB per extra slot and 192 MiB from the KV cache, as on the Spark
+  preset.
+- `PREFILL_ACTIVATIONS=a4` runs long prefill calls with NVFP4 activations for
+  faster prefill while decode stays W4A16, see
+  [GLM-5.3-Flash expert precision](#glm-53-flash-expert-precision).
+
+The Spark TP2 preset remains available. It uses the Spark checkpoint (stored
+MXFP8 attention, pre-QAD experts) on two 96-GB RTX PRO GPUs; it does not select
+DGX Spark hardware or replace GLM TP4 defaults.
 
 ```bash
 docker run -d --name glm-spark-tp2 --init --gpus '"device=0,1"' \
@@ -210,10 +243,11 @@ performance measurements. Source references are recorded inside each profile.
   not environment variables: after changing an environment variable that
   affects GPU memory, start once with `-e VLLM_ENABLE_STARTUP_PLAN=0` or set
   `KV_CACHE_MEMORY_BYTES`.
-  The official text/Vision checkpoint and remote-code revisions follow the
-  source launcher's pinned revisions. An explicit model override does not
-  inherit another repository's revision; `MODEL_REVISION` and
-  `MODEL_CODE_REVISION` remain operator controls.
+  The original text/Vision checkpoints (`CHECKPOINT=original`) and their
+  remote-code revisions follow the source launcher's pinned revisions; the
+  default FP4-CSF checkpoints are described [below](#fp4-csf-checkpoints).
+  An explicit model override does not inherit another repository's revision;
+  `MODEL_REVISION` and `MODEL_CODE_REVISION` remain operator controls.
 - DS4.1: DSpark K7 with adaptive verification, sampled proposals, standard
   rejection, B12X target/draft attention and B12X MoE/dense. Engram table
   placement selects `ram` (default) or `disk` independently of general CPU
@@ -236,6 +270,74 @@ performance measurements. Source references are recorded inside each profile.
   top-k 20 is a request policy, not evidence that every checkpoint has those
   server defaults. Qwen attention selection is native; GDN, MoE, and dense
   kernel selection are explicitly B12X.
+
+### GLM-5.3-Flash expert precision
+
+GLM's routed FP4 experts run on B12X with BF16 activations (W4A16) and FP32
+router weights by default. Three options choose the precision; each sets the
+B12X or vLLM variables shown, and a variable you set yourself is kept and
+decides its option:
+
+| Option | Values (default first) | Variables |
+| --- | --- | --- |
+| `EXPERT_ACTIVATIONS` | `bf16` (W4A16), `fp4` (W4A4, faster, less exact) | `VLLM_B12X_MOE_FP4_FORCE_A16` 1/0 |
+| `ROUTER_WEIGHTS` | `fp32`, `bf16` (only with `bf16` activations) | `B12X_W4A16_FP32_TOPK_WEIGHTS` 1/0 |
+| `PREFILL_ACTIVATIONS` | `a16`, `a4` (only with `bf16` activations) | `B12X_W4A16_A4_PREFILL_MIN_TOKENS` 0/1536 |
+
+`a4` runs expert calls of at least 1,536 tokens with NVFP4 activations over the
+same packed FP4 weights. On two RTX PRO 6000 Max-Q with the `glm53-tp2`
+preset, 8K-32K-token prefills ran about 19% faster with `a4` than with `a16`,
+at the same decode speed; the needle-checksum near-miss rate rose from 0.53% to
+1.75%. A second NVFP4 activation plane for the residual (B12X's
+`B12X_W4A16_A4_PREFILL_TERMS=2`) gave a smaller speedup (13%) without fewer
+near misses (1.85%), so it is not offered as an option.
+Decode stays W4A16 in every mode: decode, MTP verification and short calls
+stay below the threshold, and vLLM keeps the decode rows of steps that mix
+decode and prefill on W4A16. `a4` needs an image whose B12X and vLLM include
+that prefill path, and `EXPERT_ACTIVATIONS=bf16`; with `fp4` an explicit `a4`
+is refused. The options apply to the B12X MoE backend, so the
+GLM TP3 preset, which runs FlashInfer CUTLASS experts, has none of them.
+
+### FP4-CSF checkpoints
+
+Qwen3.8-Flash-Next, GLM-5.3-Flash, DeepSeek-V4.1-Flash, DeepSeek-V4-Flash and
+DeepSeek-V4-Flash Vision serve their FP4-CSF checkpoints by default
+(`checkpoint: csf`). An FP4-CSF checkpoint holds the same weights as the
+original with losslessly compressed routed-expert scales. B12X reads the
+compressed scales while it runs the experts, and they stay compressed in GPU
+memory, which leaves more room for the KV cache. The downloads are smaller too.
+
+| Model | FP4-CSF (default) | Original |
+| --- | --- | --- |
+| Qwen3.8-Flash-Next | `local-inference-lab/Qwen3.8-Flash-Next-NVFP4-MXFP8-CSF-QAD` | `local-inference-lab/Qwen3.8-Flash-Next-NVFP4` (QAD) |
+| GLM-5.3-Flash | `local-inference-lab/GLM-5.3-Flash-NVFP4-CSF-QAD` | `local-inference-lab/GLM-5.3-Flash-NVFP4` (QAD) |
+| DeepSeek-V4.1-Flash | `local-inference-lab/DeepSeek-V4.1-Flash-lossless-CSF` | `deepseek-ai/DeepSeek-V4.1-Flash` |
+| DeepSeek-V4-Flash | `local-inference-lab/DeepSeek-V4-Flash-0731-lossless-CSF` | `deepseek-ai/DeepSeek-V4-Flash-0731` at `9e165c30` |
+| DeepSeek-V4-Flash Vision | `local-inference-lab/DeepSeek-V4-Flash-Vision-Exp-lossless-CSF` | `deepseek-ai/DeepSeek-V4-Flash-Vision-Exp` at `6821d6ad` |
+
+- `-e CHECKPOINT=original` serves the original checkpoint with the profile's
+  ModelOpt or DeepSeek settings, at the revision shown.
+- `MODEL` naming either checkpoint selects it. Any other `MODEL` or
+  `MODEL_REVISION`, such as an older revision of the original repository,
+  keeps the original settings. A local FP4-CSF copy needs `-e CHECKPOINT=csf`
+  with its `MODEL` path.
+- The launcher downloads an FP4-CSF repository itself. It then gives vLLM a
+  directory under `/tmp/lil-csf` with the repository's metadata files and a
+  `config.json` whose quantization (`nvfp4_csf` or `mxfp4_csf`) points at the
+  downloaded weights. vLLM gets neither a Hub revision nor, for the DeepSeek
+  profiles that trust remote code, a code revision for that directory. MTP
+  and DSpark drafters stored in the checkpoint are read from it too.
+- An image whose vLLM cannot read a model's FP4-CSF checkpoint serves the
+  original with a warning. The launcher checks the installed vLLM's FP4-CSF
+  load formats and, for DeepSeek-V4-Flash and its vision variant, the
+  `deepseek_v4_flash` family of its MXFP4-CSF loader. An explicit choice
+  (`CHECKPOINT=csf`, or `MODEL` naming the FP4-CSF repository, as the
+  generated Compose files do) fails instead; use `CHECKPOINT=original` with
+  the original `MODEL`.
+- FP4-CSF needs B12X MoE without expert parallelism, so the GLM TP3 preset
+  serves the original checkpoint. A preset that names a checkpoint of its
+  own, such as `glm53-tp2` (FP4-CSF) or the GLM Spark TP2 preset, serves
+  that checkpoint and refuses a `CHECKPOINT` of the other kind.
 
 GLM and DeepSeek retain the source launchers' temperature 1/top-p 0.95
 server defaults. Explicit generation configuration replaces these defaults;

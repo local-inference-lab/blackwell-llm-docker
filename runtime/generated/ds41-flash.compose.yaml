@@ -16,7 +16,7 @@ services:
     - --hardware
     - rtx-pro-6000-pcie
     environment:
-      MODEL: ${MODEL:-deepseek-ai/DeepSeek-V4.1-Flash}
+      MODEL: ${MODEL:-local-inference-lab/DeepSeek-V4.1-Flash-lossless-CSF}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
       TP: '4'

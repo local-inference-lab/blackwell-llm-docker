@@ -51,7 +51,9 @@ def test_model_image_contract_is_checked_and_exec_preserves_private_environment(
     path = tmp_path / "image-contract.json"
     path.write_text(json.dumps(contract))
     verify_contract(path)
-    plan = resolve("ds41-flash", env={}, runtime_identity="2" * 64)
+    plan = resolve(
+        "ds41-flash", env={"CHECKPOINT": "original"}, runtime_identity="2" * 64
+    )
     monkeypatch.setenv("HF_TOKEN", "private-value")
     monkeypatch.setenv("TP", "wrong-at-exec")
     monkeypatch.setenv("NCCL_GRAPH_FILE", "")
@@ -82,7 +84,7 @@ def test_sampling_file_explicitly_replaces_profile_defaults():
 
 
 def test_remote_code_revision_tracks_only_the_selected_model():
-    plan = resolve("ds4-flash", env={})
+    plan = resolve("ds4-flash", env={"CHECKPOINT": "original"})
     assert (
         plan.values["revision"]
         == plan.values["code-revision"]

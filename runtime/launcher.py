@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -48,6 +49,13 @@ SECRET = re.compile(
     r"api[-_]?key|password|secret|authorization|access[-_]?token|hf_token",
     re.IGNORECASE,
 )
+# Precision of GLM-5.3-Flash's routed FP4 experts on B12X.
+GLM_PRECISION_OPTIONS = ("expert-activations", "router-weights", "prefill-activations")
+# With prefill-activations a4, B12X runs W4A16 expert calls of at least this
+# many tokens with NVFP4 activations. Decode and MTP verification calls stay
+# below it, and vLLM keeps the decode rows of mixed steps on W4A16; below about
+# 1K tokens W4A16 is faster anyway.
+GLM_A4_PREFILL_MIN_TOKENS = 1536
 
 
 class UniqueLoader(yaml.SafeLoader):
@@ -207,6 +215,38 @@ def installed_vllm_environment() -> frozenset[str] | None:
     if source is None:
         return None
     return frozenset(re.findall(r'^    "(VLLM_[A-Z0-9_]+)"', source, re.MULTILINE))
+
+
+def installed_csf_formats() -> frozenset[str] | None:
+    """FP4-CSF load formats the installed vLLM reads, or None without vLLM."""
+    source = installed_source("vllm", "model_executor/model_loader/__init__.py")
+    if source is None:
+        return None
+    return frozenset(fmt for fmt in CSF_FORMATS if f'"{fmt}"' in source)
+
+
+def installed_csf_families() -> frozenset[str] | None:
+    """Checkpoint families the installed vLLM's FP4-CSF loaders accept.
+
+    Each loader lists them in its FAMILIES table, for example deepseek_v41 and
+    deepseek_v4_flash in mxfp4_csf_loader.py; a reader of a format can predate
+    a family. None without vLLM.
+    """
+    if installed_source("vllm", "model_executor/model_loader/__init__.py") is None:
+        return None
+    families: set[str] = set()
+    for fmt in CSF_FORMATS:
+        source = installed_source(
+            "vllm", f"model_executor/model_loader/{fmt}_loader.py"
+        )
+        table = re.search(
+            r"^FAMILIES\b[^=\n]*=\s*\{(.*?)^\}", source or "", re.MULTILINE | re.DOTALL
+        )
+        if table:
+            families.update(
+                re.findall(r'^\s+"([a-z][a-z0-9_]*)"\s*:', table.group(1), re.MULTILINE)
+            )
+    return frozenset(families)
 
 
 def installed_b12x_mxfp8_moe() -> bool:
@@ -374,6 +414,9 @@ class LaunchPlan:
     # Drafter shipped inside the target checkpoint; resolved to a local path
     # at launch, so printing a configuration never downloads anything.
     draft_subfolder: str | None = None
+    # Content identity of a target served from generated files (FP4-CSF),
+    # which the checkpoint identity helper cannot hash itself.
+    target_identity: dict | None = None
 
     def public(self) -> dict:
         # Build public argv from redacted values; never dump the process environment.
@@ -434,6 +477,8 @@ def resolve(
     runtime_identity: str | None = None,
     preset: str | None = None,
     vllm_environment: frozenset[str] | None = None,
+    csf_formats: frozenset[str] | None = None,
+    csf_families: frozenset[str] | None = None,
 ) -> LaunchPlan:
     incoming = dict(os.environ if env is None else env)
     config = config or {}
@@ -611,6 +656,114 @@ def resolve(
         target[parts[-1]] = value
         origins[root] = "cli:json-fields"
 
+    # The checkpoint variant (CHECKPOINT) chooses the checkpoint and the settings
+    # that read it, replacing profile defaults only. A model naming a variant's
+    # checkpoint selects that variant. Any other model or revision chosen by a
+    # preset, settings or the operator keeps the profile settings unless
+    # CHECKPOINT is chosen there too; then the variant fills in everything else.
+    # A preset that names a checkpoint of its own serves it as configured.
+    checkpoint_warnings: list[str] = []
+    if "checkpoint" in values:
+        variants = model.get("checkpoints", {})
+        profile_level = ("common:", "model:", "hardware:")
+
+        def chosen(key: str) -> bool:
+            return key in values and not origins[key].startswith(profile_level)
+
+        def is_csf(options: dict) -> bool:
+            return options.get("load-format") in CSF_FORMATS
+
+        def unreadable(item: dict) -> str | None:
+            """The checkpoints the installed vLLM cannot read, if a variant is one."""
+            if not is_csf(item["options"]):
+                return None
+            if (
+                csf_formats is not None
+                and item["options"]["load-format"] not in csf_formats
+            ):
+                return "FP4-CSF checkpoints"
+            family = item.get("csf_family")
+            if family and csf_families is not None and family not in csf_families:
+                return f"FP4-CSF checkpoints of the {family} family"
+            return None
+
+        name, reason = values["checkpoint"], "derived:model"
+        if (
+            variants
+            and origins["model"].startswith("preset:")
+            and values["model"]
+            not in {item["options"]["model"] for item in variants.values()}
+        ):
+            # CHECKPOINT cannot swap a preset's own checkpoint for one of the
+            # other kind; the preset's settings read only its own.
+            if (
+                chosen("checkpoint")
+                and name in variants
+                and is_csf(variants[name]["options"]) != is_csf(values)
+            ):
+                kind = "an FP4-CSF" if is_csf(values) else "a non-CSF"
+                raise ConfigError(
+                    f"PRESET={preset} serves {kind} checkpoint of its own, "
+                    f"{values['model']}; CHECKPOINT={name} does not apply to it. "
+                    "Choose the checkpoint with the model profile, without this preset"
+                )
+            name = None
+        elif not chosen("checkpoint") and (chosen("model") or chosen("revision")):
+            named = [
+                variant
+                for variant, item in variants.items()
+                if item["options"]["model"] == values["model"]
+            ]
+            name = named[0] if chosen("model") and named else None
+        missing = {
+            variant: text
+            for variant, item in variants.items()
+            if (text := unreadable(item)) is not None
+        }
+        if name in missing:
+            if chosen("checkpoint") or chosen("model"):
+                raise ConfigError(
+                    f"This image's vLLM cannot read {missing[name]}; "
+                    "use CHECKPOINT=original"
+                )
+            # An image whose vLLM predates the FP4-CSF reader of this checkpoint
+            # serves the checkpoint it can read instead of failing at startup.
+            lacking = missing[name]
+            name = next(v for v in variants if v not in missing)
+            reason = f"derived:installed vLLM cannot read {lacking}"
+            checkpoint_warnings.append(
+                f"This image's vLLM cannot read {lacking}; serving the {name} checkpoint."
+            )
+        if name is None:
+            values.pop("checkpoint")
+            origins.pop("checkpoint")
+        elif name not in variants:
+            raise ConfigError(f"{identifier} has no {name} checkpoint variant")
+        else:
+            if name != values["checkpoint"]:
+                set_value("checkpoint", name, reason)
+            options = variants[name]["options"]
+            # A pinned revision belongs to the variant's own checkpoint.
+            other = chosen("model") and values["model"] != options["model"]
+            for key, value in options.items():
+                if not chosen(key) and not (key == "revision" and other):
+                    set_value(key, value, f"checkpoint:{name}")
+    # An FP4-CSF checkpoint named by a preset or the operator rather than a
+    # checkpoint variant has no other checkpoint to fall back to.
+    if (
+        values.get("load-format") in CSF_FORMATS
+        and csf_formats is not None
+        and values["load-format"] not in csf_formats
+    ):
+        raise ConfigError(
+            f"This image's vLLM cannot read {values['load-format']} checkpoints"
+            + (
+                f", which PRESET={preset} serves"
+                if origins["load-format"].startswith("preset:")
+                else ""
+            )
+        )
+
     # Environment values are explicit only in a model-neutral image. Its build
     # contract is checked before execution; value-equality origin guessing is forbidden.
     consumed = {alias for spec in specs.values() for alias in spec["env"]}
@@ -668,6 +821,17 @@ def resolve(
         values[key] = value
         origins[key] = f"derived:{reason}"
 
+    configure_expert_precision(
+        identifier,
+        values,
+        origins,
+        environment_origins=env_origins,
+        explicit_env=explicit_env,
+        vllm_environment=vllm_environment,
+        set_env=set_env,
+        derive=derive,
+    )
+
     if deployment:
         for target, source in deployment["linked_options"].items():
             if target not in specs or source not in values:
@@ -707,10 +871,13 @@ def resolve(
         derive(
             "revision", model["checkpoint_revision"], "profile checkpoint/code revision"
         )
+    # vLLM opens an FP4-CSF checkpoint from generated local serving files that
+    # carry its Hugging Face files, so no Hub code revision applies to it.
     if (
         values.get("trust-remote-code")
         and "revision" in values
         and "code-revision" not in values
+        and values.get("load-format") not in CSF_FORMATS
     ):
         derive(
             "code-revision",
@@ -991,7 +1158,8 @@ def resolve(
         if name not in environment:
             set_env(name, path, "derived:runtime-lock and profile identity")
     warnings = [
-        "Model parameters preserve recipe intent; changing installed vLLM/B12X requires independent qualification."
+        "Model parameters preserve recipe intent; changing installed vLLM/B12X requires independent qualification.",
+        *checkpoint_warnings,
     ]
     if identifier.startswith("ds4-") and "linear-backend" not in values:
         warnings.append(
@@ -1043,6 +1211,276 @@ def resolve(
         cache_service,
         draft_subfolder,
     )
+
+
+def configure_expert_precision(
+    identifier: str,
+    values: dict,
+    origins: dict,
+    *,
+    environment_origins: dict,
+    explicit_env: dict,
+    vllm_environment: frozenset[str] | None,
+    set_env,
+    derive,
+) -> None:
+    """Map GLM-5.3-Flash's routed-expert precision options to B12X variables.
+
+    expert-activations bf16 runs the FP4 experts as W4A16 (FP4 weights, BF16
+    activations) and fp4 as W4A4. router-weights fp32 combines W4A16 expert
+    outputs with FP32 router weights. prefill-activations a4 runs W4A16 calls
+    of at least GLM_A4_PREFILL_MIN_TOKENS tokens with NVFP4 activations. A
+    variable the operator sets itself is kept and decides the option it belongs
+    to.
+    """
+    present = [option for option in GLM_PRECISION_OPTIONS if option in values]
+    if not present:
+        return
+    profile_level = ("common:", "model:", "hardware:")
+    if identifier != "glm53-flash":
+        raise ConfigError(f"{present[0]} applies to GLM-5.3-Flash only")
+    if values.get("moe-backend") != "b12x":
+        # Another MoE backend runs the experts in its own precision.
+        named = [
+            item for item in present if not origins[item].startswith(profile_level)
+        ]
+        if named:
+            raise ConfigError(
+                f"{named[0]} applies to B12X routed experts (moe-backend b12x)"
+            )
+        for option in present:
+            values.pop(option)
+            origins.pop(option)
+        return
+
+    def explicit(option: str) -> bool:
+        return origins.get(option, "").startswith(("cli", "settings:", "environment"))
+
+    def effective(option: str, value: str, reason: str) -> None:
+        """Make an option describe what runs; refuse an explicit contradiction."""
+        if option not in values or values[option] == value:
+            return
+        if explicit(option):
+            raise ConfigError(f"{reason} conflicts with {option} {values[option]}")
+        derive(option, value, reason)
+
+    def option_env(option: str, name: str, value: str) -> None:
+        """Set an option's variable unless the operator set it, a preset pinned
+        it while the option kept its profile default, or the installed vLLM
+        does not define it."""
+        if option not in values or name in explicit_env:
+            return
+        if (
+            name.startswith("VLLM_")
+            and vllm_environment is not None
+            and name not in vllm_environment
+        ):
+            return
+        if origins[option].startswith(profile_level) and environment_origins.get(
+            name, ""
+        ).startswith("preset:"):
+            return
+        set_env(name, value, origins[option])
+
+    for option, name, decode in (
+        (
+            "expert-activations",
+            "VLLM_B12X_MOE_FP4_FORCE_A16",
+            {"1": "bf16", "0": "fp4"},
+        ),
+        ("router-weights", "B12X_W4A16_FP32_TOPK_WEIGHTS", {"1": "fp32", "0": "bf16"}),
+    ):
+        if explicit_env.get(name) in decode:
+            effective(
+                option, decode[explicit_env[name]], f"{name}={explicit_env[name]}"
+            )
+    threshold_name = "B12X_W4A16_A4_PREFILL_MIN_TOKENS"
+    threshold = explicit_env.get(threshold_name)
+    if threshold is not None and "prefill-activations" in values:
+        try:
+            enabled = int(threshold) > 0
+        except ValueError:
+            enabled = None  # B12X refuses the value at startup
+        if enabled is not None:
+            effective(
+                "prefill-activations",
+                "a4" if enabled else "a16",
+                f"{threshold_name}={threshold}",
+            )
+
+    bf16 = values.get("expert-activations") == "bf16"
+    option_env(
+        "expert-activations", "VLLM_B12X_MOE_FP4_FORCE_A16", "1" if bf16 else "0"
+    )
+    # FP32 router weights belong to the W4A16 combine.
+    option_env(
+        "router-weights",
+        "B12X_W4A16_FP32_TOPK_WEIGHTS",
+        "1" if bf16 and values.get("router-weights") == "fp32" else "0",
+    )
+    prefill = values.get("prefill-activations")
+    if prefill not in (None, "a16") and not bf16:
+        # FP4 expert activations already quantize prefill and decode alike.
+        if explicit("prefill-activations"):
+            raise ConfigError(
+                f"prefill-activations needs expert-activations bf16; {prefill} "
+                "cannot be combined with expert-activations fp4"
+            )
+        derive("prefill-activations", "a16", "FP4 expert activations")
+        prefill = "a16"
+    if prefill is not None:
+        option_env(
+            "prefill-activations",
+            threshold_name,
+            "0" if prefill == "a16" else str(GLM_A4_PREFILL_MIN_TOKENS),
+        )
+
+
+CSF_FORMATS = ("nvfp4_csf", "mxfp4_csf")
+CSF_SCHEMAS = {
+    "lil-nvfp4-csf-checkpoint/1": "nvfp4_csf",
+    "lil-mxfp4-csf-checkpoint/1": "mxfp4_csf",
+}
+CSF_SERVING_ROOT = Path("/tmp/lil-csf")
+
+
+def csf_serving_config(config: dict, method: str, root: Path) -> dict:
+    """config.json that points vLLM's FP4-CSF reader at a checkpoint root."""
+    holder = config if "quantization_config" in config else config.get("text_config")
+    if not isinstance(holder, dict) or not isinstance(
+        holder.get("quantization_config"), dict
+    ):
+        raise ConfigError("FP4-CSF metadata/config.json has no quantization_config")
+    source = holder["quantization_config"]
+    location = {"format_version": 1, "checkpoint_root": str(root)}
+    if method == "nvfp4_csf":
+        holder["quantization_config"] = {
+            "quant_method": method,
+            **location,
+            "source_quantization_config": source,
+        }
+    else:
+        holder["quantization_config"] = {**source, "quant_method": method, **location}
+    return config
+
+
+def csf_format(manifest: Path, source: str, method: str) -> None:
+    """Check that a manifest describes an FP4-CSF checkpoint read by method."""
+    try:
+        schema = json.loads(manifest.read_text()).get("schema")
+    except (OSError, ValueError, AttributeError) as error:
+        raise ConfigError(
+            f"{source} is not an FP4-CSF checkpoint ({error}); "
+            "use CHECKPOINT=original for other checkpoints"
+        ) from error
+    stored = CSF_SCHEMAS.get(schema)
+    if stored is None:
+        raise ConfigError(
+            f"{source} has FP4-CSF schema {schema!r}; this image reads "
+            f"{', '.join(sorted(CSF_SCHEMAS))}"
+        )
+    if stored != method:
+        raise ConfigError(f"{source} is a {stored} checkpoint, not {method}")
+
+
+def csf_missing_files(root: Path) -> list[str]:
+    """Files the manifest of an FP4-CSF checkpoint lists that are absent or partial."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    expected: dict[str, int | None] = {"build-contract.json": None}
+    for name in manifest.get("metadata_sha256", {}):
+        expected[f"metadata/{name}"] = None
+    for shard in manifest.get("shards", []):
+        expected[f"tensors/{shard['file']}"] = shard.get("target_file_bytes")
+    return [
+        name
+        for name, size in expected.items()
+        if not (root / name).is_file()
+        or (size is not None and (root / name).stat().st_size != size)
+    ]
+
+
+def csf_snapshot(repository: str, revision: str | None, method: str) -> Path:
+    """A complete local snapshot of an FP4-CSF Hub repository.
+
+    A complete cached snapshot is used as is, also offline. Otherwise the
+    small manifest proves the format before the weights are downloaded.
+    """
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        root = Path(
+            snapshot_download(repository, revision=revision, local_files_only=True)
+        )
+    except LocalEntryNotFoundError:
+        root = None
+    if root is not None and (root / "manifest.json").is_file():
+        csf_format(root / "manifest.json", repository, method)
+        if not csf_missing_files(root):
+            return root
+    manifest = hf_hub_download(repository, "manifest.json", revision=revision)
+    csf_format(Path(manifest), repository, method)
+    return Path(snapshot_download(repository, revision=revision))
+
+
+def prepare_csf_checkpoint(plan: LaunchPlan) -> None:
+    """Serve an FP4-CSF checkpoint from a directory vLLM can open.
+
+    An FP4-CSF repository keeps the Hugging Face files under metadata/ and the
+    compressed tensors under tensors/. vLLM gets a directory with those files
+    and a config.json whose quantization_config names the CSF reader and the
+    checkpoint root; the weights stay where they are. vLLM does not download a
+    directory, so a Hub checkpoint is downloaded here, at the pinned revision.
+    """
+    method = plan.values.get("load-format")
+    if method not in CSF_FORMATS:
+        return
+    source = plan.values["model"]
+    if Path(source).is_dir():
+        root = Path(source).absolute()
+    else:
+        root = csf_snapshot(source, plan.values.get("revision"), method)
+    csf_format(root / "manifest.json", source, method)
+    missing = csf_missing_files(root)
+    if missing:
+        raise ConfigError(
+            f"{source} is incomplete; missing or partial: {', '.join(missing[:5])}"
+            + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+        )
+    try:
+        config = json.loads((root / "metadata" / "config.json").read_text())
+    except (OSError, ValueError) as error:
+        raise ConfigError(f"{source} has no readable metadata/config.json") from error
+    # The name shows in the vLLM command line, logs and benchmark records.
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", Path(source).name) or "checkpoint"
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
+    serving = CSF_SERVING_ROOT / f"{name}-{digest}"
+    if serving.exists():
+        shutil.rmtree(serving)
+    serving.mkdir(parents=True)
+    for item in sorted((root / "metadata").iterdir()):
+        if item.is_file() and item.name != "config.json":
+            shutil.copyfile(item, serving / item.name)
+    (serving / "config.json").write_text(
+        json.dumps(csf_serving_config(config, method, root), indent=2) + "\n"
+    )
+    plan.values["model"] = str(serving)
+    plan.origins["model"] = f"resolved:FP4-CSF serving files for {source}"
+    # The manifest names every shard and metadata file by SHA-256, so it
+    # identifies the checkpoint content wherever the snapshot lives.
+    manifest_digest = hashlib.sha256(
+        b"lil-fp4-csf-v1\0" + (root / "manifest.json").read_bytes()
+    ).hexdigest()
+    plan.target_identity = {"identity": manifest_digest, "revision": ""}
+    plan.values.pop("revision", None)
+    spec = plan.values.get("speculative-config")
+    if spec and spec.get("model", source) == source:
+        # Drafters read from the target checkpoint follow its serving files.
+        spec.pop("revision", None)
+        if "model" in spec:
+            spec["model"] = str(serving)
+    plan.argv = make_argv(plan.values, plan.passthrough)
+    print(f"Serving FP4-CSF checkpoint {root} through {serving}", file=sys.stderr)
 
 
 def resolve_draft_subfolder(plan: LaunchPlan) -> None:
@@ -1230,6 +1668,18 @@ def validate(values: dict, environment: dict, identifier: str) -> None:
         raise ConfigError(
             "These profiles support single-node tensor parallelism, not pipeline parallelism"
         )
+    if {values.get("load-format"), values.get("quantization")} & set(CSF_FORMATS):
+        if values.get("load-format") != values.get("quantization"):
+            raise ConfigError(
+                "FP4-CSF checkpoints need matching --quantization and --load-format "
+                "(nvfp4_csf or mxfp4_csf)"
+            )
+        if values.get("moe-backend") != "b12x" or values.get("enable-expert-parallel"):
+            raise ConfigError(
+                "FP4-CSF checkpoints decode their experts on B12X with tensor "
+                "parallelism only; use CHECKPOINT=original with another MoE "
+                "backend or expert parallelism"
+            )
     supported_kv = {"fp8", "fp8_e4m3"}
     if identifier == "glm53-flash":
         supported_kv.add("nvfp4_ds_mla")
@@ -1383,6 +1833,7 @@ def execute(plan: LaunchPlan, contract_path: Path) -> None:
     if environment.get("NCCL_GRAPH_FILE") == "":
         environment.pop("NCCL_GRAPH_FILE")
     environment.update(plan.environment)
+    prepare_csf_checkpoint(plan)
     resolve_draft_subfolder(plan)
     resolve_draft_moe_backend(plan)
     if plan.values["replicas"] > 1:
@@ -1483,6 +1934,8 @@ def main() -> int:
             # Inside an image, check the installed vLLM; a CPU-only
             # --print-config outside one resolves the preset as written.
             vllm_environment=installed_vllm_environment() if contract else None,
+            csf_formats=installed_csf_formats() if contract else None,
+            csf_families=installed_csf_families() if contract else None,
         )
         if args.print_config:
             public = plan.public()

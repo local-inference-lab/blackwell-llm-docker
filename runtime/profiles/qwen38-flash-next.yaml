@@ -9,6 +9,7 @@ defaults:
   # Disk gets the newest checkpoint of each conversation when it leaves RAM
   # and at shutdown; superseded turns are never written.
   cache-l2-checkpoint-writes: on-evict
+  checkpoint: csf
   model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
   served-model-name: Qwen3.8-Flash-Next
   tensor-parallel-size: 1
@@ -61,6 +62,19 @@ environment:
   VLLM_B12X_DENSE_ACTIVATION_MODE: auto
   B12X_DYNAMIC_DETERMINISTIC_OUTPUT: "0"
   B12X_DENSE_SPLITK_TURBO: "1"
+checkpoints:
+  csf:
+    description: >-
+      Lossless FP4-CSF container of the QAD NVFP4/MXFP8 checkpoint: the same weights as the original, with the routed-expert scales compressed losslessly. B12X reads the compressed scales and they stay compressed in GPU memory, which leaves more room for the KV cache; the download is smaller too.
+    options:
+      model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4-MXFP8-CSF-QAD
+      # TODO pin after upload
+      quantization: nvfp4_csf
+      load-format: nvfp4_csf
+  original:
+    description: The QAD ModelOpt checkpoint the FP4-CSF container is made from, with uncompressed expert scales.
+    options:
+      model: local-inference-lab/Qwen3.8-Flash-Next-NVFP4
 modes:
   off: {}
   mtp:

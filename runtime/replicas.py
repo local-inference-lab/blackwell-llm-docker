@@ -34,7 +34,9 @@ def checkpoint_identity(plan, helper: Path) -> str:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     values = plan.values
-    target = module.resolve_checkpoint(values["model"], values.get("revision"))
+    target = plan.target_identity or module.resolve_checkpoint(
+        values["model"], values.get("revision")
+    )
     if target["revision"]:
         values["revision"] = target["revision"]
         plan.origins["revision"] = "resolved:checkpoint identity"

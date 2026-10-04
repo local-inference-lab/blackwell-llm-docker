@@ -347,3 +347,133 @@ def test_installed_b12x_mxfp8_moe_needs_both_packages(
         (b12x / "moe/fused_moe/source.py").write_text(formats)
     monkeypatch.syspath_prepend(str(tmp_path))
     assert installed_b12x_mxfp8_moe() is expected
+
+
+TP2_KV = 8589934592
+QAD_CHECKPOINT = "local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD"
+QAD_REVISION = "9ca06e24effde995982c439091722e9e76db82bc"
+
+
+def tp2(env=None, **kwargs):
+    return resolve(
+        "glm53-flash",
+        "rtx-pro-6000-pcie",
+        preset="glm53-tp2",
+        env=env or {},
+        **kwargs,
+    )
+
+
+def test_tp2_preset_serves_the_stored_qad_checkpoint():
+    """The launch validated on two RTX PRO 6000 Max-Q (8 GiB KV per GPU)."""
+    plan = tp2()
+    expected = {
+        "model": QAD_CHECKPOINT,
+        "revision": QAD_REVISION,
+        "quantization": "nvfp4_csf",
+        "load-format": "nvfp4_csf",
+        "served-model-name": "GLM-5.3-Flash",
+        "tensor-parallel-size": 2,
+        "decode-context-parallel-size": 2,
+        "mode": "mtp",
+        "max-model-len": -1,
+        "max-num-seqs": 8,
+        "max-num-batched-tokens": 3072,
+        "kv-cache-memory-bytes": TP2_KV,
+        "gpu-memory-utilization": 0.985,
+        "max-cudagraph-capture-size": 32,
+        "cudagraph-capture-sizes": [1, 2, 4, 8, 12, 16, 20, 24, 28, 32],
+        "moe-backend": "b12x",
+        "cache-mode": "vram",
+        "expert-activations": "bf16",
+        "router-weights": "fp32",
+        "prefill-activations": "a16",
+    }
+    assert {key: plan.values[key] for key in expected} == expected
+    # The preset's own checkpoint, not one of the profile's variants.
+    assert "checkpoint" not in plan.values
+    assert plan.values["speculative-config"] == {
+        "method": "mtp",
+        "num_speculative_tokens": 3,
+        "draft_sample_method": "probabilistic",
+        "rejection_sample_method": "standard",
+        "moe_backend": "b12x",
+        "attention_backend": "B12X",
+        "revision": QAD_REVISION,
+    }
+    assert "--code-revision" not in plan.argv
+    expected_env = {
+        "NCCL_MIN_NCHANNELS": "2",
+        "NCCL_MAX_NCHANNELS": "2",
+        "NCCL_BUFFSIZE": "1048576",
+        "NCCL_NET_PLUGIN": "none",
+        "NCCL_TUNER_PLUGIN": "none",
+        "NCCL_SOCKET_IFNAME": "lo",
+        "GLOO_SOCKET_IFNAME": "lo",
+        "CUBLAS_WORKSPACE_CONFIG": ":4096:1",
+        "OMP_NUM_THREADS": "1",
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True,large_segment_size_mb:12",
+        "VLLM_PCIE_TWOSHOT_ALLREDUCE_MAX_SIZE": "off",
+        "VLLM_PCIE_DMA_MIN_BYTES": "off",
+        "VLLM_B12X_MLA_CKV_GATHER": "1",
+        "VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS": "65536",
+        "VLLM_GLM53_EMBED_HOST": "1",
+        # The checkpoint keeps the vision tower in BF16.
+        "VLLM_GLM53_VISION_MXFP8": "1",
+        "VLLM_SHARE_PYNCCL_COMMS": "1",
+        "VLLM_B12X_MOE_FP4_FORCE_A16": "1",
+        "B12X_W4A16_FP32_TOPK_WEIGHTS": "1",
+        "B12X_W4A16_A4_PREFILL_MIN_TOKENS": "0",
+    }
+    assert {name: plan.environment.get(name) for name in expected_env} == expected_env
+    assert "B12X_W4A16_A4_PREFILL_TERMS" not in plan.environment
+
+
+def test_tp2_is_described_as_the_default_tp2_recipe():
+    presets = deployment_presets()
+    assert "default TP2 recipe" in presets["glm53-tp2"]["description"]
+    assert "8 GiB KV cache per GPU" in presets["glm53-tp2"]["description"]
+    assert "glm53-tp2 is the default" in presets["glm53-spark-tp2"]["description"]
+
+
+def test_tp2_serves_only_its_fp4_csf_checkpoint():
+    with pytest.raises(
+        ConfigError,
+        match="PRESET=glm53-tp2 serves an FP4-CSF checkpoint of its own.*"
+        "CHECKPOINT=original does not apply",
+    ):
+        tp2({"CHECKPOINT": "original"})
+    same_kind = tp2({"CHECKPOINT": "csf"})
+    assert same_kind.values["model"] == QAD_CHECKPOINT
+    assert same_kind.values["revision"] == QAD_REVISION
+
+
+def test_tp2_needs_an_image_that_reads_nvfp4_csf():
+    with pytest.raises(
+        ConfigError,
+        match="cannot read nvfp4_csf checkpoints, which PRESET=glm53-tp2 serves",
+    ):
+        tp2(csf_formats=frozenset({"mxfp4_csf"}))
+    assert tp2(csf_formats=frozenset({"nvfp4_csf"})).values["model"] == (QAD_CHECKPOINT)
+
+
+def test_tp2_extra_slots_and_the_external_cache_shrink_the_kv_cache():
+    sixteen = tp2({"MAX_NUM_SEQS": "16"})
+    assert sixteen.values["kv-cache-memory-bytes"] == TP2_KV - 8 * 67108864
+    assert sixteen.values["max-cudagraph-capture-size"] == 64
+    lmcache = tp2({"CACHE_MODE": "lmcache"})
+    assert lmcache.values["kv-cache-memory-bytes"] == TP2_KV - 201326592
+    assert lmcache.values["cache-object-tokens"] == 3072
+    explicit = tp2({"MAX_NUM_SEQS": "16", "KV_CACHE_MEMORY_BYTES": "6442450944"})
+    assert explicit.values["kv-cache-memory-bytes"] == 6442450944
+
+
+def test_tp2_prefill_activation_choices():
+    a4 = tp2({"PREFILL_ACTIVATIONS": "a4"})
+    assert a4.environment["B12X_W4A16_A4_PREFILL_MIN_TOKENS"] == "1536"
+    assert "B12X_W4A16_A4_PREFILL_TERMS" not in a4.environment
+    assert a4.environment["VLLM_B12X_MOE_FP4_FORCE_A16"] == "1"
+    with pytest.raises(ConfigError, match="prefill-activations must be one of"):
+        tp2({"PREFILL_ACTIVATIONS": "a8"})
+    with pytest.raises(ConfigError, match="needs expert-activations bf16"):
+        tp2({"EXPERT_ACTIVATIONS": "fp4", "PREFILL_ACTIVATIONS": "a4"})
