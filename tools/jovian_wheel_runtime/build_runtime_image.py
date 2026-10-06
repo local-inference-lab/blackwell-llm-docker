@@ -53,11 +53,13 @@ def main() -> None:
     subprocess.run(["sha256sum", "--check", "SHA256SUMS"], cwd=bundle, check=True)
     manifest = bundle / "manifest.json"
     manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    source_image = dict(
+    foundation_lock = dict(
         line.split("=", 1)
         for line in (tools / "foundation.lock").read_text().splitlines()
         if "=" in line
-    )["source.image"]
+    )
+    source_image = foundation_lock["source.image"]
+    platform = foundation_lock.get("source.image.platform", "linux/amd64")
     source_commit = run(["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
     if run(["git", "-C", str(root), "status", "--porcelain"]):
         raise ValueError("Runtime image builds require a clean recipe checkout")
@@ -68,7 +70,7 @@ def main() -> None:
     if present.returncode:
         subprocess.run(["docker", "pull", source_image], check=True)
     inspection = json.loads(run(["docker", "image", "inspect", source_image]))
-    builder = os.environ.get("BUILDX_BUILDER", "lil-wheel-cu134-sm120")
+    builder = os.environ.get("BUILDX_BUILDER", foundation_lock.get("buildx.builder", "lil-wheel-cu134-sm120"))
     foundation, neutral_inspection = prepare(
         source_image,
         inspection[0],
@@ -79,6 +81,7 @@ def main() -> None:
             )
         ),
         builder,
+        platform,
     )
     with tempfile.TemporaryDirectory(prefix="lil-runtime-build-metadata-") as tmp:
         metadata = Path(tmp)
@@ -92,6 +95,8 @@ def main() -> None:
                 "build",
                 "--builder",
                 builder,
+                "--platform",
+                platform,
                 "--file",
                 str(tools / "Dockerfile.runtime"),
                 "--build-context",
@@ -102,6 +107,11 @@ def main() -> None:
                 f"model-neutral-foundation={foundation}",
                 "--build-arg",
                 f"SOURCE_IMAGE={source_image}",
+                *(
+                    ["--build-arg", f"UV_IMAGE={foundation_lock['uv.container-image']}"]
+                    if "uv.container-image" in foundation_lock
+                    else []
+                ),
                 "--build-arg",
                 f"RUNTIME_SOURCE_COMMIT={source_commit}",
                 "--tag",

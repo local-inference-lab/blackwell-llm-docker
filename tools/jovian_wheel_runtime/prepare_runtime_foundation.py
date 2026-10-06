@@ -112,6 +112,7 @@ def prepare(
     policy_path: Path,
     cache: Path,
     builder: str,
+    platform: str = "linux/amd64",
 ) -> tuple[str, dict]:
     policy = json.loads(policy_path.read_text())
     if (
@@ -148,7 +149,7 @@ def prepare(
                         "--builder",
                         builder,
                         "--platform",
-                        "linux/amd64",
+                        platform,
                         "--provenance=false",
                         "--file",
                         "-",

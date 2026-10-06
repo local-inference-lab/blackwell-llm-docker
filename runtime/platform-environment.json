@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_image": "nvcr.io/nvidia/pytorch@sha256:33ef5fc15e8937602d64022209cdb2777b32dadf742f41332023d946041b3c14",
+  "source_image": "nvcr.io/nvidia/pytorch@sha256:237ecf9ac7373daf91b31bb4f86651ce1ce57b676366ed435aa1aba61dad81d5",
   "environment": {
     "NCCL_NET_PLUGIN": "spcx",
-    "TORCH_CUDA_ARCH_LIST": "7.5 8.0 8.6 9.0 10.0 12.0+PTX"
+    "TORCH_CUDA_ARCH_LIST": "8.0 8.6 9.0 10.0 11.0 12.0+PTX"
   }
 }
