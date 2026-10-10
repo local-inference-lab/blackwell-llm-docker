@@ -1110,7 +1110,7 @@ PY
 ## Hardware
 
 - NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) or compatible
-- NVIDIA driver 615+ (CUDA 13.4)
+- CUDA driver 575+
 - 96 GB VRAM per GPU
 
 ## Key features
