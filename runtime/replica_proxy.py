@@ -311,7 +311,7 @@ def build_app(upstreams: list[str], *, router: StickyRouter | None = None):
                 base + path, timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 return response.status, await response.text()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+        except (TimeoutError, aiohttp.ClientError) as error:
             return 0, str(error)
 
     async def health(request: web.Request) -> web.Response:

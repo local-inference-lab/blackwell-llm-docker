@@ -1,0 +1,14 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-149",
+  "category": "fix",
+  "summary": "A local FP4-CSF copy is read as FP4-CSF without CHECKPOINT=csf",
+  "models": ["DeepSeek-V4.1-Flash", "DeepSeek-V4-Flash", "DeepSeek-V4-Flash-Vision-Exp", "GLM-5.3", "GLM-5.3-Flash", "Qwen3.8-Flash-Next"],
+  "compatibility": "No user action required. CHECKPOINT=original with a local FP4-CSF copy now stops with an error instead of serving wrong output.",
+  "details": [
+    "MODEL pointing at a local FP4-CSF copy without CHECKPOINT=csf kept the original checkpoint's settings, so the compressed expert scales were read as plain ones and the model served wrong output without an error (DeepSeek-V4.1-Flash DSpark acceptance 2.2 to 1.2).",
+    "The launcher now recognizes the copy from its manifest.json schema or its Hugging Face-layout CSF recipes and serves it as FP4-CSF, as with CHECKPOINT=csf."
+  ],
+  "pull_requests": [149],
+  "requires": []
+}
