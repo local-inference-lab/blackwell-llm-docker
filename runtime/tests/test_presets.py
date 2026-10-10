@@ -458,3 +458,16 @@ def test_tp2_prefill_activation_choices():
         tp2({"PREFILL_ACTIVATIONS": "a8"})
     with pytest.raises(ConfigError, match="needs expert-activations bf16"):
         tp2({"EXPERT_ACTIVATIONS": "fp4", "PREFILL_ACTIVATIONS": "a4"})
+
+
+@pytest.mark.parametrize("preset", ["glm53-csf-tp8", "glm53-csf-tp6"])
+def test_glm53_presets_share_contended_steps_with_prefill(preset):
+    """Like the Flash and DS4.1 profiles, GLM-5.3 keeps decoding while a long
+    prompt prefills instead of stalling the running requests."""
+    argv = resolve("glm53", "rtx-pro-6000-pcie", preset=preset, env={}).argv
+    for flag, value in (
+        ("--prefill-compute-share", "0.4"),
+        ("--prefill-schedule-interval", "1"),
+        ("--max-parallel-prefills", "1"),
+    ):
+        assert argv[argv.index(flag) + 1] == value, flag
