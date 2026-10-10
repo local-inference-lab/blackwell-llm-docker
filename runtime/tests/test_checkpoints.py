@@ -1014,3 +1014,71 @@ def test_hf_layout_identity_covers_the_shard_contents(tmp_path):
         shard.symlink_to(blobs / blob)
         digests.add(launcher.csf_hf_content_digest(root))
     assert len(digests) == 2
+
+
+@pytest.mark.parametrize("profile_id", ["ds41-flash", *DS4, "glm53-flash"])
+def test_a_local_csf_copy_selects_the_variant_that_reads_it(
+    tmp_path, monkeypatch, profile_id
+):
+    """Read with the original settings, a local FP4-CSF copy loads without an
+    error and serves wrong output, so its manifest picks the reader."""
+    monkeypatch.setattr(launcher, "CSF_SERVING_ROOT", tmp_path / "serving")
+    method = CSF[profile_id].method
+    source = {"quant_method": "fp8"}
+    root = _csf_checkpoint(
+        tmp_path / "copy", f"lil-{method.split('_')[0]}-csf-checkpoint/1", source
+    )
+    plan = resolve(profile_id, "rtx-pro-6000-pcie", env={"MODEL": str(root)})
+
+    assert plan.values["checkpoint"] == "csf"
+    assert plan.values["quantization"] == plan.values["load-format"] == method
+    assert "revision" not in plan.values
+    if method == "mxfp4_csf":
+        prepare_csf_checkpoint(plan)
+        config = _serving_config(plan)["quantization_config"]
+        assert config["quant_method"] == method
+        assert config["checkpoint_root"] == str(root)
+
+
+def test_a_local_hf_layout_csf_copy_selects_the_csf_variant(tmp_path):
+    root = _hf_layout_checkpoint(tmp_path / "copy")
+    plan = resolve("qwen38-flash-next", env={"MODEL": str(root)})
+
+    assert plan.values["checkpoint"] == "csf"
+    assert plan.values["load-format"] == "nvfp4_csf"
+
+
+def test_the_original_checkpoint_settings_refuse_a_local_csf_copy(tmp_path):
+    root = _csf_checkpoint(
+        tmp_path / "copy", "lil-mxfp4-csf-checkpoint/1", {"quant_method": "fp8"}
+    )
+    with pytest.raises(
+        ConfigError, match=r"CHECKPOINT=original \(environment:CHECKPOINT\) reads"
+    ):
+        resolve("ds41-flash", env={"MODEL": str(root), "CHECKPOINT": "original"})
+
+
+def test_a_local_csf_copy_needs_a_variant_of_its_format(tmp_path):
+    root = _csf_checkpoint(
+        tmp_path / "copy", "lil-mxfp4-csf-checkpoint/1", {"quant_method": "fp8"}
+    )
+    with pytest.raises(ConfigError, match="has no checkpoint variant that reads"):
+        resolve("glm53-flash", env={"MODEL": str(root)})
+
+
+def test_a_local_csf_copy_needs_the_reader(tmp_path):
+    root = _csf_checkpoint(
+        tmp_path / "copy", "lil-mxfp4-csf-checkpoint/1", {"quant_method": "fp8"}
+    )
+    with pytest.raises(ConfigError, match=f"which MODEL={root} is$"):
+        resolve("ds41-flash", env={"MODEL": str(root)}, csf_formats=frozenset())
+
+
+def test_a_local_copy_of_another_format_keeps_the_profile_settings(tmp_path):
+    root = tmp_path / "copy"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"schema": "lil-x4t-checkpoint/1"}))
+    plan = resolve("ds41-flash", env={"MODEL": str(root)})
+
+    assert "checkpoint" not in plan.values
+    assert plan.values["load-format"] == "instanttensor"

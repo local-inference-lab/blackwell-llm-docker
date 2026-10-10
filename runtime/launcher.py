@@ -764,6 +764,9 @@ def resolve(
             return None
 
         name, reason = values["checkpoint"], "derived:model"
+        # A local FP4-CSF copy read with a non-CSF variant's settings loads
+        # without an error and serves wrong output, so its files choose.
+        local_csf = local_csf_format(values["model"]) if chosen("model") else None
         if variants and origins["model"].startswith("preset:"):
             # CHECKPOINT cannot swap a preset's own checkpoint for one of the
             # other kind; the preset's settings read only its own.
@@ -785,13 +788,36 @@ def resolve(
                 for variant, item in variants.items()
                 if item["options"]["model"] == values["model"]
             ]
+            if chosen("model") and not named and local_csf:
+                named = [
+                    variant
+                    for variant, item in variants.items()
+                    if item["options"].get("load-format") == local_csf
+                ]
+                if not named:
+                    raise ConfigError(
+                        f"MODEL={values['model']} is a {local_csf} checkpoint; "
+                        f"{identifier} has no checkpoint variant that reads it"
+                    )
+                reason = f"derived:{local_csf} files at MODEL"
             name = named[0] if chosen("model") and named else None
+        if local_csf and name in variants and not is_csf(variants[name]["options"]):
+            raise ConfigError(
+                f"MODEL={values['model']} is a {local_csf} checkpoint, but "
+                f"CHECKPOINT={name} ({origins['checkpoint']}) reads its compressed "
+                "scales as plain ones and serves wrong output"
+            )
         missing = {
             variant: text
             for variant, item in variants.items()
             if (text := unreadable(item)) is not None
         }
         if name in missing:
+            if local_csf:
+                raise ConfigError(
+                    f"This image's vLLM cannot read {missing[name]}, which "
+                    f"MODEL={values['model']} is"
+                )
             if chosen("checkpoint") or chosen("model"):
                 raise ConfigError(
                     f"This image's vLLM cannot read {missing[name]}; "
@@ -1537,6 +1563,21 @@ def csf_format(manifest: Path, source: str, method: str) -> None:
         )
     if stored != method:
         raise ConfigError(f"{source} is a {stored} checkpoint, not {method}")
+
+
+def local_csf_format(source: str) -> str | None:
+    """The FP4-CSF load format a local checkpoint directory needs, if it is one."""
+    root = Path(source)
+    if not root.is_dir():
+        return None
+    manifest = root / "manifest.json"
+    if manifest.is_file():
+        try:
+            schema = json.loads(manifest.read_text()).get("schema")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return CSF_SCHEMAS.get(schema)
+    return "nvfp4_csf" if csf_hf_layout(root) else None
 
 
 def csf_missing_files(root: Path) -> list[str]:

@@ -56,8 +56,8 @@ options:
     summary: Which checkpoint of the model to serve. csf is the FP4-CSF container (the same weights
       with losslessly compressed routed-expert scales, read by B12X); original is the checkpoint it is
       made from. The choice sets the model, revision, quantization and load format together. A model
-      or revision you set yourself keeps its own settings unless you also set checkpoint, so
-      checkpoint=csf with a local FP4-CSF copy reads that copy.
+      or revision you set yourself keeps its own settings unless you also set checkpoint. A local
+      FP4-CSF copy is recognized from its files and read as FP4-CSF; checkpoint=original refuses it.
     why: >-
       Profiles with an FP4-CSF checkpoint default to csf. Its scales stay compressed in GPU memory,
       which leaves more room for the KV cache, and the downloads are smaller. An image whose vLLM cannot

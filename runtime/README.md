@@ -409,10 +409,13 @@ time per step is the same.
 
 - `-e CHECKPOINT=original` serves the original checkpoint with the profile's
   ModelOpt or DeepSeek settings, at the revision shown.
-- `MODEL` naming either checkpoint selects it. Any other `MODEL` or
+- `MODEL` naming either checkpoint selects it. A local FP4-CSF copy selects
+  the FP4-CSF settings from its own files (the `manifest.json` schema, or the
+  CSF recipes in a Hugging Face-layout `config.json`). `CHECKPOINT=original`
+  refuses such a copy: the original settings would read its compressed scales
+  as plain ones and serve wrong output without an error. Any other `MODEL` or
   `MODEL_REVISION`, such as an older revision of the original repository,
-  keeps the original settings. A local FP4-CSF copy needs `-e CHECKPOINT=csf`
-  with its `MODEL` path.
+  keeps the original settings.
 - The launcher downloads an FP4-CSF repository itself. It then gives vLLM a
   directory under `/tmp/lil-csf` with the repository's metadata files and a
   `config.json` whose quantization (`nvfp4_csf` or `mxfp4_csf`) points at the
