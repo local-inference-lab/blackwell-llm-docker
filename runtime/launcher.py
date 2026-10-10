@@ -739,6 +739,7 @@ def resolve(
     # A preset that names a checkpoint of its own serves it as configured, also
     # when a variant names the same checkpoint.
     checkpoint_warnings: list[str] = []
+    local_csf = None
     if "checkpoint" in values:
         variants = model.get("checkpoints", {})
         profile_level = ("common:", "model:", "hardware:")
@@ -845,6 +846,19 @@ def resolve(
             for key, value in options.items():
                 if not chosen(key) and not (key == "revision" and other):
                     set_value(key, value, f"checkpoint:{name}")
+    # Explicit loader settings win over the variant. A local FP4-CSF container
+    # (manifest layout) read by any other loader still serves wrong output; a
+    # Hugging Face-layout copy marks its CSF scales in config.json instead.
+    if (
+        local_csf
+        and values.get("load-format") not in CSF_FORMATS
+        and (Path(values["model"]) / "manifest.json").is_file()
+    ):
+        raise ConfigError(
+            f"MODEL={values['model']} is a {local_csf} checkpoint, but load-format "
+            f"{values.get('load-format')} ({origins.get('load-format')}) reads its "
+            "compressed scales as plain ones and serves wrong output"
+        )
     # An FP4-CSF checkpoint named by a preset or the operator rather than a
     # checkpoint variant has no other checkpoint to fall back to.
     if (

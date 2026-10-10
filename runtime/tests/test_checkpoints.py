@@ -1082,3 +1082,27 @@ def test_a_local_copy_of_another_format_keeps_the_profile_settings(tmp_path):
 
     assert "checkpoint" not in plan.values
     assert plan.values["load-format"] == "instanttensor"
+
+
+def test_plain_loader_settings_refuse_a_local_csf_container(tmp_path):
+    root = _csf_checkpoint(
+        tmp_path / "copy", "lil-mxfp4-csf-checkpoint/1", {"quant_method": "fp8"}
+    )
+    env = {"MODEL": str(root), "LOAD_FORMAT": "instanttensor"}
+    with pytest.raises(ConfigError, match="load-format instanttensor"):
+        resolve("ds41-flash", env=env)
+
+
+def test_a_local_hf_layout_csf_copy_keeps_explicit_recipe_settings(tmp_path):
+    """The ModelOpt recipes in its config.json mark the CSF scales, so the
+    standard loader reads a Hugging Face-layout copy correctly."""
+    root = _hf_layout_checkpoint(tmp_path / "copy")
+    env = {
+        "MODEL": str(root),
+        "LOAD_FORMAT": "instanttensor",
+        "QUANTIZATION": "modelopt_mixed",
+    }
+    plan = resolve("qwen38-flash-next", env=env)
+
+    assert plan.values["load-format"] == "instanttensor"
+    assert plan.values["quantization"] == "modelopt_mixed"
