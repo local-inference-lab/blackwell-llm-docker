@@ -1,0 +1,14 @@
+{
+  "schema": "local-inference-release-change/v1",
+  "id": "docker-150",
+  "category": "performance",
+  "summary": "GLM-5.3 keeps decoding while a long prompt prefills",
+  "models": ["GLM-5.3"],
+  "compatibility": "No user action required. A long new prompt waits about twice as long for its first token while other requests are decoding; set PREFILL_COMPUTE_SHARE to change the balance.",
+  "details": [
+    "The GLM-5.3 (744B) presets now set prefill-compute-share 0.4, as the GLM-5.3-Flash and DeepSeek-V4.1-Flash profiles do. Before, a long prompt's prefill took every engine step and the running requests nearly stopped.",
+    "glm53-csf-tp8 on 8x RTX PRO 6000, 16 decode streams and a 32K-token prompt every 20 s: decode during the prefill 61 to 409 tok/s, the prompt's time to first token 4.4 to 8.9 s; decode without prefills is unchanged."
+  ],
+  "pull_requests": [150],
+  "requires": []
+}

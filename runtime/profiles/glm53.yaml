@@ -15,6 +15,13 @@ defaults:
   served-model-name: GLM-5.3
   tensor-parallel-size: 8
   mode: mtp
+  # Prefill gets 40% of the contended step time while decodes run, as on the
+  # Flash and DS4.1 profiles. TP8 with 16 decode streams and a 32K-token prompt
+  # every 20 s: decode during the prefill 61 -> 405 tok/s, the prompt's time to
+  # first token 4.4 -> 8.9 s; decode without prefills is unchanged.
+  prefill-compute-share: 0.4
+  prefill-schedule-interval: 1
+  max-parallel-prefills: 1
   # The longest context the KV cache holds for one request: about 536K tokens
   # with the FP4-CSF checkpoint at TP8, about 490K with the original.
   max-model-len: -1

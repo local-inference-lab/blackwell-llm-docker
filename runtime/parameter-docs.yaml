@@ -766,6 +766,8 @@ options:
       ds41-flash: >-
         DeepSeek-V4.1-Flash sets 1, which matches the native SchedulerConfig contract with round-robin
         policy.
+      glm53: >-
+        GLM-5.3 sets 1.
   decode-refill-target:
     group: scheduling
     summary: Number of running decodes that decode-aware prefill selection tries to maintain. auto uses
@@ -842,6 +844,8 @@ options:
         GLM-5.3-Flash sets 0.4.
       ds41-flash: >-
         DeepSeek-V4.1-Flash sets 0.4.
+      glm53: >-
+        GLM-5.3 sets 0.4.
       mimo26-flash: >-
         MiMo-V2.6-Flash sets 0.8, as in its qualified serve script (vllm PR 881).
   prefill-compute-half-life:
@@ -861,6 +865,8 @@ options:
         GLM-5.3-Flash sets 1, as required by its prefill compute share.
       ds41-flash: >-
         DeepSeek-V4.1-Flash sets 1, as required by its prefill compute share.
+      glm53: >-
+        GLM-5.3 sets 1, as required by its prefill compute share.
   prefill-policy:
     group: scheduling
     summary: How prefills are chosen when several may run in parallel. round-robin gives every queued
