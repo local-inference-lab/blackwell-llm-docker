@@ -1,0 +1,24 @@
+{
+  "base": {
+    "commit": "ee0be888cd0e972f9409bf53756f8c38c6652173",
+    "ref": "refs/heads/dev",
+    "repository": "https://github.com/vllm-project/FlashKDA.git"
+  },
+  "manifest": {
+    "sha256": "90c7399584932d6996736b2993654ca205fbe5f865216b57e8070ec8a2af29e1"
+  },
+  "name": "flashkda-sm120-tensormap-r1",
+  "pull_requests": [],
+  "submodules": {
+    "cutlass": {
+      "commit": "5c149f52a436782210263fb2f19b354443a61c6a",
+      "path": "cutlass"
+    }
+  },
+  "result": {
+    "patch": "integration.patch",
+    "patch_sha256": "2119fdd721decd873cdbbbe5263f624e21b8b2e83cede36d9f19e75377895951",
+    "tree": "6851531e95decd57c28f166fa6ce8aa381a1aa04"
+  },
+  "schema_version": 1
+}
