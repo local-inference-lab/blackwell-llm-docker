@@ -25,6 +25,7 @@ from pathlib import Path
 import platform
 import signal
 import subprocess
+import socket
 import sys
 import tempfile
 import time
@@ -355,7 +356,44 @@ def _terminate_process_group(process: subprocess.Popen[str]) -> str:
     return _output_text(stdout)
 
 
+def _ensure_local_hostname_resolves() -> None:
+    """Fail fast (or self-heal) when the container cannot resolve itself.
+
+    torchrun's elastic agent advertises ``socket.gethostname()`` to its
+    workers for the worker TCPStore, independent of the ``--standalone``
+    rendezvous endpoint. Under ``network_mode: host`` the container usually
+    inherits the host's hostname without an ``/etc/hosts`` entry for it, so
+    every worker retries DNS until the calibration timeout expires and the
+    launcher silently falls back to the conservative topology policy.
+
+    Repair ``/etc/hosts`` when the container allows it; otherwise raise one
+    clean, actionable failure immediately instead of burning the timeout.
+    """
+    hostname = socket.gethostname()
+    try:
+        socket.gethostbyname(hostname)
+        return
+    except OSError:
+        pass
+    try:
+        with open("/etc/hosts", "a", encoding="utf-8") as hosts:
+            hosts.write(f"127.0.0.1\t{hostname}\n")
+        socket.gethostbyname(hostname)
+        return
+    except OSError:
+        pass
+    raise CalibrationFailure(
+        f"hostname {hostname!r} does not resolve inside this container, so "
+        "torchrun workers would retry DNS until the calibration timeout. "
+        f"Add `--add-host={hostname}:127.0.0.1` (docker run) or an "
+        f"`extra_hosts: [\"{hostname}:127.0.0.1\"]` entry (compose), or run "
+        "with a resolvable hostname.",
+        "",
+    )
+
+
 def _run_probe(args: argparse.Namespace, output: Path) -> dict[str, Any]:
+    _ensure_local_hostname_resolves()
     command = [
         sys.executable,
         "-m",
