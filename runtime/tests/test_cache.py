@@ -6,7 +6,7 @@ import pytest
 
 from runtime import ConfigError
 from runtime.cache import resolve_identity, verify_installed_transfer
-from runtime.launcher import make_argv, resolve
+from runtime.launcher import ROOT, make_argv, resolve
 from runtime.supervisor import validate_pool
 
 
@@ -224,6 +224,41 @@ def test_ds41_external_cache_keeps_sliding_window_and_engram_independent():
     disk = resolve("ds41-flash", env={"LMCACHE_MODE": "disk"})
     assert "--l2-adapter" in disk.cache_service.argv
     assert disk.cache_service.identity_required
+
+
+# Every profile with an external cache, with its disk-tier eviction settings
+# (trigger watermark, eviction ratio).
+DISK_TIER_EVICTION = {
+    "glm53-flash": (0.8, 0.2),
+    "qwen38-flash-next": (0.8, 0.2),
+    "ds4-flash": (0.8, 0.2),
+    "ds4-vision": (0.8, 0.2),
+    # DS4.1 evicts in small passes; runtime/cache.py says why.
+    "ds41-flash": (0.9, 0.02),
+}
+
+
+@pytest.mark.parametrize("identifier", sorted(DISK_TIER_EVICTION))
+def test_every_disk_tier_evicts_instead_of_rejecting_stores(identifier):
+    disk = resolve(identifier, env={"LMCACHE_MODE": "disk"})
+    index = disk.cache_service.argv.index("--l2-adapter")
+    adapter = json.loads(disk.cache_service.argv[index + 1])
+    watermark, ratio = DISK_TIER_EVICTION[identifier]
+    assert adapter["max_capacity_gb"] > 0
+    assert adapter["eviction"] == {
+        "eviction_policy": "LRU",
+        "trigger_watermark": watermark,
+        "eviction_ratio": ratio,
+    }
+
+
+def test_profiles_outside_the_eviction_table_have_no_disk_tier():
+    # A profile that gains an external cache must join DISK_TIER_EVICTION.
+    for path in sorted((ROOT / "profiles").glob("*.yaml")):
+        if path.stem == "common" or path.stem in DISK_TIER_EVICTION:
+            continue
+        with pytest.raises(ConfigError, match="external cache is unsupported"):
+            resolve(path.stem, env={"LMCACHE_MODE": "disk"})
 
 
 @pytest.mark.parametrize("identifier", ["qwen38-flash-next", "ds41-flash"])

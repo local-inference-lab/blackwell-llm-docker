@@ -429,13 +429,17 @@ def configure(values, origins, environment, env_origins, identifier, runtime_ide
             "num_workers": values["cache-l2-workers"],
             "use_odirect": values["cache-l2-odirect"],
             "max_capacity_gb": values["cache-l2-gib"],
-        }
-        if glm or qwen:
-            l2["eviction"] = {
+            # Every disk tier needs this: without an eviction block, LMCache
+            # rejects every store once the tier reaches max_capacity_gb. DS4.1
+            # evicts in small passes, 2% from 90% full. Its objects are small
+            # (about 0.45 MB), so a 20% pass on a 1.5 TB tier deletes about 0.5M
+            # files at once.
+            "eviction": {
                 "eviction_policy": "LRU",
-                "trigger_watermark": 0.8,
-                "eviction_ratio": 0.2,
-            }
+                "trigger_watermark": 0.9 if ds41 else 0.8,
+                "eviction_ratio": 0.02 if ds41 else 0.2,
+            },
+        }
         argv += ["--l2-adapter", json.dumps(l2, separators=(",", ":"))]
         if glm and values["cache-prefetch-policy"] == "retain":
             argv += ["--emergency-evict-for-prefetch"]
