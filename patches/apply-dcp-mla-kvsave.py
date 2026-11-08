@@ -17,7 +17,7 @@ def patch():
     # 1. forward_batch_info: enable out_cache_loc division
     # =========================================================================
     path = '/opt/sglang/python/sglang/srt/model_executor/forward_batch_info.py'
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         src = f.read()
     src = src.replace(
         '        # DCP: no infrastructure changes - handled in attention backend',
@@ -28,7 +28,7 @@ def patch():
         '            ret.dcp_kv_mask = ret.out_cache_loc % dcp_size == dcp_rank\n'
         '            ret.out_cache_loc = ret.out_cache_loc // dcp_size',
     )
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding="utf-8") as f:
         f.write(src)
     print('1. forward_batch_info: out_cache_loc // dcp_size')
 
@@ -36,7 +36,7 @@ def patch():
     # 2. model_runner_kv_cache_mixin: inflate page_size
     # =========================================================================
     path2 = '/opt/sglang/python/sglang/srt/model_executor/model_runner_kv_cache_mixin.py'
-    with open(path2) as f:
+    with open(path2, encoding="utf-8") as f:
         src2 = f.read()
     src2 = src2.replace(
         '                    if self.page_size == 1:',
@@ -46,7 +46,7 @@ def patch():
         '                            self.max_total_num_tokens,\n                            page_size=self.page_size,',
         '                            self.max_total_num_tokens,\n                            page_size=self.page_size * self.dcp_size,',
     )
-    with open(path2, 'w') as f:
+    with open(path2, 'w', encoding="utf-8") as f:
         f.write(src2)
     print('2. model_runner_kv_cache_mixin: page_size *= dcp_size')
 
@@ -54,7 +54,7 @@ def patch():
     # 3. MLA backend: DCP for BOTH decode AND prefill
     # =========================================================================
     path3 = '/opt/sglang/python/sglang/srt/layers/attention/flashinfer_mla_backend.py'
-    with open(path3) as f:
+    with open(path3, encoding="utf-8") as f:
         src3 = f.read()
 
     # --- 3a. Fix imports: use dividing DCP kernel ---
@@ -103,23 +103,23 @@ def patch():
     )
     # This is inside the dcp_kv_mask check block from earlier patch
     # Check if already masked
+    new_extend_kv = (
+        "                    if self.dcp_size > 1 and forward_batch.dcp_kv_mask is not None:\n"
+        "                        _lid = layer.layer_id\n"
+        "                        _pool = forward_batch.token_to_kv_pool\n"
+        "                        if hasattr(_pool, 'full_kv_pool'):\n"
+        "                            _pool = _pool.full_kv_pool\n"
+        "                        _buf = _pool.kv_buffer[_lid - _pool.start_layer]\n"
+        "                        set_mla_kv_buffer_masked_triton(\n"
+        "                            _buf, cache_loc, k, k_rope, forward_batch.dcp_kv_mask,\n"
+        "                        )\n"
+        "                    else:\n"
+        "                        forward_batch.token_to_kv_pool.set_mla_kv_buffer(\n"
+        "                            layer, cache_loc, k, k_rope\n"
+        "                        )"
+    )
     if 'set_mla_kv_buffer_masked_triton' in src3 and old_extend_kv in src3:
         # Already has masked decode, just need to handle extend
-        new_extend_kv = (
-            "                    if self.dcp_size > 1 and forward_batch.dcp_kv_mask is not None:\n"
-            "                        _lid = layer.layer_id\n"
-            "                        _pool = forward_batch.token_to_kv_pool\n"
-            "                        if hasattr(_pool, 'full_kv_pool'):\n"
-            "                            _pool = _pool.full_kv_pool\n"
-            "                        _buf = _pool.kv_buffer[_lid - _pool.start_layer]\n"
-            "                        set_mla_kv_buffer_masked_triton(\n"
-            "                            _buf, cache_loc, k, k_rope, forward_batch.dcp_kv_mask,\n"
-            "                        )\n"
-            "                    else:\n"
-            "                        forward_batch.token_to_kv_pool.set_mla_kv_buffer(\n"
-            "                            layer, cache_loc, k, k_rope\n"
-            "                        )"
-        )
         src3 = src3.replace(old_extend_kv, new_extend_kv, 1)
         print('3d. Extend KV write: masked')
     elif old_extend_kv in src3:
@@ -289,7 +289,7 @@ def patch():
             src3 = src3.replace(call, new_call, 1)
             print('3i. Passed dcp to prefill updater call')
 
-    with open(path3, 'w') as f:
+    with open(path3, 'w', encoding="utf-8") as f:
         f.write(src3)
 
     print('\nDCP KV savings patch complete!')
