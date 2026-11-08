@@ -103,23 +103,23 @@ def patch():
     )
     # This is inside the dcp_kv_mask check block from earlier patch
     # Check if already masked
+    new_extend_kv = (
+        "                    if self.dcp_size > 1 and forward_batch.dcp_kv_mask is not None:\n"
+        "                        _lid = layer.layer_id\n"
+        "                        _pool = forward_batch.token_to_kv_pool\n"
+        "                        if hasattr(_pool, 'full_kv_pool'):\n"
+        "                            _pool = _pool.full_kv_pool\n"
+        "                        _buf = _pool.kv_buffer[_lid - _pool.start_layer]\n"
+        "                        set_mla_kv_buffer_masked_triton(\n"
+        "                            _buf, cache_loc, k, k_rope, forward_batch.dcp_kv_mask,\n"
+        "                        )\n"
+        "                    else:\n"
+        "                        forward_batch.token_to_kv_pool.set_mla_kv_buffer(\n"
+        "                            layer, cache_loc, k, k_rope\n"
+        "                        )"
+    )
     if 'set_mla_kv_buffer_masked_triton' in src3 and old_extend_kv in src3:
         # Already has masked decode, just need to handle extend
-        new_extend_kv = (
-            "                    if self.dcp_size > 1 and forward_batch.dcp_kv_mask is not None:\n"
-            "                        _lid = layer.layer_id\n"
-            "                        _pool = forward_batch.token_to_kv_pool\n"
-            "                        if hasattr(_pool, 'full_kv_pool'):\n"
-            "                            _pool = _pool.full_kv_pool\n"
-            "                        _buf = _pool.kv_buffer[_lid - _pool.start_layer]\n"
-            "                        set_mla_kv_buffer_masked_triton(\n"
-            "                            _buf, cache_loc, k, k_rope, forward_batch.dcp_kv_mask,\n"
-            "                        )\n"
-            "                    else:\n"
-            "                        forward_batch.token_to_kv_pool.set_mla_kv_buffer(\n"
-            "                            layer, cache_loc, k, k_rope\n"
-            "                        )"
-        )
         src3 = src3.replace(old_extend_kv, new_extend_kv, 1)
         print('3d. Extend KV write: masked')
     elif old_extend_kv in src3:
